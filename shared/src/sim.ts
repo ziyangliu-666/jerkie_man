@@ -1,31 +1,27 @@
 /**
- * 共享的玩家移动模拟逻辑
- * 确保 client 和 server 使用完全相同的移动/碰撞算法，避免位置漂移
+ * 共享的游戏模拟逻辑
+ * 用于客户端预测和服务端权威计算，确保双端一致
  */
-import { circleVsAABB, clampCircleInBounds } from './math.js';
+
+import { circleVsAABB, clamp } from './math.js';
 import type { OBSTACLE_STATE } from './protocol.js';
 
-/**
- * 玩家移动速度（像素/秒）
- */
-export const PLAYER_SPEED = 200; // 200px/s，在20Hz tick下约10px/tick
+// 玩家移动速度（像素/秒）
+const PLAYER_SPEED = 200;
+
+// 玩家碰撞半径
+const PLAYER_RADIUS = 10;
 
 /**
- * 玩家碰撞半径（与 server Player.processInput 一致）
- */
-export const PLAYER_RADIUS = 10;
-
-/**
- * 模拟玩家移动（分轴移动，实现沿墙滑动）
- * 这个函数必须与 server/src/player.ts 的 processInput 逻辑完全一致
+ * 模拟玩家移动（包含碰撞检测）
  * 
- * @param pos 当前位置 {x, y}
- * @param keys 按键状态 {up, down, left, right}
- * @param deltaTime 时间步长（秒）
+ * @param pos 当前位置 { x, y }
+ * @param keys 按键状态 { up, down, left, right }
+ * @param deltaTime 时间间隔（秒）
  * @param mapWidth 地图宽度
  * @param mapHeight 地图高度
  * @param obstacles 障碍物列表
- * @returns 新位置 {x, y}
+ * @returns 新位置 { x, y }
  */
 export function simulatePlayerMove(
   pos: { x: number; y: number },
@@ -35,70 +31,67 @@ export function simulatePlayerMove(
   mapHeight: number,
   obstacles: OBSTACLE_STATE[] = []
 ): { x: number; y: number } {
-  // 计算移动方向
+  // 计算移动向量
   let dx = 0;
   let dy = 0;
-
+  
   if (keys.up) dy -= 1;
   if (keys.down) dy += 1;
   if (keys.left) dx -= 1;
   if (keys.right) dx += 1;
-
-  // 归一化对角线移动
-  if (dx !== 0 && dy !== 0) {
-    dx *= 0.707; // 1/sqrt(2)
-    dy *= 0.707;
-  }
-
-  // 计算期望的新位置
-  const desiredX = pos.x + dx * PLAYER_SPEED * deltaTime;
-  const desiredY = pos.y + dy * PLAYER_SPEED * deltaTime;
   
-  // 第一步：尝试 X 轴移动（newX, oldY）
-  let finalX = pos.x;
-  if (dx !== 0) {
-    let testX = desiredX;
-    // 边界检测
-    const clampedX = clampCircleInBounds(testX, pos.y, PLAYER_RADIUS, 0, 0, mapWidth, mapHeight);
-    testX = clampedX.x;
-    
-    // 障碍物碰撞检测
-    let xCollided = false;
-    for (const obstacle of obstacles) {
-      if (circleVsAABB(testX, pos.y, PLAYER_RADIUS, obstacle)) {
-        xCollided = true;
-        break;
-      }
-    }
-    
-    if (!xCollided) {
-      finalX = testX;
+  // 归一化对角线移动（避免对角移动更快）
+  const len = Math.sqrt(dx * dx + dy * dy);
+  if (len > 0) {
+    dx = dx / len;
+    dy = dy / len;
+  }
+  
+  // 计算移动距离
+  const moveX = dx * PLAYER_SPEED * deltaTime;
+  const moveY = dy * PLAYER_SPEED * deltaTime;
+  
+  // 新位置（未检查碰撞）
+  let newX = pos.x + moveX;
+  let newY = pos.y + moveY;
+  
+  // 分离轴碰撞检测：先处理 X 轴，再处理 Y 轴
+  // 这样可以实现"滑动"效果，而不是完全停止
+  
+  // 检查 X 轴移动
+  const testX = newX;
+  let xBlocked = false;
+  
+  for (const obstacle of obstacles) {
+    if (circleVsAABB(testX, pos.y, PLAYER_RADIUS, obstacle)) {
+      xBlocked = true;
+      break;
     }
   }
   
-  // 第二步：尝试 Y 轴移动（finalX, newY）
-  let finalY = pos.y;
-  if (dy !== 0) {
-    let testY = desiredY;
-    // 边界检测
-    const clampedY = clampCircleInBounds(finalX, testY, PLAYER_RADIUS, 0, 0, mapWidth, mapHeight);
-    testY = clampedY.y;
-    
-    // 障碍物碰撞检测
-    let yCollided = false;
-    for (const obstacle of obstacles) {
-      if (circleVsAABB(finalX, testY, PLAYER_RADIUS, obstacle)) {
-        yCollided = true;
-        break;
-      }
-    }
-    
-    if (!yCollided) {
-      finalY = testY;
+  if (xBlocked) {
+    newX = pos.x; // 回退 X 轴移动
+  }
+  
+  // 检查 Y 轴移动
+  const testY = newY;
+  let yBlocked = false;
+  
+  for (const obstacle of obstacles) {
+    if (circleVsAABB(newX, testY, PLAYER_RADIUS, obstacle)) {
+      yBlocked = true;
+      break;
     }
   }
   
-  return { x: finalX, y: finalY };
+  if (yBlocked) {
+    newY = pos.y; // 回退 Y 轴移动
+  }
+  
+  // 世界边界限制（考虑玩家半径）
+  newX = clamp(newX, PLAYER_RADIUS, mapWidth - PLAYER_RADIUS);
+  newY = clamp(newY, PLAYER_RADIUS, mapHeight - PLAYER_RADIUS);
+  
+  return { x: newX, y: newY };
 }
-
 

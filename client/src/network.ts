@@ -2,9 +2,13 @@ import {
   C2S_HELLO_SCHEMA,
   C2S_INPUT_SCHEMA,
   C2S_PING_SCHEMA, // Day5: Ping 消息
+  C2S_PICKUP_WORLD_ITEM_SCHEMA, // 新增: 拾取世界物品
+  C2S_PICKUP_LOOT_BAG_SCHEMA, // 新增: 拾取掉落包
+  C2S_SELL_FROM_STASH_SCHEMA, // 新增: 从仓库卖出
   S2C_MESSAGE_SCHEMA,
   type S2C_MESSAGE,
   type S2C_SNAPSHOT,
+  type S2C_WORLD_INIT, // 新增: 世界初始化消息类型
   type MAP_CONFIG, // P0-1 修复: 使用 shared 的 MAP_CONFIG 类型，避免类型漂移
   type OBSTACLE_STATE, // 修复: 静态世界初始化
   type ITEM_STATE, // 修复: 静态世界初始化
@@ -25,7 +29,8 @@ export interface NetworkCallbacks {
   onDisconnect?: () => void;
   onWelcome?: (playerId: string, roomInfo?: RoomInfo) => void;
   onEvent?: (message: string) => void; // 游戏化增强: 服务端事件回调
-  onWorldInit?: (world: { seed: number; mapConfig: MAP_CONFIG; obstacles: OBSTACLE_STATE[]; items: ITEM_STATE[] }) => void; // 修复: 静态世界初始化回调
+  onWorldInit?: (world: S2C_WORLD_INIT) => void; // 新增: 世界初始化回调（使用协议类型）
+  onProfile?: (profile: { money: number; stash: any[]; bagCap: number }) => void; // P1-1: Profile 回调
 }
 
 export class Network {
@@ -131,12 +136,7 @@ export class Network {
           } else if (message.type === 'S2C_WORLD_INIT') {
             // 修复: 处理静态世界初始化消息
             if (this.callbacks.onWorldInit) {
-              this.callbacks.onWorldInit({
-                seed: message.seed,
-                mapConfig: message.mapConfig,
-                obstacles: message.obstacles,
-                items: message.items,
-              });
+              this.callbacks.onWorldInit(message);
             }
           } else if (message.type === 'S2C_EVENT') {
             // 游戏化增强: 处理服务端事件
@@ -248,6 +248,61 @@ export class Network {
     });
 
     this.ws.send(JSON.stringify(message));
+  }
+
+  // 新增: 发送拾取世界物品动作
+  sendPickupWorldItem(wid: string): boolean {
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+      return false;
+    }
+    try {
+      const message = C2S_PICKUP_WORLD_ITEM_SCHEMA.parse({
+        type: 'C2S_PICKUP_WORLD_ITEM',
+        wid,
+      });
+      this.ws.send(JSON.stringify(message));
+      return true;
+    } catch (error) {
+      console.error('Failed to send pickup world item:', error);
+      return false;
+    }
+  }
+
+  // 新增: 发送拾取掉落包动作
+  sendPickupLootBag(bid: string): boolean {
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+      return false;
+    }
+    try {
+      const message = C2S_PICKUP_LOOT_BAG_SCHEMA.parse({
+        type: 'C2S_PICKUP_LOOT_BAG',
+        bid,
+      });
+      this.ws.send(JSON.stringify(message));
+      return true;
+    } catch (error) {
+      console.error('Failed to send pickup loot bag:', error);
+      return false;
+    }
+  }
+
+  // 新增: 发送从仓库卖出物品动作
+  sendSellFromStash(iid: string, qty: number): boolean {
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+      return false;
+    }
+    try {
+      const message = C2S_SELL_FROM_STASH_SCHEMA.parse({
+        type: 'C2S_SELL_FROM_STASH',
+        iid,
+        qty,
+      });
+      this.ws.send(JSON.stringify(message));
+      return true;
+    } catch (error) {
+      console.error('Failed to send sell from stash:', error);
+      return false;
+    }
   }
 
   // P0-1 修复: 返回 boolean 表示是否真的发送成功
@@ -373,4 +428,3 @@ export class Network {
     }
   }
 }
-

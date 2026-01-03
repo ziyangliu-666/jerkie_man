@@ -1,5 +1,5 @@
 # key-code dump
-# time: 2026-01-03T13:34:29.597Z
+# time: 2026-01-03T16:11:25.547Z
 # root: C:/Users/1/Code/mini_game/jerkie_man
 # mode: plan
 # allowlist: tools/dump_allowlist.json
@@ -7,10 +7,86 @@
 # max files: 30
 
 ==========================================================================================
+FILE: client/src/debugLog.ts
+STATUS: OK
+------------------------------------------------------------------------------------------
+/**
+ * Debug Log - 环形缓冲区日志记录器
+ * 用于记录客户端调试信息，支持快速 dump 最近的日志条目
+ */
+
+export interface LogEntry {
+  time: number;
+  tag: string;
+  data: Record<string, unknown>;
+}
+
+export class DebugLog {
+  private buffer: LogEntry[] = [];
+  private maxSize: number;
+
+  constructor(maxSize: number = 600) {
+    this.maxSize = maxSize;
+  }
+
+  /**
+   * 添加日志条目
+   */
+  push(tag: string, data: Record<string, unknown>): void {
+    const entry: LogEntry = {
+      time: performance.now(),
+      tag,
+      data,
+    };
+    
+    this.buffer.push(entry);
+    
+    // Ring buffer: 超过最大长度时移除最旧的
+    if (this.buffer.length > this.maxSize) {
+      this.buffer.shift();
+    }
+  }
+
+  /**
+   * 获取最近 N 条日志
+   */
+  getRecent(count: number): LogEntry[] {
+    const start = Math.max(0, this.buffer.length - count);
+    return this.buffer.slice(start);
+  }
+
+  /**
+   * 导出日志为可读字符串
+   */
+  dump(count: number = 200): string {
+    const entries = this.getRecent(count);
+    const lines: string[] = [];
+    
+    for (const entry of entries) {
+      const timeStr = entry.time.toFixed(1);
+      const dataStr = JSON.stringify(entry.data);
+      lines.push(`[${timeStr}] ${entry.tag}: ${dataStr}`);
+    }
+    
+    return lines.join('\n');
+  }
+
+  /**
+   * 清空日志
+   */
+  clear(): void {
+    this.buffer = [];
+  }
+}
+
+
+
+==========================================================================================
 FILE: client/src/hud.ts
 STATUS: OK
 ------------------------------------------------------------------------------------------
-import type { PLAYER_STATE, S2C_SNAPSHOT } from '@jerkie-man/shared';
+import type { PLAYER_STATE, S2C_SNAPSHOT, PlayerInventory, ItemInstance } from '@jerkie-man/shared';
+import { getItemType, ITEM_CATALOG } from '@jerkie-man/shared';
 
 /**
  * HTML 转义函数（防止 XSS）
@@ -39,10 +115,15 @@ export interface HUDData {
   players: PLAYER_STATE[];
   counts: {
     bullets: number;
-    items: number;
+    worldItems: number; // P2-1: 改用 worldItems（旧 items 已停用）
+    lootBags: number; // P2-1: 新增掉落包计数
   };
   selectedEntity: PLAYER_STATE | null;
   events: string[]; // 最近30条事件
+  // 新增: 物品系统数据
+  inventory?: PlayerInventory; // 本地玩家背包
+  stash?: ItemInstance[]; // 仓库（需要从服务器获取，暂时留空）
+  money?: number; // 钱（需要从服务器获取，暂时留空）
 }
 
 export class HUD {
@@ -69,6 +150,15 @@ export class HUD {
       
       <h3>Counts</h3>
       <div id="hud-counts"></div>
+      
+      <h3>Inventory (In-Raid)</h3>
+      <div id="hud-inventory"></div>
+      
+      <h3>Stash (Out-of-Raid)</h3>
+      <div id="hud-stash"></div>
+      
+      <h3>Money</h3>
+      <div id="hud-money"></div>
       
       <h3>Selected Entity</h3>
       <div id="hud-selected"></div>
@@ -144,8 +234,69 @@ export class HUD {
     if (countsEl) {
       countsEl.innerHTML = `
         <div>Bullets: ${data.counts.bullets}</div>
-        <div>Items: ${data.counts.items}</div>
+        <div>World Items: ${data.counts.worldItems}</div>
+        <div>Loot Bags: ${data.counts.lootBags}</div>
       `;
+    }
+
+    // 新增: Inventory (In-Raid)
+    const inventoryEl = document.getElementById('hud-inventory');
+    if (inventoryEl) {
+      if (data.inventory) {
+        const items = data.inventory.items;
+        if (items.length === 0) {
+          inventoryEl.innerHTML = '<div>Empty</div>';
+        } else {
+          let html = `<div><strong>Capacity:</strong> ${items.length}/${data.inventory.bagCap}</div><ul>`;
+          for (const item of items) {
+            try {
+              const itemType = getItemType(item.typeId);
+              html += `<li>${escapeHtml(itemType.name)} x${escapeHtml(item.qty)}</li>`;
+            } catch {
+              html += `<li>${escapeHtml(item.typeId)} x${escapeHtml(item.qty)}</li>`;
+            }
+          }
+          html += '</ul>';
+          inventoryEl.innerHTML = html;
+        }
+      } else {
+        inventoryEl.innerHTML = '<div>Not available</div>';
+      }
+    }
+
+    // 新增: Stash (Out-of-Raid)
+    const stashEl = document.getElementById('hud-stash');
+    if (stashEl) {
+      if (data.stash && data.stash.length > 0) {
+        // 按 typeId 聚合显示
+        const stashMap = new Map<string, number>();
+        for (const item of data.stash) {
+          stashMap.set(item.typeId, (stashMap.get(item.typeId) || 0) + item.qty);
+        }
+        let html = '<ul>';
+        for (const [typeId, qty] of stashMap.entries()) {
+          try {
+            const itemType = getItemType(typeId);
+            html += `<li>${escapeHtml(itemType.name)} x${escapeHtml(qty)}</li>`;
+          } catch {
+            html += `<li>${escapeHtml(typeId)} x${escapeHtml(qty)}</li>`;
+          }
+        }
+        html += '</ul>';
+        stashEl.innerHTML = html;
+      } else {
+        stashEl.innerHTML = '<div>Empty</div>';
+      }
+    }
+
+    // 新增: Money
+    const moneyEl = document.getElementById('hud-money');
+    if (moneyEl) {
+      if (data.money !== undefined) {
+        moneyEl.innerHTML = `<div><strong>${escapeHtml(data.money)}</strong></div>`;
+      } else {
+        moneyEl.innerHTML = '<div>Not available</div>';
+      }
     }
 
     // Selected Entity
@@ -187,7 +338,6 @@ export class HUD {
     }
   }
 }
-
 
 
 ==========================================================================================
@@ -355,7 +505,6 @@ export class InputManager {
 }
 
 
-
 ==========================================================================================
 FILE: client/src/main.ts
 STATUS: OK
@@ -364,8 +513,9 @@ import { Renderer } from './renderer.js';
 import { Network } from './network.js';
 import { InputManager } from './input.js';
 import { HUD } from './hud.js';
+import { DebugLog } from './debugLog.js'; // 修复: 添加 debug log 系统
 import { loadMapConfig, type MAP_CONFIG, simulatePlayerMove } from '@jerkie-man/shared'; // 修复: 导入共享模拟函数
-import type { S2C_SNAPSHOT, PLAYER_STATE, OBSTACLE_STATE, ITEM_STATE } from '@jerkie-man/shared';
+import type { S2C_SNAPSHOT, PLAYER_STATE, OBSTACLE_STATE, ITEM_STATE, WorldItem, LootBag, PlayerInventory, ItemInstance } from '@jerkie-man/shared';
 
 const canvas = document.getElementById('canvas') as HTMLCanvasElement;
 if (!canvas) {
@@ -380,6 +530,11 @@ const renderer = new Renderer(canvas);
 // - 使用HUD实际宽度 + 上限保护，避免HUD变宽导致canvas被挤到最小
 // - 使用rAF防抖，避免resize时频繁读写DOM导致抖动
 // - 使用ResizeObserver监听HUD宽度变化，自动更新canvas
+// 修复: 添加阈值，避免频繁 resize 导致卡顿/重影
+let lastCanvasW = 0;
+let lastCanvasH = 0;
+const RESIZE_THRESHOLD = 3; // 只有尺寸变化超过 3px 才真正 resize
+
 function updateCanvasSize(): void {
   const hudEl = document.getElementById('hud');
   const hudWidthMeasured = hudEl?.getBoundingClientRect().width ?? 300;
@@ -394,6 +549,22 @@ function updateCanvasSize(): void {
   const cssWidth = Math.max(minCanvasW, window.innerWidth - hudWidth);
   const cssHeight = Math.max(minCanvasH, window.innerHeight);
 
+  // 修复: 只有当尺寸变化超过阈值时才真正 resize（避免频繁 resize 导致卡顿/重影）
+  if (Math.abs(cssWidth - lastCanvasW) < RESIZE_THRESHOLD && 
+      Math.abs(cssHeight - lastCanvasH) < RESIZE_THRESHOLD) {
+    return; // 尺寸变化太小，不触发 resize
+  }
+  
+  lastCanvasW = cssWidth;
+  lastCanvasH = cssHeight;
+  
+  // Debug: 计数 resize 次数（确认移动时不会频繁触发）
+  // 修复: 使用可选的方式检查 isDebug，避免初始化顺序问题
+  const debugMode = typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('debug') === '1';
+  if (debugMode) {
+    console.count('renderer.resize');
+  }
+  
   renderer.resize(cssWidth, cssHeight);
 }
 
@@ -416,9 +587,11 @@ updateCanvasSize();
 window.addEventListener('resize', scheduleResize);
 
 // ResizeObserver监听HUD宽度变化：当HUD表格变宽/变窄时，也触发resize
+// 修复: 保存 resizeObserver 引用，用于 cleanup
+let resizeObserver: ResizeObserver | null = null;
 const hudEl = document.getElementById('hud');
 if (hudEl) {
-  const resizeObserver = new ResizeObserver(() => {
+  resizeObserver = new ResizeObserver(() => {
     scheduleResize(); // HUD宽度变化时，也触发canvas resize
   });
   resizeObserver.observe(hudEl);
@@ -449,6 +622,10 @@ const fallbackMapConfig = loadMapConfig(); // 仅用于兼容
 // 修复: 缓存静态世界数据（从 WORLD_INIT 接收）
 let cachedObstacles: OBSTACLE_STATE[] = [];
 let cachedItems: ITEM_STATE[] = [];
+// 新增: 缓存世界物品（从 WORLD_INIT 接收）
+let cachedWorldItems: WorldItem[] = [];
+// P1-1 新增: 玩家 Profile（从 S2C_PROFILE 接收）
+let playerProfile: { money: number; stash: ItemInstance[]; bagCap: number } | null = null;
 
 // 修复: 客户端预测相关状态
 interface PendingInput {
@@ -458,6 +635,16 @@ interface PendingInput {
 }
 let pendingInputs: PendingInput[] = [];
 let predictedLocalPlayer: PLAYER_STATE | null = null; // 预测的本地玩家状态
+// 修复: 渲染平滑 - 每帧平滑追向预测位置，避免 20Hz 步进卡顿
+let renderLocalPlayer: PLAYER_STATE | null = null;
+let lastRenderNow = performance.now();
+
+// 指数平滑：halfLife 越小，追得越快；0.06~0.10 秒通常手感不错
+function smoothTo(current: number, target: number, dtSec: number, halfLifeSec = 0.08): number {
+  const a = 1 - Math.pow(0.5, dtSec / halfLifeSec);
+  return current + (target - current) * a;
+}
+
 // 修复: 客户端 tick 对齐（严格 20Hz，与 server 同步）
 const CLIENT_TICK_MS = 50; // 与 server tick 间隔一致
 let clientAccMs = 0; // 客户端 tick 累积器（毫秒）
@@ -466,6 +653,24 @@ let lastClientTickTime = 0; // 上次客户端 tick 的时间戳
 // Debug开关：从URL参数读取（生产环境也可通过?debug=1启用）
 const urlParams = new URLSearchParams(window.location.search);
 const isDebug = urlParams.get('debug') === '1';
+
+// 修复: 初始化 debug log 系统（必须在所有使用 dbg 的地方之前）
+const dbg = new DebugLog(600);
+(window as any).__dbgDump = (n = 200) => dbg.dump(n);
+
+// 修复: 快捷键复制日志（debug 模式才启用）
+if (isDebug) {
+  window.addEventListener('keydown', async (e) => {
+    if (e.key === '`') { // 按 ` 打印最近日志
+      const text = dbg.dump(220);
+      console.log(text);
+      try {
+        await navigator.clipboard.writeText(text);
+        console.log('[DBG] copied to clipboard');
+      } catch {}
+    }
+  });
+}
 
 // 初始化网络
 let localPlayerId: string | null = null;
@@ -487,6 +692,7 @@ const network = new Network('ws://localhost:8080', 'local', {
     // 修复: 断开连接时清空预测状态
     pendingInputs = [];
     predictedLocalPlayer = null;
+    renderLocalPlayer = null; // 修复: 同时清空渲染平滑状态
     clientAccMs = 0;
     lastClientTickTime = 0;
     // P0-2 修复: snapshotBuffer 已在 Network.onclose 中清理，这里不需要再清理
@@ -515,12 +721,13 @@ const network = new Network('ws://localhost:8080', 'local', {
     lastSentAim = NaN;
     lastSentShoot = false;
     lastSentExtractHeld = null; // 游戏化增强: 重置撤离持续状态
-    pendingInteract = false;
+    interactUntil = 0; // P2-2: 重置 interact TTL
     // 修复: pendingExtract 不再使用
     // pendingExtract = false;
     // 修复: 重连后清空预测状态
     pendingInputs = [];
     predictedLocalPlayer = null;
+    renderLocalPlayer = null; // 修复: 同时清空渲染平滑状态
     clientAccMs = 0;
     lastClientTickTime = 0;
     // inputSeq 不重置（保持递增，避免 server 端 seq 冲突）
@@ -541,8 +748,14 @@ const network = new Network('ws://localhost:8080', 'local', {
     if (localPlayerId) {
       const serverPlayer = snapshot.players.find((p) => p.id === localPlayerId);
       if (serverPlayer) {
+        // 修复: 记录回滚前的状态
+        const before = predictedLocalPlayer ? { x: predictedLocalPlayer.x, y: predictedLocalPlayer.y } : null;
+        const pendingBefore = pendingInputs.length;
+        
+        const ackSeq = serverPlayer.lastInputSeq;
         // 移除已确认的输入（seq <= serverPlayer.lastInputSeq）
-        pendingInputs = pendingInputs.filter((input) => input.seq > serverPlayer.lastInputSeq);
+        pendingInputs = pendingInputs.filter((input) => input.seq > ackSeq);
+        const removed = pendingBefore - pendingInputs.length;
         
         // 从 server 状态开始，重放剩余的 pendingInputs
         let predictedPos = { x: serverPlayer.x, y: serverPlayer.y };
@@ -559,21 +772,30 @@ const network = new Network('ws://localhost:8080', 'local', {
           );
         }
         
+        const after = predictedPos;
+        const err = before
+          ? Math.hypot(after.x - before.x, after.y - before.y)
+          : 0;
+        
+        // 修复: debug log - 记录回滚重放关键数据
+        dbg.push('RECON', {
+          tick: snapshot.tick,
+          ackSeq,
+          removed,
+          remain: pendingInputs.length,
+          server: { x: +serverPlayer.x.toFixed(2), y: +serverPlayer.y.toFixed(2) },
+          before: before ? { x: +before.x.toFixed(2), y: +before.y.toFixed(2) } : null,
+          after: { x: +after.x.toFixed(2), y: +after.y.toFixed(2) },
+          err: +err.toFixed(2),
+          hasObstacles: cachedObstacles.length,
+        });
+        
         // 更新预测的本地玩家状态
         predictedLocalPlayer = {
           ...serverPlayer,
           x: predictedPos.x,
           y: predictedPos.y,
         };
-        
-        // 修复: debug 日志（验证抖动是否消失）
-        if (isDebug) {
-          const distance = Math.sqrt(
-            Math.pow(predictedLocalPlayer.x - serverPlayer.x, 2) +
-            Math.pow(predictedLocalPlayer.y - serverPlayer.y, 2)
-          );
-          console.log(`[RECONCILE] serverPos=(${serverPlayer.x.toFixed(2)},${serverPlayer.y.toFixed(2)}) predictedPos=(${predictedLocalPlayer.x.toFixed(2)},${predictedLocalPlayer.y.toFixed(2)}) distance=${distance.toFixed(2)}px pendingInputs=${pendingInputs.length}`);
-        }
       }
     }
   },
@@ -588,11 +810,23 @@ const network = new Network('ws://localhost:8080', 'local', {
   onWorldInit: (world) => {
     // 修复: 接收并缓存静态世界数据
     cachedObstacles = world.obstacles;
-    cachedItems = world.items;
+    cachedItems = world.items ?? []; // 修复: 处理可选字段
+    cachedWorldItems = world.worldItems ?? []; // 新增: 缓存世界物品
     serverMapConfig = world.mapConfig;
     serverSeed = world.seed;
-    console.log(`Received world init: seed=${world.seed}, obstacles=${world.obstacles.length}, items=${world.items.length}`);
-    hud.addEvent(`World initialized: ${world.obstacles.length} obstacles, ${world.items.length} items`);
+    
+    // P0-3 修复: 设置 Renderer 的世界边界（用于 camera clamp）
+    renderer.setWorldBounds(world.mapConfig.width, world.mapConfig.height);
+    
+    const itemsCount = world.items?.length ?? 0;
+    const worldItemsCount = world.worldItems?.length ?? 0;
+    console.log(`Received world init: seed=${world.seed}, obstacles=${world.obstacles.length}, items=${itemsCount}, worldItems=${worldItemsCount}`);
+    hud.addEvent(`World initialized: ${world.obstacles.length} obstacles, ${itemsCount} items, ${worldItemsCount} worldItems`);
+  },
+  // P1-1 新增: 接收 Profile 消息并更新 HUD
+  onProfile: (profile) => {
+    playerProfile = profile;
+    console.log(`Received profile: money=${profile.money}, stash=${profile.stash.length} items, bagCap=${profile.bagCap}`);
   },
 }, isDebug);
 
@@ -619,8 +853,10 @@ let lastSentKeys: { up: boolean; down: boolean; left: boolean; right: boolean } 
 let lastSentAim = NaN;
 let lastSentShoot = false; // Day2: 上次发送的开火状态
 let lastSentExtractHeld: boolean | null = null; // 游戏化增强: 上次发送的撤离持续状态
-// Day3 修复A: 脉冲事件 pending latch（直到成功发送才清零，防止节流窗口内丢失）
-let pendingInteract = false;
+// P2-2: pendingInteract 改成 TTL 脉冲（不再无限期粘住）
+// interactUntil 是 performance.now() 时间戳，超过这个时间就清零
+let interactUntil = 0;
+const INTERACT_TTL_MS = 200; // 200ms 后自动失效
 // 修复: pendingExtract 已废弃（不再发送 extract 脉冲，只使用 extractHeld）
 // let pendingExtract = false;
 
@@ -629,13 +865,18 @@ let lastLogTime = 0;
 let lastHudUpdateTime = 0; // 修复: HUD 更新节流（10Hz）
 const HUD_UPDATE_INTERVAL_MS = 100; // 10Hz
 function renderLoop(): void {
+  // 修复: 计算帧 dt（用于渲染平滑）
+  const nowPerf = performance.now();
+  const dtSec = Math.min(0.05, (nowPerf - lastRenderNow) / 1000); // cap 50ms 防止切后台后爆炸
+  lastRenderNow = nowPerf;
+  
   // 获取插值后的状态
   const state = network.getSnapshotBuffer().getInterpolatedState(120);
   
-  // 修复: 客户端预测 - 本地玩家使用预测位置，其他玩家使用插值位置
+  // 修复: 客户端预测 - 本地玩家使用平滑渲染位置，其他玩家使用插值位置
   let playersToRender = state.players;
   if (localPlayerId) {
-    // 如果还没有预测状态，从 snapshot 获取
+    // 确保 predictedLocalPlayer 存在（沿用你现在的逻辑）
     if (!predictedLocalPlayer) {
       const serverPlayer = state.players.find((p) => p.id === localPlayerId);
       if (serverPlayer) {
@@ -643,10 +884,36 @@ function renderLoop(): void {
       }
     }
     
-    // 如果有预测状态，使用预测位置
+    // 修复: 每帧把 renderLocalPlayer 平滑追向 predictedLocalPlayer
     if (predictedLocalPlayer) {
-      playersToRender = state.players.map((p) => 
-        p.id === localPlayerId ? predictedLocalPlayer! : p
+      if (!renderLocalPlayer) {
+        renderLocalPlayer = { ...predictedLocalPlayer };
+      } else {
+        const dx = predictedLocalPlayer.x - renderLocalPlayer.x;
+        const dy = predictedLocalPlayer.y - renderLocalPlayer.y;
+        const dist = Math.hypot(dx, dy);
+        
+        // 大回滚直接瞬移，避免慢慢"飘回去"
+        if (dist > 80) {
+          renderLocalPlayer.x = predictedLocalPlayer.x;
+          renderLocalPlayer.y = predictedLocalPlayer.y;
+        } else {
+          renderLocalPlayer.x = smoothTo(renderLocalPlayer.x, predictedLocalPlayer.x, dtSec, 0.08);
+          renderLocalPlayer.y = smoothTo(renderLocalPlayer.y, predictedLocalPlayer.y, dtSec, 0.08);
+        }
+        
+        // 其他字段保持最新（别让血量/状态落后一拍）
+        renderLocalPlayer.hp = predictedLocalPlayer.hp;
+        renderLocalPlayer.status = predictedLocalPlayer.status;
+        renderLocalPlayer.lootCount = predictedLocalPlayer.lootCount;
+        renderLocalPlayer.lastInputSeq = predictedLocalPlayer.lastInputSeq;
+        renderLocalPlayer.lastInputTick = predictedLocalPlayer.lastInputTick;
+        renderLocalPlayer.extractProgress = predictedLocalPlayer.extractProgress;
+      }
+      
+      // 使用平滑后的 renderLocalPlayer 渲染本地玩家
+      playersToRender = state.players.map((p) =>
+        p.id === localPlayerId ? (renderLocalPlayer as PLAYER_STATE) : p
       );
     }
   }
@@ -656,7 +923,18 @@ function renderLoop(): void {
       
       // 修复: 使用缓存的静态世界数据（obstacles 从 WORLD_INIT 接收，不再从 snapshot 获取）
       // items 仍然从 snapshot 获取（因为会被拾取，是动态的）
-      renderer.render(playersToRender, localPlayerId, isDebug, state.bullets, state.items, extractZone, cachedObstacles);
+      // 新增: 渲染 worldItems 和 lootBags
+      renderer.render(
+        playersToRender,
+        localPlayerId,
+        isDebug,
+        state.bullets,
+        state.items,
+        extractZone,
+        cachedObstacles,
+        state.worldItems, // 新增: 世界物品
+        state.lootBags // 新增: 掉落包
+      );
 
   // 修复: 客户端 tick 对齐（严格 20Hz，与 server 同步）
   const now = Date.now();
@@ -688,27 +966,83 @@ function renderLoop(): void {
       const tickShoot = inputManager.getShoot();
       const tickExtractHeld = inputManager.getExtractHeld();
       
-      // 合并 pendingInteract（脉冲事件）
-      pendingInteract = pendingInteract || inputManager.consumeInteract();
+      // P2-2: 合并 interact 脉冲（使用 TTL，不再无限期保留）
+      if (inputManager.consumeInteract()) {
+        interactUntil = performance.now() + INTERACT_TTL_MS;
+        dbg.push('INTERACT_PRESS', { until: interactUntil });
+      }
       
-      // 2. 本地预测推进一步（0.05s）
       // 修复: 使用 fallback mapConfig，确保 fallback 模式也能工作
       const mapConfig = serverMapConfig ?? fallbackMapConfig;
-      if (predictedLocalPlayer && mapConfig) {
-        const newPredictedPos = simulatePlayerMove(
-          { x: predictedLocalPlayer.x, y: predictedLocalPlayer.y },
-          tickKeys,
-          0.05, // 固定为 server tick 间隔
-          mapConfig.width,
-          mapConfig.height,
-          cachedObstacles
-        );
-        predictedLocalPlayer.x = newPredictedPos.x;
-        predictedLocalPlayer.y = newPredictedPos.y;
-      }
+      
+      // 修复: 只在 input "成功发送并入 pendingInputs"后，再做那一步预测
+      // 核心原则：预测推进必须和你写进 pendingInputs 的那一步一一对应
+      let committed = false;
+      let commitSeq = 0;
+      const commitKeys = { ...tickKeys };
       
       // 3. 如果 ws 可发，发送输入并 push 到 pendingInputs
       const connState = network.getConnectionState();
+      
+      // P2-2: 处理拾取动作（E键按下时，尝试拾取最近的世界物品或掉落包）
+      // 使用 TTL 脉冲，不再无限期保留
+      const interactActive = performance.now() <= interactUntil;
+      if (interactActive && connState.connected) {
+        // P2-2: 使用 fallback 获取本地玩家位置（覆盖预测未就绪阶段）
+        const lp = predictedLocalPlayer ?? state.players.find(p => p.id === localPlayerId);
+        
+        if (lp) {
+          dbg.push('PICKUP_TRY', { x: lp.x, y: lp.y, worldItems: state.worldItems.length, lootBags: state.lootBags.length });
+          
+          // 查找最近的世界物品或掉落包
+          let nearestTarget: { kind: 'world'; wid: string } | { kind: 'bag'; bid: string } | null = null;
+          let nearestDist = 40; // 拾取半径
+          
+          for (const worldItem of state.worldItems) {
+            const dx = worldItem.x - lp.x;
+            const dy = worldItem.y - lp.y;
+            const dist = Math.sqrt(dx * dx + dy * dy);
+            if (dist < nearestDist) {
+              nearestTarget = { kind: 'world', wid: worldItem.wid };
+              nearestDist = dist;
+            }
+          }
+          
+          for (const bag of state.lootBags) {
+            if (bag.items.length === 0) continue;
+            const dx = bag.x - lp.x;
+            const dy = bag.y - lp.y;
+            const dist = Math.sqrt(dx * dx + dy * dy);
+            if (dist < nearestDist) {
+              nearestTarget = { kind: 'bag', bid: bag.bid };
+              nearestDist = dist;
+            }
+          }
+          
+          if (nearestTarget) {
+            // 发送拾取消息
+            const sent = nearestTarget.kind === 'world'
+              ? network.sendPickupWorldItem(nearestTarget.wid)
+              : network.sendPickupLootBag(nearestTarget.bid);
+            
+            // P2-2: 无论 sent 成功与否，都清零（不再无限期保留）
+            interactUntil = 0;
+            dbg.push('PICKUP_SENT', { kind: nearestTarget.kind, sent, dist: nearestDist });
+          } else {
+            // P2-2: 没找到目标也要清零
+            interactUntil = 0;
+            dbg.push('PICKUP_NO_TARGET', { x: lp.x, y: lp.y });
+          }
+        } else {
+          // P2-2: lp 为空也要清零
+          interactUntil = 0;
+          dbg.push('PICKUP_NO_PLAYER', {});
+        }
+      } else if (interactUntil > 0 && performance.now() > interactUntil) {
+        // P2-2: TTL 过期，清零
+        dbg.push('PICKUP_EXPIRE', { was: interactUntil });
+        interactUntil = 0;
+      }
       if (connState.connected) {
         // 修复: 持续输入流式发送逻辑
         // 检查是否有持续态输入（移动/射击/撤离）
@@ -724,42 +1058,75 @@ function renderLoop(): void {
         const extractHeldChanged = tickExtractHeld !== (lastSentExtractHeld ?? false);
         
         // 只要在"持续态"（移动/射击/撤离），每 tick 都发；idle 时才用 change-based
-        const shouldSend = mustStream || pendingInteract || keysChanged || aimChanged || shootChanged || extractHeldChanged;
+        // P0-1 修复: interact 不再通过 input 发送（拾取走独立的 C2S_PICKUP_* 消息）
+        const shouldSend = mustStream || keysChanged || aimChanged || shootChanged || extractHeldChanged;
         
         if (shouldSend) {
           const nextSeq = inputSeq + 1;
-          const sent = network.sendInput(nextSeq, tickKeys, tickAim, tickShoot, pendingInteract, false, tickExtractHeld);
+          // P0-1 修复: interact 参数设为 false，不再触发服务端旧拾取逻辑
+          const sent = network.sendInput(nextSeq, tickKeys, tickAim, tickShoot, false, false, tickExtractHeld);
           
           if (sent) {
             inputSeq = nextSeq;
             // 同时写入 pendingInputs（同一份快照）
             pendingInputs.push({
               seq: nextSeq,
-              keys: { ...tickKeys },
+              keys: commitKeys,
               deltaTime: 0.05,
+            });
+            committed = true;
+            commitSeq = nextSeq;
+            
+            // 修复: debug log - 记录发送输入关键数据
+            dbg.push('SEND', {
+              seq: nextSeq,
+              tick: connState.lastServerTick,
+              keys: tickKeys,
+              shoot: tickShoot,
+              eh: tickExtractHeld,
+              pi: pendingInputs.length,
             });
             
             lastSentKeys = { ...tickKeys };
             lastSentAim = tickAim;
             lastSentShoot = tickShoot;
             lastSentExtractHeld = tickExtractHeld;
-            pendingInteract = false;
+            // P2-2: interact 已改为 TTL 脉冲，不再在这里处理
+          } else {
+            // 修复: 记录发送失败，便于诊断
+            dbg.push('SEND_FAIL', { seq: nextSeq, connected: connState.connected });
           }
           // 如果 sent === false（ws 未连接），不递增 seq，不 push pendingInputs
         }
+      }
+      
+      // 修复: 只有 committed 才推进预测（保证 pendingInputs 可重放）
+      // 这样即使某个 tick 发包失败/服务端没吃到，也不会"白走一步"
+      if (committed && predictedLocalPlayer && mapConfig) {
+        const newPredictedPos = simulatePlayerMove(
+          { x: predictedLocalPlayer.x, y: predictedLocalPlayer.y },
+          commitKeys,
+          0.05, // 固定为 server tick 间隔
+          mapConfig.width,
+          mapConfig.height,
+          cachedObstacles
+        );
+        predictedLocalPlayer.x = newPredictedPos.x;
+        predictedLocalPlayer.y = newPredictedPos.y;
       }
     }
     
     clientAccMs -= CLIENT_TICK_MS;
   }
 
-  // Debug日志：每200ms打印一次（仅在debug模式下）
+  // P0-2 修复: Debug日志使用 performance.now()（仅在显示给用户时才用 Date.now()）
   if (isDebug) {
-    if (now - lastLogTime >= 200) {
+    const nowPerf = performance.now();
+    if (nowPerf - lastLogTime >= 200) {
       const connState = network.getConnectionState();
       const currentKeys = inputManager.getKeys();
       console.log(`[CLIENT] seq=${inputSeq} tick=${connState.lastServerTick} pendingInputs=${pendingInputs.length} keys=${JSON.stringify(currentKeys)}`);
-      lastLogTime = now;
+      lastLogTime = nowPerf;
     }
   }
 
@@ -803,17 +1170,49 @@ function renderLoop(): void {
       players: state.players,
       counts: {
         bullets: state.bullets.length,
-        items: state.items.length,
+        worldItems: state.worldItems.length, // P2-1: 改用 worldItems
+        lootBags: state.lootBags.length, // P2-1: 新增掉落包计数
       },
       selectedEntity: selectedEntity,
       events: [], // events由HUD内部管理
+      // P1-1 新增: 物品系统数据（从 Profile 获取）
+      inventory: localPlayerId ? (state.players.find(p => p.id === localPlayerId)?.inventory) : undefined,
+      stash: playerProfile?.stash, // 从 Profile 获取
+      money: playerProfile?.money, // 从 Profile 获取
     });
   }
 
-  requestAnimationFrame(renderLoop);
+  rafId = requestAnimationFrame(renderLoop);
 }
 
-renderLoop();
+// 修复: HMR/多实例防护 - 防止多个 renderLoop 同时运行导致重影
+const g = window as any;
+
+if (g.__jerkieCleanup) {
+  try { g.__jerkieCleanup(); } catch {}
+}
+
+let rafId = 0;
+
+function cleanup() {
+  if (rafId) cancelAnimationFrame(rafId);
+  if (resizeRafId !== null) cancelAnimationFrame(resizeRafId);
+  resizeObserver?.disconnect();
+  // 断网，避免旧实例还在收包/发包
+  network.disconnect();
+  console.log('[CLEANUP] old instance stopped');
+}
+
+g.__jerkieCleanup = cleanup;
+
+// Vite HMR：模块被替换时调用 cleanup（没有也不影响）
+const meta: any = import.meta as any;
+if (meta.hot) {
+  meta.hot.dispose(() => cleanup());
+}
+
+// 启动 renderLoop
+rafId = requestAnimationFrame(renderLoop);
 
 // P0-2: 将network暴露到window，方便调试时手动调用disconnect()
 // 例如在控制台执行：window.net.disconnect() 后不会再自动重连
@@ -830,9 +1229,13 @@ import {
   C2S_HELLO_SCHEMA,
   C2S_INPUT_SCHEMA,
   C2S_PING_SCHEMA, // Day5: Ping 消息
+  C2S_PICKUP_WORLD_ITEM_SCHEMA, // 新增: 拾取世界物品
+  C2S_PICKUP_LOOT_BAG_SCHEMA, // 新增: 拾取掉落包
+  C2S_SELL_FROM_STASH_SCHEMA, // 新增: 从仓库卖出
   S2C_MESSAGE_SCHEMA,
   type S2C_MESSAGE,
   type S2C_SNAPSHOT,
+  type S2C_WORLD_INIT, // 新增: 世界初始化消息类型
   type MAP_CONFIG, // P0-1 修复: 使用 shared 的 MAP_CONFIG 类型，避免类型漂移
   type OBSTACLE_STATE, // 修复: 静态世界初始化
   type ITEM_STATE, // 修复: 静态世界初始化
@@ -853,7 +1256,8 @@ export interface NetworkCallbacks {
   onDisconnect?: () => void;
   onWelcome?: (playerId: string, roomInfo?: RoomInfo) => void;
   onEvent?: (message: string) => void; // 游戏化增强: 服务端事件回调
-  onWorldInit?: (world: { seed: number; mapConfig: MAP_CONFIG; obstacles: OBSTACLE_STATE[]; items: ITEM_STATE[] }) => void; // 修复: 静态世界初始化回调
+  onWorldInit?: (world: S2C_WORLD_INIT) => void; // 新增: 世界初始化回调（使用协议类型）
+  onProfile?: (profile: { money: number; stash: any[]; bagCap: number }) => void; // P1-1: Profile 回调
 }
 
 export class Network {
@@ -959,12 +1363,7 @@ export class Network {
           } else if (message.type === 'S2C_WORLD_INIT') {
             // 修复: 处理静态世界初始化消息
             if (this.callbacks.onWorldInit) {
-              this.callbacks.onWorldInit({
-                seed: message.seed,
-                mapConfig: message.mapConfig,
-                obstacles: message.obstacles,
-                items: message.items,
-              });
+              this.callbacks.onWorldInit(message);
             }
           } else if (message.type === 'S2C_EVENT') {
             // 游戏化增强: 处理服务端事件
@@ -1076,6 +1475,61 @@ export class Network {
     });
 
     this.ws.send(JSON.stringify(message));
+  }
+
+  // 新增: 发送拾取世界物品动作
+  sendPickupWorldItem(wid: string): boolean {
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+      return false;
+    }
+    try {
+      const message = C2S_PICKUP_WORLD_ITEM_SCHEMA.parse({
+        type: 'C2S_PICKUP_WORLD_ITEM',
+        wid,
+      });
+      this.ws.send(JSON.stringify(message));
+      return true;
+    } catch (error) {
+      console.error('Failed to send pickup world item:', error);
+      return false;
+    }
+  }
+
+  // 新增: 发送拾取掉落包动作
+  sendPickupLootBag(bid: string): boolean {
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+      return false;
+    }
+    try {
+      const message = C2S_PICKUP_LOOT_BAG_SCHEMA.parse({
+        type: 'C2S_PICKUP_LOOT_BAG',
+        bid,
+      });
+      this.ws.send(JSON.stringify(message));
+      return true;
+    } catch (error) {
+      console.error('Failed to send pickup loot bag:', error);
+      return false;
+    }
+  }
+
+  // 新增: 发送从仓库卖出物品动作
+  sendSellFromStash(iid: string, qty: number): boolean {
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+      return false;
+    }
+    try {
+      const message = C2S_SELL_FROM_STASH_SCHEMA.parse({
+        type: 'C2S_SELL_FROM_STASH',
+        iid,
+        qty,
+      });
+      this.ws.send(JSON.stringify(message));
+      return true;
+    } catch (error) {
+      console.error('Failed to send sell from stash:', error);
+      return false;
+    }
   }
 
   // P0-1 修复: 返回 boolean 表示是否真的发送成功
@@ -1203,12 +1657,12 @@ export class Network {
 }
 
 
-
 ==========================================================================================
 FILE: client/src/renderer.ts
 STATUS: OK
 ------------------------------------------------------------------------------------------
-import type { PLAYER_STATE, BULLET_STATE, ITEM_STATE, OBSTACLE_STATE } from '@jerkie-man/shared';
+import type { PLAYER_STATE, BULLET_STATE, ITEM_STATE, OBSTACLE_STATE, WorldItem, LootBag } from '@jerkie-man/shared';
+import { getItemType } from '@jerkie-man/shared';
 
 export class Renderer {
   private canvas: HTMLCanvasElement;
@@ -1222,6 +1676,10 @@ export class Renderer {
   // camera跟随本地玩家，让玩家始终在屏幕中心附近可见
   private camX = 0;
   private camY = 0;
+  
+  // P0-3 修复: 世界边界（用于 camera clamp）
+  private worldWidth: number = 0;
+  private worldHeight: number = 0;
   
   // P2 优化: 缓存 canvas rect，避免每帧 getBoundingClientRect()
   private cachedRectLeft: number = 0;
@@ -1284,9 +1742,14 @@ export class Renderer {
     };
   }
 
-  // 清除画布（使用缓存的尺寸，避免每帧getBoundingClientRect）
+  // 清除画布（使用 device-pixel 尺寸清屏，避免 transform/dpr/合成导致的残留）
   clear(): void {
-    this.ctx.clearRect(0, 0, this.cssWidth, this.cssHeight);
+    const ctx = this.ctx;
+    ctx.save();
+    // 用真实 backing store 清屏，避免 transform / dpr / 合成导致的残留
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+    ctx.restore();
   }
 
   // 绘制玩家（简单方块）
@@ -1294,8 +1757,9 @@ export class Renderer {
   drawPlayer(player: PLAYER_STATE, isLocal: boolean = false): void {
     const size = 20; // 像素大小
     // 将世界坐标转换为屏幕坐标（减去camera偏移）
-    const screenX = player.x - this.camX;
-    const screenY = player.y - this.camY;
+    // 修复: round 到整数像素，避免子像素抗锯齿导致的重影
+    const screenX = Math.round(player.x - this.camX);
+    const screenY = Math.round(player.y - this.camY);
 
     // 玩家颜色（本地玩家蓝色，其他红色）
     this.ctx.fillStyle = isLocal ? '#00aaff' : '#ff4444';
@@ -1341,8 +1805,9 @@ export class Renderer {
   // Day2: 绘制子弹
   // Step5: 使用BULLET_STATE类型，后续要画ownerId颜色时不需要改签名
   drawBullet(bullet: BULLET_STATE): void {
-    const screenX = bullet.x - this.camX;
-    const screenY = bullet.y - this.camY;
+    // 修复: round 到整数像素，避免子像素抗锯齿导致的重影
+    const screenX = Math.round(bullet.x - this.camX);
+    const screenY = Math.round(bullet.y - this.camY);
     
     // 绘制小圆点
     this.ctx.fillStyle = '#ffff00'; // 黄色
@@ -1351,20 +1816,70 @@ export class Renderer {
     this.ctx.fill();
   }
 
-  // Day3: 绘制物品
+  // Day3: 绘制物品（保留兼容）
   drawItem(item: ITEM_STATE): void {
-    const screenX = item.x - this.camX;
-    const screenY = item.y - this.camY;
+    // 修复: round 到整数像素，避免子像素抗锯齿导致的重影
+    const screenX = Math.round(item.x - this.camX);
+    const screenY = Math.round(item.y - this.camY);
     const size = 12; // 物品大小
     
     // 绘制小方块（先用统一颜色，后续可按type区分）
     this.ctx.fillStyle = '#00ff00'; // 绿色
     this.ctx.fillRect(screenX - size / 2, screenY - size / 2, size, size);
-    
+
     // 边框
     this.ctx.strokeStyle = '#fff';
     this.ctx.lineWidth = 1;
     this.ctx.strokeRect(screenX - size / 2, screenY - size / 2, size, size);
+  }
+
+  // 新增: 绘制世界物品
+  drawWorldItem(worldItem: WorldItem): void {
+    const screenX = Math.round(worldItem.x - this.camX);
+    const screenY = Math.round(worldItem.y - this.camY);
+    const size = 12;
+    
+    try {
+      const itemType = getItemType(worldItem.typeId);
+      // 根据稀有度设置颜色
+      if (itemType.rarity === 'COMMON') {
+        this.ctx.fillStyle = '#00ff00'; // 绿色
+      } else if (itemType.rarity === 'RARE') {
+        this.ctx.fillStyle = '#0088ff'; // 蓝色
+      } else {
+        this.ctx.fillStyle = '#ff8800'; // 橙色（QUEST）
+      }
+    } catch {
+      this.ctx.fillStyle = '#00ff00'; // 默认绿色
+    }
+    
+    this.ctx.fillRect(screenX - size / 2, screenY - size / 2, size, size);
+    this.ctx.strokeStyle = '#000000';
+    this.ctx.lineWidth = 1;
+    this.ctx.strokeRect(screenX - size / 2, screenY - size / 2, size, size);
+  }
+
+  // 新增: 绘制掉落包
+  drawLootBag(bag: LootBag): void {
+    const screenX = Math.round(bag.x - this.camX);
+    const screenY = Math.round(bag.y - this.camY);
+    const size = 16; // 掉落包稍大一些
+    
+    // 掉落包用棕色表示
+    this.ctx.fillStyle = '#8b4513';
+    this.ctx.fillRect(screenX - size / 2, screenY - size / 2, size, size);
+    this.ctx.strokeStyle = '#654321';
+    this.ctx.lineWidth = 2;
+    this.ctx.strokeRect(screenX - size / 2, screenY - size / 2, size, size);
+    
+    // 显示物品数量（如果有）
+    if (bag.items.length > 0) {
+      this.ctx.fillStyle = '#ffffff';
+      this.ctx.font = '10px monospace';
+      this.ctx.textAlign = 'center';
+      this.ctx.textBaseline = 'middle';
+      this.ctx.fillText(bag.items.length.toString(), screenX, screenY);
+    }
   }
 
   // Day3: 绘制撤离区
@@ -1384,13 +1899,14 @@ export class Renderer {
 
   // Day4-2: 绘制障碍物（灰色矩形）
   drawObstacle(obstacle: OBSTACLE_STATE): void {
-    const screenX = obstacle.x - this.camX;
-    const screenY = obstacle.y - this.camY;
+    // 修复: round 到整数像素，避免子像素抗锯齿导致的重影
+    const screenX = Math.round(obstacle.x - this.camX);
+    const screenY = Math.round(obstacle.y - this.camY);
 
     // 填充（深灰色）
     this.ctx.fillStyle = '#666';
     this.ctx.fillRect(screenX, screenY, obstacle.w, obstacle.h);
-    
+
     // 边框（深色）
     this.ctx.strokeStyle = '#333';
     this.ctx.lineWidth = 2;
@@ -1408,7 +1924,9 @@ export class Renderer {
     bullets: BULLET_STATE[] = [],
     items: ITEM_STATE[] = [],
     extractZone?: { x: number; y: number; w: number; h: number },
-    obstacles: OBSTACLE_STATE[] = [] // Day4-2: 障碍物列表
+    obstacles: OBSTACLE_STATE[] = [], // Day4-2: 障碍物列表
+    worldItems: WorldItem[] = [], // 新增: 世界物品列表
+    lootBags: LootBag[] = [] // 新增: 掉落包列表
   ): void {
     this.clear();
 
@@ -1418,8 +1936,17 @@ export class Renderer {
       if (localPlayer) {
         // camera位置 = 玩家世界坐标 - 屏幕中心偏移
         // 这样玩家就会显示在屏幕中心（screenX = player.x - camX = cssWidth/2）
-        this.camX = localPlayer.x - this.cssWidth / 2;
-        this.camY = localPlayer.y - this.cssHeight / 2;
+        let targetCamX = localPlayer.x - this.cssWidth / 2;
+        let targetCamY = localPlayer.y - this.cssHeight / 2;
+        
+        // P0-3 修复: Clamp camera 到世界边界（避免看到出界空白）
+        if (this.worldWidth > 0 && this.worldHeight > 0) {
+          targetCamX = Math.max(0, Math.min(targetCamX, this.worldWidth - this.cssWidth));
+          targetCamY = Math.max(0, Math.min(targetCamY, this.worldHeight - this.cssHeight));
+        }
+        
+        this.camX = targetCamX;
+        this.camY = targetCamY;
       }
     }
     // 如果本地玩家不存在，camX/camY保持0（不移动camera）
@@ -1434,9 +1961,19 @@ export class Renderer {
       this.drawExtractZone(extractZone);
     }
 
-    // Day3: 绘制所有物品
-    for (const item of items) {
-      this.drawItem(item);
+    // P2-1: 旧 items 系统已停用，不再绘制
+    // for (const item of items) {
+    //   this.drawItem(item);
+    // }
+
+    // 绘制世界物品（只使用新系统）
+    for (const worldItem of worldItems) {
+      this.drawWorldItem(worldItem);
+    }
+
+    // 新增: 绘制掉落包
+    for (const bag of lootBags) {
+      this.drawLootBag(bag);
     }
 
     // 绘制所有玩家（使用屏幕坐标）
@@ -1465,9 +2002,16 @@ export class Renderer {
     }
   }
 
+  // P0-3 修复: 设置世界边界（用于 camera clamp）
+  setWorldBounds(width: number, height: number): void {
+    this.worldWidth = width;
+    this.worldHeight = height;
+  }
+
   // Resize方法：由外部调用，负责所有canvas尺寸和transform设置
   // 单一真相：所有resize逻辑都在这里，不再有内部自动resize
   // P2 优化: 在 resize 时缓存 rect，避免每帧 getBoundingClientRect()
+
   resize(cssWidth: number, cssHeight: number): void {
     this.cssWidth = cssWidth;
     this.cssHeight = cssHeight;
@@ -1481,8 +2025,17 @@ export class Renderer {
     this.canvas.width = cssWidth * dpr;
     this.canvas.height = cssHeight * dpr;
 
-    // 重置transform，然后设置scale（避免重复scale）
-    this.ctx.resetTransform();
+    // P0-4 修复: resetTransform 兼容性（Safari 等环境可能不支持）
+    // 使用 setTransform(1,0,0,1,0,0) 作为 fallback
+    try {
+      if (this.ctx.resetTransform) {
+        this.ctx.resetTransform();
+      } else {
+        this.ctx.setTransform(1, 0, 0, 1, 0, 0);
+      }
+    } catch {
+      this.ctx.setTransform(1, 0, 0, 1, 0, 0);
+    }
     this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     this.scale = dpr;
     
@@ -1507,7 +2060,7 @@ export class Renderer {
 FILE: client/src/snapshot.ts
 STATUS: OK
 ------------------------------------------------------------------------------------------
-import type { S2C_SNAPSHOT, PLAYER_STATE, BULLET_STATE, ITEM_STATE } from '@jerkie-man/shared';
+import type { S2C_SNAPSHOT, PLAYER_STATE, BULLET_STATE, ITEM_STATE, WorldItem, LootBag } from '@jerkie-man/shared';
 import { lerp } from '@jerkie-man/shared';
 
 interface SnapshotEntry {
@@ -1554,6 +2107,8 @@ export class SnapshotBuffer {
     players: PLAYER_STATE[];
     bullets: BULLET_STATE[];
     items: ITEM_STATE[];
+    worldItems: WorldItem[];
+    lootBags: LootBag[];
   } {
     // P0-1: 使用服务器时间域计算renderTime，避免跨机器时钟偏移导致插值失败
     // 将客户端时间转换为服务器时间域：clientNow + offset = serverNow
@@ -1563,14 +2118,16 @@ export class SnapshotBuffer {
     const renderTimeServer = serverNow - renderDelay;
 
     if (this.buffer.length === 0) {
-      return { players: [], bullets: [], items: [] };
+      return { players: [], bullets: [], items: [], worldItems: [], lootBags: [] };
     }
 
     if (this.buffer.length === 1) {
       return {
         players: this.buffer[0].snapshot.players,
         bullets: this.buffer[0].snapshot.bullets,
-        items: this.buffer[0].snapshot.items,
+        items: this.buffer[0].snapshot.items ?? [], // 修复: 处理可选字段
+        worldItems: this.buffer[0].snapshot.worldItems ?? [], // 新增: 世界物品
+        lootBags: this.buffer[0].snapshot.lootBags ?? [], // 新增: 掉落包
       };
     }
 
@@ -1597,7 +2154,9 @@ export class SnapshotBuffer {
       return {
         players: latest.snapshot.players,
         bullets: latest.snapshot.bullets,
-        items: latest.snapshot.items,
+        items: latest.snapshot.items ?? [], // 修复: 处理可选字段
+        worldItems: latest.snapshot.worldItems ?? [], // 新增: 世界物品
+        lootBags: latest.snapshot.lootBags ?? [], // 新增: 掉落包
       };
     }
 
@@ -1642,7 +2201,9 @@ export class SnapshotBuffer {
     return {
       players: interpolatedPlayers,
       bullets: t1.snapshot.bullets,
-      items: t1.snapshot.items,
+      items: t1.snapshot.items ?? [], // 修复: 处理可选字段
+      worldItems: t1.snapshot.worldItems ?? [], // 新增: 世界物品（不做插值）
+      lootBags: t1.snapshot.lootBags ?? [], // 新增: 掉落包（不做插值）
     };
   }
 
@@ -1656,7 +2217,6 @@ export class SnapshotBuffer {
     this.serverOffsetMs = 0;
   }
 }
-
 
 
 ==========================================================================================
@@ -1750,6 +2310,7 @@ import {
   S2C_WORLD_INIT_SCHEMA, // 静态世界初始化消息
   S2C_EVENT_SCHEMA, // 游戏化增强: 事件消息
   S2C_PONG_SCHEMA, // Day5: Pong 消息
+  S2C_PROFILE_SCHEMA, // P1-1: Profile 消息
   type C2S_MESSAGE,
 } from '@jerkie-man/shared';
 
@@ -1780,6 +2341,17 @@ const INPUT_QUEUE_MAX_LENGTH = 32;
 const inputQueues = new Map<string, Array<{ input: C2S_MESSAGE & { type: 'C2S_INPUT' }; ws: WebSocket }>>();
 let lastQueueWarnTime = 0;
 
+// P2-3: Pickup 队列（入队列 tick 处理，确保移动和拾取对齐）
+type PickupReq = 
+  | { type: 'world'; wid: string; ws: WebSocket }
+  | { type: 'bag'; bid: string; ws: WebSocket };
+const pickupQueues = new Map<string, PickupReq[]>();
+
+// P1-1 修复: lastProfileSentTick 移至模块级，避免每 tick 重新创建导致重复发送
+const lastProfileSentTick = new Map<string, number>();
+// 新增: 记录玩家撤离时的背包物品数（用于判断"刚完成撤离"）
+const lastExtractedInventoryCount = new Map<string, number>();
+
 wss.on('connection', (ws: WebSocket) => {
   let playerId: string | null = null;
 
@@ -1807,6 +2379,7 @@ ws.on('message', (data: Buffer) => {
             connections.set(ws, playerId);
             room.addPlayer(playerId);
             inputQueues.set(playerId, []);
+            pickupQueues.set(playerId, []); // P2-3: 初始化 pickup 队列
 
         log('CONNECT', {
           room: room.id,
@@ -1834,7 +2407,21 @@ ws.on('message', (data: Buffer) => {
               seed: room.seed,
               mapConfig: room.mapConfig,
               obstacles: room.getObstacles(),
-              items: room.getItems(),
+              items: room.getItems(), // 保留兼容
+              worldItems: room.getWorldItems(), // 新增: 世界物品列表
+            })
+          )
+        );
+        
+        // P1-1 新增: 发送 Profile 消息（WELCOME 后立即发送一次）
+        const initialProfile = room.profileManager.getProfileData(playerId);
+        ws.send(
+          JSON.stringify(
+            S2C_PROFILE_SCHEMA.parse({
+              type: 'S2C_PROFILE',
+              money: initialProfile.money,
+              stash: initialProfile.stash,
+              bagCap: initialProfile.bagCap,
             })
           )
         );
@@ -1847,6 +2434,95 @@ ws.on('message', (data: Buffer) => {
                 type: 'S2C_PONG',
                 clientTimestamp: parsed.timestamp,
                 serverTimestamp: Date.now(),
+              })
+            )
+          );
+        }
+      } else if (parsed.type === 'C2S_PICKUP_WORLD_ITEM') {
+        // P2-3: 拾取改成入队列，在 tick 中处理（确保移动和拾取对齐）
+        if (!playerId) {
+          ws.send(
+            JSON.stringify(
+              S2C_ERROR_SCHEMA.parse({
+                type: 'S2C_ERROR',
+                code: 'NOT_AUTHENTICATED',
+                message: 'Must send C2S_HELLO first',
+              })
+            )
+          );
+          return;
+        }
+        // 入队列，不立即处理
+        const queue = pickupQueues.get(playerId);
+        if (queue) {
+          queue.push({ type: 'world', wid: parsed.wid, ws });
+          log('PICKUP_ENQUEUE', { player: playerId, type: 'world', wid: parsed.wid, tick: room.tick });
+        }
+      } else if (parsed.type === 'C2S_PICKUP_LOOT_BAG') {
+        // P2-3: 拾取改成入队列，在 tick 中处理（确保移动和拾取对齐）
+        if (!playerId) {
+          ws.send(
+            JSON.stringify(
+              S2C_ERROR_SCHEMA.parse({
+                type: 'S2C_ERROR',
+                code: 'NOT_AUTHENTICATED',
+                message: 'Must send C2S_HELLO first',
+              })
+            )
+          );
+          return;
+        }
+        // 入队列，不立即处理
+        const queue = pickupQueues.get(playerId);
+        if (queue) {
+          queue.push({ type: 'bag', bid: parsed.bid, ws });
+          log('PICKUP_ENQUEUE', { player: playerId, type: 'bag', bid: parsed.bid, tick: room.tick });
+        }
+      } else if (parsed.type === 'C2S_SELL_FROM_STASH') {
+        // 新增: 处理从仓库卖出物品
+        if (!playerId) {
+          ws.send(
+            JSON.stringify(
+              S2C_ERROR_SCHEMA.parse({
+                type: 'S2C_ERROR',
+                code: 'NOT_AUTHENTICATED',
+                message: 'Must send C2S_HELLO first',
+              })
+            )
+          );
+          return;
+        }
+        const result = room.profileManager.sellFromStash(playerId, parsed.iid, parsed.qty);
+        if (!result.success) {
+          ws.send(
+            JSON.stringify(
+              S2C_ERROR_SCHEMA.parse({
+                type: 'S2C_ERROR',
+                code: 'SELL_FAILED',
+                message: 'Failed to sell from stash',
+              })
+            )
+          );
+        } else {
+          // 发送成功消息：立即回发 S2C_PROFILE 刷新客户端 HUD
+          log('SELL_FROM_STASH', {
+            room: room.id,
+            player: playerId,
+            iid: parsed.iid,
+            qty: parsed.qty,
+            money: result.money,
+            tick: room.tick,
+          });
+          
+          // 卖出成功后立即发送 Profile（不然 client HUD 不刷新）
+          const updatedProfile = room.profileManager.getProfileData(playerId);
+          ws.send(
+            JSON.stringify(
+              S2C_PROFILE_SCHEMA.parse({
+                type: 'S2C_PROFILE',
+                money: updatedProfile.money,
+                stash: updatedProfile.stash,
+                bagCap: updatedProfile.bagCap,
               })
             )
           );
@@ -1929,6 +2605,7 @@ ws.on('message', (data: Buffer) => {
       room.removePlayer(playerId);
       connections.delete(ws);
       inputQueues.delete(playerId);
+      pickupQueues.delete(playerId); // P2-3: 清理 pickup 队列
     }
   });
 
@@ -1946,35 +2623,146 @@ setInterval(() => {
   room.tick++;
 
   // Day2: 先处理输入（可能生成子弹）
-  // Day3 修复B: 使用最新的 movement/aim/shoot，但对 interact/extract 做 OR 聚合
+  // 修复: 按序处理最多 N 条，避免队列为空时不移动（解决 err=10 问题）
+  const MAX_STEPS = 4; // 每 tick 最多追 4 步，避免被恶意灌爆
   for (const [playerId, queue] of inputQueues.entries()) {
-    if (queue.length === 0) continue;
-    
-    // 按seq排序，只处理最新的一个（避免积压导致越跑越慢）
-    queue.sort((a, b) => b.input.seq - a.input.seq); // 降序，最新的在前
-    const latest = queue.shift();
-    if (latest) {
-      // Day3 修复B: 聚合队列中所有 input 的 interact/extract（OR 操作）
-      let aggregatedInteract = latest.input.interact ?? false;
-      let aggregatedExtract = latest.input.extract ?? false;
-      
-      for (const entry of queue) {
-        if (entry.input.interact) aggregatedInteract = true;
-        if (entry.input.extract) aggregatedExtract = true;
+    if (queue.length === 0) {
+      // 修复: 记录队列为空的情况，便于诊断
+      if (room.tick % 100 === 0) { // 每 5 秒记录一次，避免日志过多
+        log('NO_INPUT_THIS_TICK', { player: playerId, tick: room.tick });
       }
-      
-      // 使用最新的 input，但替换 interact/extract 为聚合值
-      const aggregatedInput = {
-        ...latest.input,
-        interact: aggregatedInteract,
-        extract: aggregatedExtract,
-      };
-      
-      room.processInput(playerId, aggregatedInput);
+      continue;
     }
     
-    // 清空队列（只保留最新输入）
+    // 修复: 按 seq 升序排序，按序处理（而不是只处理最新一条）
+    queue.sort((a, b) => a.input.seq - b.input.seq);
+    
+    // 只处理最后 MAX_STEPS 条，避免被恶意灌爆
+    const slice = queue.length > MAX_STEPS ? queue.slice(queue.length - MAX_STEPS) : queue;
+    
+    // 聚合一次性事件（interact/extract）只在最后一条处理
+    let aggregatedInteract = false;
+    let aggregatedExtract = false;
+    for (const e of slice) {
+      if (e.input.interact) aggregatedInteract = true;
+      if (e.input.extract) aggregatedExtract = true;
+    }
+    
+    // 按序处理每条 input（保证移动连续性）
+    for (let i = 0; i < slice.length; i++) {
+      const raw = slice[i].input;
+      const isLast = i === slice.length - 1;
+      room.processInput(playerId, {
+        ...raw,
+        // 只在最后一条处理一次性事件，避免重复触发
+        interact: isLast ? aggregatedInteract : false,
+        extract: isLast ? aggregatedExtract : false,
+      });
+    }
+    
+    // 清空队列
     queue.length = 0;
+  }
+  
+  // P2-3: 处理 pickup 队列（在移动处理之后，确保位置对齐）
+  for (const [playerId, queue] of pickupQueues.entries()) {
+    if (queue.length === 0) continue;
+    
+    // 只处理最后一个请求（避免重复拾取）
+    const lastReq = queue[queue.length - 1];
+    
+    if (lastReq.type === 'world') {
+      const result = room.handlePickupWorldItem(playerId, lastReq.wid);
+      if (!result.success) {
+        const player = room.getPlayer(playerId);
+        log('PICKUP_FAIL', {
+          player: playerId,
+          type: 'world',
+          wid: lastReq.wid,
+          reason: result.message,
+          playerPos: player ? `(${player.x.toFixed(1)},${player.y.toFixed(1)})` : 'N/A',
+          tick: room.tick,
+        });
+        if (lastReq.ws.readyState === WebSocket.OPEN) {
+          lastReq.ws.send(
+            JSON.stringify(
+              S2C_ERROR_SCHEMA.parse({
+                type: 'S2C_ERROR',
+                code: 'PICKUP_FAILED',
+                message: result.message || 'Failed to pickup world item',
+              })
+            )
+          );
+        }
+      } else {
+        log('PICKUP_OK', { player: playerId, type: 'world', wid: lastReq.wid, tick: room.tick });
+      }
+    } else {
+      const result = room.handlePickupLootBag(playerId, lastReq.bid);
+      if (!result.success) {
+        const player = room.getPlayer(playerId);
+        log('PICKUP_FAIL', {
+          player: playerId,
+          type: 'bag',
+          bid: lastReq.bid,
+          reason: result.message,
+          playerPos: player ? `(${player.x.toFixed(1)},${player.y.toFixed(1)})` : 'N/A',
+          tick: room.tick,
+        });
+        if (lastReq.ws.readyState === WebSocket.OPEN) {
+          lastReq.ws.send(
+            JSON.stringify(
+              S2C_ERROR_SCHEMA.parse({
+                type: 'S2C_ERROR',
+                code: 'PICKUP_FAILED',
+                message: result.message || 'Failed to pickup loot bag',
+              })
+            )
+          );
+        }
+      } else {
+        log('PICKUP_OK', { player: playerId, type: 'bag', bid: lastReq.bid, tick: room.tick });
+      }
+    }
+    
+    // 清空队列
+    queue.length = 0;
+  }
+  
+  // P1-1 修复: 检查所有玩家是否刚完成撤离，发送更新的 Profile
+  // 只在"玩家状态变为 EXTRACTED 且背包已清空"的那一刻发送一次
+  for (const [playerId, player] of room.players.entries()) {
+    if (player.status === 'EXTRACTED') {
+      const lastSent = lastProfileSentTick.get(playerId) ?? -1;
+      const lastInvCount = lastExtractedInventoryCount.get(playerId) ?? -1;
+      
+      // 判断是否刚完成撤离：
+      // 1. 背包已清空（items.length === 0）
+      // 2. 上次记录的背包数量 !== 0（说明刚刚被清空）
+      // 3. 还没在这个 tick 发送过 Profile
+      const justExtracted = player.inventory.items.length === 0 && lastInvCount !== 0;
+      
+      if (justExtracted && lastSent < room.tick) {
+        const ws = Array.from(connections.entries()).find(([, pid]) => pid === playerId)?.[0];
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          const profile = room.profileManager.getProfileData(playerId);
+          ws.send(
+            JSON.stringify(
+              S2C_PROFILE_SCHEMA.parse({
+                type: 'S2C_PROFILE',
+                money: profile.money,
+                stash: profile.stash,
+                bagCap: profile.bagCap,
+              })
+            )
+          );
+          lastProfileSentTick.set(playerId, room.tick);
+        }
+      }
+      
+      // 更新记录的背包数量
+      lastExtractedInventoryCount.set(playerId, player.inventory.items.length);
+    }
   }
 
   // Day2: 更新子弹位置并检测命中（20Hz tick = 50ms = 0.05s）
@@ -2002,7 +2790,9 @@ setInterval(() => {
     timestamp: Date.now(),
     players: snapshot.players,
     bullets: snapshot.bullets,
-    items: snapshot.items,
+    items: snapshot.items, // 保留兼容
+    worldItems: snapshot.worldItems, // 新增: 世界物品列表（MVP 全量，未来做 delta）
+    lootBags: snapshot.lootBags, // 新增: 掉落包列表
     // 修复: obstacles 已移至 S2C_WORLD_INIT，不再在 snapshot 中发送（减少带宽）
   });
 
@@ -2054,8 +2844,8 @@ log('Server listening', {
 FILE: server/src/player.ts
 STATUS: OK
 ------------------------------------------------------------------------------------------
-import type { PLAYER_STATE, OBSTACLE_STATE } from '@jerkie-man/shared';
-import { simulatePlayerMove } from '@jerkie-man/shared';
+import type { PLAYER_STATE, OBSTACLE_STATE, PlayerInventory, ItemInstance } from '@jerkie-man/shared';
+import { simulatePlayerMove, getItemType } from '@jerkie-man/shared';
 
 export class Player {
   public id: string;
@@ -2065,8 +2855,9 @@ export class Player {
   public status: 'ALIVE' | 'DEAD' | 'EXTRACTED';
   public lastInputSeq: number;
   public lastInputTick: number;
-  public lootCount: number; // Day3: 战利品计数
+  public lootCount: number; // Day3: 战利品计数（已废弃，保留兼容）
   public extractProgress: number = 0; // 游戏化增强: 撤离进度（毫秒，0-2000）
+  public inventory: PlayerInventory; // 新增: 背包系统
 
   // 修复: 移动速度已移至 shared/sim.ts，这里不再需要（保留注释用于文档）
   // SPEED = 200 (在 shared/sim.ts 中定义)
@@ -2076,7 +2867,7 @@ export class Player {
   private readonly FIRE_COOLDOWN_MS = 150; // 150ms冷却，约6.67发/秒
   private readonly EXTRACT_DURATION_MS = 2000; // 游戏化增强: 撤离需要持续2秒
 
-  constructor(id: string, x: number = 0, y: number = 0) {
+  constructor(id: string, x: number = 0, y: number = 0, bagCap: number = 8) {
     this.id = id;
     this.x = x;
     this.y = y;
@@ -2084,7 +2875,12 @@ export class Player {
     this.status = 'ALIVE';
     this.lastInputSeq = 0;
     this.lastInputTick = 0;
-    this.lootCount = 0; // Day3: 初始化为0
+    this.lootCount = 0; // Day3: 初始化为0（已废弃，保留兼容）
+    // 新增: 初始化背包
+    this.inventory = {
+      bagCap,
+      items: [],
+    };
   }
 
   // 处理输入，更新位置
@@ -2140,6 +2936,82 @@ export class Player {
     }
   }
 
+  /**
+   * 添加物品到背包（堆叠合并）
+   * P2-4: 修复 stackMax 拆分逻辑，确保每个堆叠不超过 stackMax
+   */
+  addItem(typeId: string, qty: number): { success: boolean; added: number } {
+    const itemType = getItemType(typeId);
+    let remaining = qty;
+    let totalAdded = 0;
+    
+    // 1. 先尝试合并到现有堆叠
+    for (const item of this.inventory.items) {
+      if (remaining <= 0) break;
+      if (item.typeId !== typeId) continue;
+      if (item.qty >= itemType.stackMax) continue;
+      
+      const spaceLeft = itemType.stackMax - item.qty;
+      const toAdd = Math.min(spaceLeft, remaining);
+      item.qty += toAdd;
+      remaining -= toAdd;
+      totalAdded += toAdd;
+    }
+    
+    // 2. 如果还有剩余，创建新堆叠（每个不超过 stackMax）
+    while (remaining > 0) {
+      if (this.inventory.items.length >= this.inventory.bagCap) {
+        // 背包满了，返回部分成功（如果有添加过）
+        return { success: totalAdded > 0, added: totalAdded };
+      }
+      
+      // 每个新堆叠最多 stackMax
+      const stackQty = Math.min(remaining, itemType.stackMax);
+      this.inventory.items.push({
+        iid: this.generateIid(),
+        typeId,
+        qty: stackQty,
+      });
+      remaining -= stackQty;
+      totalAdded += stackQty;
+    }
+    
+    return { success: true, added: totalAdded };
+  }
+
+  /**
+   * 从背包移除物品
+   */
+  removeItem(iid: string, qty: number): boolean {
+    const item = this.inventory.items.find(i => i.iid === iid);
+    if (!item || item.qty < qty) {
+      return false;
+    }
+    
+    item.qty -= qty;
+    if (item.qty <= 0) {
+      const index = this.inventory.items.indexOf(item);
+      this.inventory.items.splice(index, 1);
+    }
+    return true;
+  }
+
+  /**
+   * 清空背包（用于死亡掉落）
+   */
+  clearInventory(): ItemInstance[] {
+    const items = [...this.inventory.items];
+    this.inventory.items = [];
+    return items;
+  }
+
+  /**
+   * 生成物品实例 ID
+   */
+  private generateIid(): string {
+    return `i${Date.now()}_${Math.random().toString(36).substring(2, 11)}`;
+  }
+
   toState(): PLAYER_STATE {
     return {
       id: this.id,
@@ -2149,9 +3021,152 @@ export class Player {
       status: this.status,
       lastInputSeq: this.lastInputSeq,
       lastInputTick: this.lastInputTick,
-      lootCount: this.lootCount, // Day3: 包含战利品计数
+      lootCount: this.lootCount, // Day3: 包含战利品计数（已废弃，保留兼容）
       extractProgress: this.extractProgress, // 游戏化增强: 包含撤离进度
+      inventory: this.inventory, // 新增: 包含背包
     };
+  }
+}
+
+
+==========================================================================================
+FILE: server/src/profile.ts
+STATUS: OK
+------------------------------------------------------------------------------------------
+/**
+ * ProfileManager - 玩家档案管理器
+ * 管理玩家的 money、stash 和 bagCap
+ */
+import type { ItemInstance, PlayerProfile } from '@jerkie-man/shared';
+import { getItemType, ITEM_CATALOG } from '@jerkie-man/shared';
+
+/**
+ * 玩家档案管理器
+ * - 内存存储（MVP 阶段，未来可接入持久化）
+ * - 支持获取/更新 Profile
+ * - 支持从仓库卖出物品
+ */
+export class ProfileManager {
+  private profiles: Map<string, PlayerProfile> = new Map();
+  
+  private readonly DEFAULT_BAG_CAP = 8;
+  private readonly DEFAULT_MONEY = 0;
+
+  /**
+   * 获取玩家背包容量
+   */
+  getBagCap(playerId: string): number {
+    return this.getProfileData(playerId).bagCap;
+  }
+
+  /**
+   * 获取玩家 Profile（不存在则创建默认值）
+   */
+  getProfileData(playerId: string): PlayerProfile {
+    let profile = this.profiles.get(playerId);
+    if (!profile) {
+      profile = {
+        money: this.DEFAULT_MONEY,
+        stash: [],
+        bagCap: this.DEFAULT_BAG_CAP,
+      };
+      this.profiles.set(playerId, profile);
+    }
+    return profile;
+  }
+
+  /**
+   * 更新玩家 Profile
+   */
+  updateProfile(playerId: string, updates: Partial<PlayerProfile>): PlayerProfile {
+    const profile = this.getProfileData(playerId);
+    if (updates.money !== undefined) {
+      profile.money = updates.money;
+    }
+    if (updates.stash !== undefined) {
+      profile.stash = updates.stash;
+    }
+    if (updates.bagCap !== undefined) {
+      profile.bagCap = updates.bagCap;
+    }
+    return profile;
+  }
+
+  /**
+   * 添加物品到仓库（撤离时调用）
+   */
+  addToStash(playerId: string, items: ItemInstance[]): void {
+    const profile = this.getProfileData(playerId);
+    
+    for (const item of items) {
+      // 尝试堆叠到现有物品
+      const existing = profile.stash.find(
+        s => s.typeId === item.typeId
+      );
+      
+      if (existing) {
+        // 简单堆叠（MVP：不检查 stackMax，stash 无容量限制）
+        existing.qty += item.qty;
+      } else {
+        // 添加新物品（保持原 iid 或生成新的）
+        profile.stash.push({
+          iid: item.iid || this.generateIid(),
+          typeId: item.typeId,
+          qty: item.qty,
+        });
+      }
+    }
+  }
+
+  /**
+   * 从仓库卖出物品
+   * @returns { success: boolean; money?: number } - 成功时返回新的 money 值
+   */
+  sellFromStash(
+    playerId: string,
+    iid: string,
+    qty: number
+  ): { success: boolean; money?: number } {
+    const profile = this.getProfileData(playerId);
+    
+    // 查找物品
+    const itemIndex = profile.stash.findIndex(s => s.iid === iid);
+    if (itemIndex === -1) {
+      return { success: false };
+    }
+    
+    const item = profile.stash[itemIndex];
+    if (item.qty < qty) {
+      return { success: false };
+    }
+    
+    // 获取物品价值
+    let value = 1; // 默认值，防止崩溃
+    try {
+      const itemType = getItemType(item.typeId);
+      value = itemType.value ?? 1;
+    } catch {
+      // 未知物品类型，使用默认值
+    }
+    
+    // 扣减数量
+    item.qty -= qty;
+    if (item.qty <= 0) {
+      profile.stash.splice(itemIndex, 1);
+    }
+    
+    // 增加金钱
+    const earned = value * qty;
+    profile.money += earned;
+    
+    return { success: true, money: profile.money };
+  }
+
+  /**
+   * 生成物品实例 ID
+   */
+  private generateIid(): string {
+    return `i${Date.now()}_${Math.random().toString(36).substring(2, 11)}`;
   }
 }
 
@@ -2161,40 +3176,52 @@ export class Player {
 FILE: server/src/room.ts
 STATUS: OK
 ------------------------------------------------------------------------------------------
-import { Player } from './player.js';
-import type { PLAYER_STATE, BULLET_STATE, ITEM_STATE, C2S_INPUT, MAP_CONFIG, OBSTACLE_STATE } from '@jerkie-man/shared';
-import { loadMapConfig, loadItemTypes, circleVsAABB, createRng, rectIntersects, segmentIntersectsCircle } from '@jerkie-man/shared';
+﻿import { Player } from './player.js';
+import { ProfileManager } from './profile.js';
+import type { PLAYER_STATE, BULLET_STATE, ITEM_STATE, C2S_INPUT, MAP_CONFIG, OBSTACLE_STATE, WorldItem, LootBag } from '@jerkie-man/shared';
+import { loadMapConfig, loadItemTypes, circleVsAABB, createRng, rectIntersects, segmentIntersectsCircle, getItemType, getAllItemTypes, getItemTypesByRarity } from '@jerkie-man/shared';
 import { log } from './logger.js';
 
-// Step4: 内部子弹类型，包含spawnAt用于TTL检测（不改变协议）
+// Step4: �ڲ��ӵ����ͣ�����spawnAt����TTL���⣨���ı�Э�飩
 type Bullet = BULLET_STATE & { spawnAt: number };
 
 export class Room {
   public id: string;
   public players: Map<string, Player>;
-  public bullets: Bullet[]; // Step4: 使用内部类型，包含spawnAt
-  public items: ITEM_STATE[]; // Day1占位
-  public obstacles: OBSTACLE_STATE[]; // Day4-2: 障碍物列表
-  // Day4-1: Room 持有世界配置（seed + mapConfig），作为单一真相来源
+  public bullets: Bullet[]; // Step4: ʹ���ڲ����ͣ�����spawnAt
+  public items: ITEM_STATE[]; // Day1ռλ���������ݣ�
+  public obstacles: OBSTACLE_STATE[]; // Day4-2: �ϰ����б�
+  // ����: ��Ʒϵͳ
+  public worldItems: Map<string, WorldItem>; // ������Ʒ��wid -> WorldItem��
+  public lootBags: Map<string, LootBag>; // ��������bid -> LootBag��
+  public profileManager: ProfileManager; // ���ҵ�������
+  // Day4-1: Room �����������ã�seed + mapConfig������Ϊ��һ������Դ
   public readonly seed: number;
   public readonly mapConfig: MAP_CONFIG;
   public tick: number;
-  // 修复: 可复现 ID 生成（使用 rng 计数器而非 Date.now()）
-  private itemIdCounter = 0; // items ID 计数器
-  private bulletIdCounter = 0; // bullets ID 计数器
-  // 游戏化增强: 事件队列（ring buffer，最多保留 50 条）
+  // �޸�: �ɸ��� ID ���ɣ�ʹ�� rng ���������� Date.now()��
+  private itemIdCounter = 0; // items ID ������
+  private bulletIdCounter = 0; // bullets ID ������
+  private worldItemIdCounter = 0; // worldItems ID ������
+  private lootBagIdCounter = 0; // lootBags ID ������
+  // ��Ϸ����ǿ: �¼����У�ring buffer�����ౣ�� 50 ����
   private events: Array<{ tick: number; timestamp: number; message: string }> = [];
   private readonly MAX_EVENTS = 50;
+  private readonly PICKUP_RADIUS = 40; // ʰȡ�뾶�����أ�
 
   constructor(id: string, seed?: number) {
     this.id = id;
     this.players = new Map();
     this.bullets = [];
-    this.items = [];
-    this.obstacles = []; // Day4-2: 初始化障碍物列表
+    this.items = []; // ��������
+    this.obstacles = []; // Day4-2: ��ʼ���ϰ����б�
+    // ����: ��ʼ����Ʒϵͳ
+    this.worldItems = new Map();
+    this.lootBags = new Map();
+    this.profileManager = new ProfileManager();
     
-    // P1-1 修复: 支持 seed 可注入（优先级：参数 > 环境变量 > 随机）
-    // 用于调试/测试时稳定复现同一个世界
+    // P1-1 �޸�: ֧�� seed ��ע�루���ȼ������� > �������� > ������
+    // ���ڵ���/����ʱ�ȶ�����ͬһ������
     if (seed !== undefined) {
       this.seed = seed;
     } else if (process.env.SEED !== undefined) {
@@ -2204,27 +3231,30 @@ export class Room {
       }
       this.seed = envSeed;
     } else {
-      // Day4-1: 生成随机 seed（int，范围 0 到 2^31-1）
+      // Day4-1: �������� seed��int����Χ 0 �� 2^31-1��
       this.seed = Math.floor(Math.random() * 2**31);
     }
     
-    // P1-1 修复: 使用 this.seed 加载 mapConfig，确保 seed 与 mapConfig.seed 一致
+    // P1-1 �޸�: ʹ�� this.seed ���� mapConfig��ȷ�� seed �� mapConfig.seed һ��
     this.mapConfig = loadMapConfig(this.seed);
     
     this.tick = 0;
     
-    // Day4-2: 初始化时生成障碍物（基于 seed）
+    // Day4-2: ��ʼ��ʱ�����ϰ������ seed��
     this.generateObstacles();
     
-    // Day3: 初始化时生成物品
-    this.generateItems(30);
+    // P2-1: 停用旧 items 系统（只使用 worldItems）
+    // this.generateItems(30);
+    
+    // ����: ����������Ʒ��ʹ���µ���Ʒϵͳ��
+    this.generateWorldItems(30);
   }
   
-  // Day3: 生成物品（简单策略：随机分布，避免重叠）
+  // Day3: ������Ʒ���򵥲��ԣ������ֲ��������ص���
   private generateItems(count: number): void {
     const itemTypes = loadItemTypes();
-    const minDistance = 32; // 物品之间最小距离
-    // 使用 seed + 常数偏移作为 items 的 RNG seed，避免和 obstacles 完全相关
+    const minDistance = 32; // ��Ʒ֮����С����
+    // ʹ�� seed + ����ƫ����Ϊ items �� RNG seed�������� obstacles ��ȫ����
     const itemsRng = createRng(this.seed + 1000000);
     
     for (let i = 0; i < count; i++) {
@@ -2232,18 +3262,18 @@ export class Room {
       let x: number, y: number;
       let valid = false;
       
-      // 尝试生成位置，避免重叠
+      // ��������λ�ã������ص�
       while (!valid && attempts < 50) {
         x = itemsRng() * this.mapConfig.width;
         y = itemsRng() * this.mapConfig.height;
         
-        // 修复: 检查是否在撤离区内
+        // �޸�: �����Ƿ��ڳ�������
         if (this.isInExtractZone(x, y)) {
           attempts++;
           continue;
         }
         
-        // 修复: 检查是否与障碍物碰撞（物品视作半径8的圆）
+        // �޸�: �����Ƿ����ϰ�����ײ����Ʒ�����뾶8��Բ��
         const ITEM_RADIUS = 8;
         let collidedWithObstacle = false;
         for (const obstacle of this.obstacles) {
@@ -2257,7 +3287,7 @@ export class Room {
           continue;
         }
         
-        // 检查是否与现有物品太近
+        // �����Ƿ���������Ʒ̫��
         valid = true;
         for (const existing of this.items) {
           const dx = x - existing.x;
@@ -2273,7 +3303,7 @@ export class Room {
       
       if (valid) {
         const itemType = itemTypes[Math.floor(itemsRng() * itemTypes.length)];
-        // 修复: 使用 rng + 计数器生成可复现的 ID（而非 Date.now()）
+        // �޸�: ʹ�� rng + ���������ɿɸ��ֵ� ID������ Date.now()��
         const itemId = `item_${this.itemIdCounter++}_${Math.floor(itemsRng() * 1000000).toString(36)}`;
         this.items.push({
           id: itemId,
@@ -2291,31 +3321,117 @@ export class Room {
       tick: this.tick,
     });
   }
+
+  // ����: ����������Ʒ��ʹ���µ���Ʒϵͳ��
+  private generateWorldItems(count: number): void {
+    const allItemTypes = getAllItemTypes();
+    const minDistance = 32;
+    // ʹ�� seed + ����ƫ����Ϊ worldItems �� RNG seed
+    const itemsRng = createRng(this.seed + 2000000);
+    
+    // ����ϡ�ж�Ȩ��������Ʒ
+    const commonItems = getItemTypesByRarity('COMMON');
+    const rareItems = getItemTypesByRarity('RARE');
+    const questItems = getItemTypesByRarity('QUEST');
+    
+    for (let i = 0; i < count; i++) {
+      let attempts = 0;
+      let x: number, y: number;
+      let valid = false;
+      
+      while (!valid && attempts < 50) {
+        x = itemsRng() * this.mapConfig.width;
+        y = itemsRng() * this.mapConfig.height;
+        
+        if (this.isInExtractZone(x, y)) {
+          attempts++;
+          continue;
+        }
+        
+        const ITEM_RADIUS = 8;
+        let collidedWithObstacle = false;
+        for (const obstacle of this.obstacles) {
+          if (circleVsAABB(x, y, ITEM_RADIUS, obstacle)) {
+            collidedWithObstacle = true;
+            break;
+          }
+        }
+        if (collidedWithObstacle) {
+          attempts++;
+          continue;
+        }
+        
+        // ���������� worldItems �ľ���
+        valid = true;
+        for (const existing of this.worldItems.values()) {
+          const dx = x - existing.x;
+          const dy = y - existing.y;
+          const dist = Math.sqrt(dx * dx + dy * dy);
+          if (dist < minDistance) {
+            valid = false;
+            break;
+          }
+        }
+        attempts++;
+      }
+      
+      if (valid) {
+        // ����Ȩ��ѡ����Ʒ���ͣ�70% COMMON, 25% RARE, 5% QUEST��
+        const roll = itemsRng();
+        let itemType;
+        if (roll < 0.7 && commonItems.length > 0) {
+          itemType = commonItems[Math.floor(itemsRng() * commonItems.length)];
+        } else if (roll < 0.95 && rareItems.length > 0) {
+          itemType = rareItems[Math.floor(itemsRng() * rareItems.length)];
+        } else if (questItems.length > 0) {
+          itemType = questItems[Math.floor(itemsRng() * questItems.length)];
+        } else {
+          itemType = allItemTypes[Math.floor(itemsRng() * allItemTypes.length)];
+        }
+        
+        const wid = `wid_${this.seed}_${this.worldItemIdCounter++}_${itemsRng().toString(36).substring(2, 11)}`;
+        const qty = Math.floor(itemsRng() * 3) + 1; // 1-3 ��
+        
+        this.worldItems.set(wid, {
+          wid,
+          typeId: itemType.id,
+          qty,
+          x: x!,
+          y: y!,
+        });
+      }
+    }
+    
+    log('WORLD_ITEMS_GENERATED', {
+      count: this.worldItems.size,
+      tick: this.tick,
+    });
+  }
   
-  // Day4-2: 生成障碍物（基于 seed，确保可复现）
+  // Day4-2: �����ϰ������ seed��ȷ���ɸ��֣�
   private generateObstacles(): void {
-    // 使用 shared 的 createRng，确保可复现
+    // ʹ�� shared �� createRng��ȷ���ɸ���
     const rng = createRng(this.seed);
     
-    const count = 10 + Math.floor(rng() * 11); // 10-20 个障碍物
+    const count = 10 + Math.floor(rng() * 11); // 10-20 ���ϰ���
     const minSize = 40;
     const maxSize = 120;
-    const minDistance = 60; // 障碍物之间最小距离
-    const playerSpawnRadius = 100; // 玩家出生点周围不生成障碍物
+    const minDistance = 60; // �ϰ���֮����С����
+    const playerSpawnRadius = 100; // ���ҳ�������Χ�������ϰ���
     
     for (let i = 0; i < count; i++) {
       let attempts = 0;
       let x: number, y: number, w: number, h: number;
       let valid = false;
       
-      // 尝试生成位置和大小，避免重叠和与玩家出生点重叠
+      // ��������λ�úʹ�С�������ص��������ҳ������ص�
       while (!valid && attempts < 100) {
         w = minSize + rng() * (maxSize - minSize);
         h = minSize + rng() * (maxSize - minSize);
         x = rng() * (this.mapConfig.width - w);
         y = rng() * (this.mapConfig.height - h);
         
-        // 检查是否与现有障碍物太近
+        // �����Ƿ��������ϰ���̫��
         valid = true;
         for (const existing of this.obstacles) {
           const dx = (x + w / 2) - (existing.x + existing.w / 2);
@@ -2327,7 +3443,7 @@ export class Room {
           }
         }
         
-        // 检查是否与玩家出生点（地图中心）太近
+        // �����Ƿ������ҳ����㣨��ͼ���ģ�̫��
         if (valid) {
           const centerX = this.mapConfig.width / 2;
           const centerY = this.mapConfig.height / 2;
@@ -2339,10 +3455,10 @@ export class Room {
           }
         }
         
-        // 修复: 检查是否与撤离区相交（含 padding）
+        // �޸�: �����Ƿ��볷�����ཻ���� padding��
         if (valid) {
           const zone = this.mapConfig.extractZone;
-          const padding = 30; // 撤离区缓冲边距
+          const padding = 30; // �����������߾�
           const paddedZone = {
             x: zone.x - padding,
             y: zone.y - padding,
@@ -2376,13 +3492,13 @@ export class Room {
     });
   }
   
-  // Day3: 检查玩家是否在撤离区内（矩形碰撞检测）
+  // Day3: ���������Ƿ��ڳ������ڣ�������ײ���⣩
   private isInExtractZone(x: number, y: number): boolean {
     const zone = this.mapConfig.extractZone;
     return x >= zone.x && x <= zone.x + zone.w && y >= zone.y && y <= zone.y + zone.h;
   }
 
-  // 游戏化增强: 推送事件到队列
+  // ��Ϸ����ǿ: �����¼�������
   private pushEvent(message: string): void {
     const event = {
       tick: this.tick,
@@ -2390,39 +3506,39 @@ export class Room {
       message,
     };
     this.events.push(event);
-    // Ring buffer: 超过最大数量时移除最旧的
+    // Ring buffer: ������������ʱ�Ƴ����ɵ�
     if (this.events.length > this.MAX_EVENTS) {
       this.events.shift();
     }
   }
 
-  // 游戏化增强: 获取并清空事件队列（供 server 广播使用）
+  // ��Ϸ����ǿ: ��ȡ�������¼����У��� server �㲥ʹ�ã�
   drainEvents(): Array<{ tick: number; timestamp: number; message: string }> {
     const events = [...this.events];
     this.events = [];
     return events;
   }
 
-  // P0-2 修复: 寻找安全的出生点（避障 + 避撤离区 + 避边界 + 避其他玩家）
+  // P0-2 �޸�: Ѱ�Ұ�ȫ�ĳ����㣨���� + �ܳ����� + �ܱ߽� + ���������ң�
   private findSpawnPoint(): { x: number; y: number } {
-    const PLAYER_RADIUS = 10; // 与 Player.processInput 一致
-    const MIN_SPAWN_PLAYER_DISTANCE = 120; // 修复: 与其他玩家的最小距离
+    const PLAYER_RADIUS = 10; // �� Player.processInput һ��
+    const MIN_SPAWN_PLAYER_DISTANCE = 120; // �޸�: ���������ҵ���С����
     const MAX_ATTEMPTS = 80;
     
-    // 使用 seed + 玩家数量偏移初始化 RNG（保证可复现，每个玩家用不同的偏移）
+    // ʹ�� seed + ��������ƫ�Ƴ�ʼ�� RNG����֤�ɸ��֣�ÿ�������ò�ͬ��ƫ�ƣ�
     const spawnRng = createRng(this.seed + this.players.size * 1000);
     
     for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
-      // 随机点，但距离边界至少 PLAYER_RADIUS
+      // �����㣬�������߽����� PLAYER_RADIUS
       const x = PLAYER_RADIUS + spawnRng() * (this.mapConfig.width - 2 * PLAYER_RADIUS);
       const y = PLAYER_RADIUS + spawnRng() * (this.mapConfig.height - 2 * PLAYER_RADIUS);
       
-      // 检查是否在撤离区内
+      // �����Ƿ��ڳ�������
       if (this.isInExtractZone(x, y)) {
         continue;
       }
       
-      // 检查是否与障碍物碰撞
+      // �����Ƿ����ϰ�����ײ
       let collided = false;
       for (const obstacle of this.obstacles) {
         if (circleVsAABB(x, y, PLAYER_RADIUS, obstacle)) {
@@ -2434,10 +3550,10 @@ export class Room {
         continue;
       }
       
-      // 修复: 检查与其他玩家的距离
+      // �޸�: �������������ҵľ���
       let tooCloseToPlayer = false;
       for (const [playerId, player] of this.players.entries()) {
-        // 只检查 ALIVE 玩家
+        // ֻ���� ALIVE ����
         if (player.status !== 'ALIVE') {
           continue;
         }
@@ -2453,32 +3569,32 @@ export class Room {
         continue;
       }
       
-      // 所有检查通过，返回安全出生点
+      // ���м���ͨ�������ذ�ȫ������
       return { x, y };
     }
     
-    // Fallback: 地图中心附近的安全点
+    // Fallback: ��ͼ���ĸ����İ�ȫ��
     const centerX = this.mapConfig.width / 2;
     const centerY = this.mapConfig.height / 2;
-    const fallbackRadius = 200; // 在中心附近 200px 范围内搜索
+    const fallbackRadius = 200; // �����ĸ��� 200px ��Χ������
     
     for (let offset = 0; offset < fallbackRadius; offset += 20) {
       for (let angle = 0; angle < Math.PI * 2; angle += Math.PI / 4) {
         const x = centerX + Math.cos(angle) * offset;
         const y = centerY + Math.sin(angle) * offset;
         
-        // 边界检查
+        // �߽�����
         if (x < PLAYER_RADIUS || x > this.mapConfig.width - PLAYER_RADIUS ||
             y < PLAYER_RADIUS || y > this.mapConfig.height - PLAYER_RADIUS) {
           continue;
         }
         
-        // 撤离区检查
+        // ����������
         if (this.isInExtractZone(x, y)) {
           continue;
         }
         
-        // 障碍物检查
+        // �ϰ�������
         let collided = false;
         for (const obstacle of this.obstacles) {
           if (circleVsAABB(x, y, PLAYER_RADIUS, obstacle)) {
@@ -2490,7 +3606,7 @@ export class Room {
           continue;
         }
         
-        // 修复: 检查与其他玩家的距离（fallback 搜索也需避开玩家）
+        // �޸�: �������������ҵľ��루fallback ����Ҳ���ܿ����ң�
         let tooCloseToPlayer = false;
         for (const [playerId, player] of this.players.entries()) {
           if (player.status !== 'ALIVE') {
@@ -2508,12 +3624,12 @@ export class Room {
           continue;
         }
         
-        // 所有检查通过，返回安全出生点
+        // ���м���ͨ�������ذ�ȫ������
         return { x, y };
       }
     }
     
-    // 最后的 fallback：地图中心（可能不安全，但至少能出生）
+    // ������ fallback����ͼ���ģ����ܲ���ȫ���������ܳ�����
     log('SPAWN_FALLBACK', {
       room: this.id,
       reason: 'no safe spawn found',
@@ -2523,9 +3639,11 @@ export class Room {
   }
 
   addPlayer(playerId: string): Player {
-    // P0-2 修复: 使用 findSpawnPoint 而不是随机撒点
+    // P0-2 �޸�: ʹ�� findSpawnPoint ��������������
     const spawn = this.findSpawnPoint();
-    const player = new Player(playerId, spawn.x, spawn.y);
+    // ����: �� profile ��ȡ bagCap
+    const bagCap = this.profileManager.getBagCap(playerId);
+    const player = new Player(playerId, spawn.x, spawn.y, bagCap);
     this.players.set(playerId, player);
     log('PLAYER_JOIN', {
       room: this.id,
@@ -2551,16 +3669,16 @@ export class Room {
     return this.players.get(playerId);
   }
 
-  // 节流日志：每200ms打印一次
+  // ������־��ÿ200ms��ӡһ��
   private lastProcessLog = new Map<string, number>();
 
-  // 处理输入（由tick循环调用）
-  // Day2: 增加开火逻辑
+  // �������루��tickѭ�����ã�
+  // Day2: ���ӿ����߼�
   processInput(playerId: string, input: C2S_INPUT): void {
     const player = this.players.get(playerId);
     if (!player) return;
 
-    // 只使用seq去重，不检查tick（简化策略）
+    // ֻʹ��seqȥ�أ�������tick���򻯲��ԣ�
     if (input.seq <= player.lastInputSeq) {
       return;
     }
@@ -2571,62 +3689,30 @@ export class Room {
     player.lastInputSeq = input.seq;
     player.lastInputTick = input.tick;
 
-    // 更新玩家位置（20Hz tick = 50ms = 0.05s）
-    // P0-1 修复: 传递 obstacles 参数，使碰撞检测生效
+    // ��������λ�ã�20Hz tick = 50ms = 0.05s��
+    // P0-1 �޸�: ���� obstacles ������ʹ��ײ������Ч
     const deltaTime = 0.05;
     player.processInput(input.keys, deltaTime, this.mapConfig.width, this.mapConfig.height, this.obstacles);
 
-    // Day3: 处理拾取（interact）
-    // Day3 修复C: 并发拾取保护（使用 findIndex + splice 原子操作）
-    if (input.interact && player.status === 'ALIVE') {
-      const pickupRadius = 28;
-      let nearestItem: ITEM_STATE | null = null;
-      let nearestItemIndex = -1;
-      let nearestDist = pickupRadius + 1;
-      
-      // 找距离玩家最近且距离 <= pickupRadius 的物品
-      for (let i = 0; i < this.items.length; i++) {
-        const item = this.items[i];
-        const dx = item.x - player.x;
-        const dy = item.y - player.y;
-        const dist = Math.sqrt(dx * dx + dy * dy);
-        
-        if (dist <= pickupRadius && dist < nearestDist) {
-          nearestItem = item;
-          nearestItemIndex = i;
-          nearestDist = dist;
-        }
-      }
-      
-      // Day3 修复C: 如果找到物品，使用原子操作移除（防止并发拾取）
-      if (nearestItem && nearestItemIndex >= 0) {
-        // 原子操作：先移除，再增加 lootCount（即使并发，也只有一个玩家能成功移除）
-        this.items.splice(nearestItemIndex, 1);
-        player.lootCount += 1; // MVP: 每个物品 +1，后续可按 rarity 加不同分
-        
-        log('PICKUP', {
-          room: this.id,
-          player: playerId,
-          item: nearestItem.id,
-          type: nearestItem.type,
-          pos: `(${player.x.toFixed(1)},${player.y.toFixed(1)})`,
-          loot: player.lootCount,
-          tick: this.tick,
-        });
-        // 游戏化增强: 推送拾取事件
-        this.pushEvent(`${playerId} picked ${nearestItem.type} (+1 loot)`);
-      }
-    }
+    // P0-1 �޸�: �Ƴ���ʰȡ�߼���interact ���ٴ���ʰȡ��
+    // ʰȡ����ֻͨ�� C2S_PICKUP_WORLD_ITEM / C2S_PICKUP_LOOT_BAG ��Ϣ����
+    // ���� legacy items ʰȡ�߼���ע�ͣ��Ա�δ����Ҫʱ�ο���
+    // if (input.interact && player.status === 'ALIVE') {
+    //   // ���߼����� this.items ʰȡ���ѷ�����
+    // }
     
-    // 游戏化增强: 处理撤离读条（extractHeld）
+    // ��Ϸ����ǿ: ��������������extractHeld��
     if (input.extractHeld && player.status === 'ALIVE') {
       if (this.isInExtractZone(player.x, player.y)) {
-        // 在撤离区内且按住F：增加进度
-        player.extractProgress += 50; // 每 tick 50ms（20Hz = 50ms/tick）
+        // �ڳ��������Ұ�סF�����ӽ���
+        player.extractProgress += 50; // ÿ tick 50ms��20Hz = 50ms/tick��
         if (player.extractProgress >= 2000) {
-          // 读条完成，撤离成功
+          // �������ɣ������ɹ�
           player.status = 'EXTRACTED';
           player.extractProgress = 0;
+          
+          // ����: �����������㣨inventory -> stash��
+          this.handlePlayerExtract(playerId);
           
           log('EXTRACT', {
             room: this.id,
@@ -2635,24 +3721,27 @@ export class Room {
             pos: `(${player.x.toFixed(1)},${player.y.toFixed(1)})`,
             tick: this.tick,
           });
-          // 游戏化增强: 推送撤离事件
+          // ��Ϸ����ǿ: ���ͳ����¼�
           this.pushEvent(`${playerId} extracted with loot=${player.lootCount}`);
         }
       } else {
-        // 不在撤离区内：进度清零
+        // ���ڳ������ڣ���������
         player.extractProgress = 0;
       }
     } else {
-      // 未按住F或已死亡：进度清零
+      // δ��סF������������������
       player.extractProgress = 0;
     }
     
-    // Day3: 处理撤离（extract 脉冲事件，已废弃，保留兼容）
+    // Day3: �������루extract �����¼����ѷ������������ݣ�
     if (input.extract && player.status === 'ALIVE') {
       if (this.isInExtractZone(player.x, player.y)) {
-        // 兼容旧客户端：直接撤离（不推荐）
+        // ���ݾɿͻ��ˣ�ֱ�ӳ��루���Ƽ���
         player.status = 'EXTRACTED';
         player.extractProgress = 0;
+        
+        // ����: �����������㣨inventory -> stash��
+        this.handlePlayerExtract(playerId);
         
         log('EXTRACT', {
           room: this.id,
@@ -2661,24 +3750,24 @@ export class Room {
           pos: `(${player.x.toFixed(1)},${player.y.toFixed(1)})`,
           tick: this.tick,
         });
-        // 游戏化增强: 推送撤离事件
+        // ��Ϸ����ǿ: ���ͳ����¼�
         this.pushEvent(`${playerId} extracted with loot=${player.lootCount}`);
       }
     }
     
-    // Day2: 处理开火（Day3: EXTRACTED 玩家不能开火）
+    // Day2: ����������Day3: EXTRACTED ���Ҳ��ܿ�����
     const now = Date.now();
     if (input.shoot && player.canFire(now) && player.status === 'ALIVE') {
-      // 生成子弹
+      // �����ӵ�
       const bulletSpeed = 800; // 800px/s
       const vx = Math.cos(input.aim) * bulletSpeed;
       const vy = Math.sin(input.aim) * bulletSpeed;
       
-      // 修复: 使用 rng + 计数器生成可复现的 ID（而非 Date.now() + Math.random()）
-      // 使用 seed + tick 作为子弹 RNG 的偏移，确保同 tick 下可复现
+      // �޸�: ʹ�� rng + ���������ɿɸ��ֵ� ID������ Date.now() + Math.random()��
+      // ʹ�� seed + tick ��Ϊ�ӵ� RNG ��ƫ�ƣ�ȷ��ͬ tick �¿ɸ���
       const bulletRng = createRng(this.seed + this.tick + this.bulletIdCounter);
       const bulletId = `b${this.bulletIdCounter++}_${Math.floor(bulletRng() * 1000000).toString(36)}`;
-      // Step4: 创建内部Bullet类型，包含spawnAt用于TTL检测
+      // Step4: �����ڲ�Bullet���ͣ�����spawnAt����TTL����
       this.bullets.push({
         id: bulletId,
         x: player.x,
@@ -2686,7 +3775,7 @@ export class Room {
         vx,
         vy,
         ownerId: playerId,
-        spawnAt: now, // Step4: 记录生成时间，用于TTL检测
+        spawnAt: now, // Step4: ��¼����ʱ�䣬����TTL����
       });
       
       player.recordFire(now);
@@ -2701,7 +3790,7 @@ export class Room {
       });
     }
 
-    // 节流日志：每200ms打印一次
+    // ������־��ÿ200ms��ӡһ��
     const lastLog = this.lastProcessLog.get(playerId) || 0;
     if (now - lastLog >= 200) {
       log('PROCESS_INPUT', {
@@ -2715,26 +3804,26 @@ export class Room {
     }
   }
 
-  // Day2: 更新子弹位置并检测命中
-  // Step4: 性能优化 - 碰撞检测用dist^2，bulletsToRemove用Set
+  // Day2: �����ӵ�λ�ò���������
+  // Step4: �����Ż� - ��ײ������dist^2��bulletsToRemove��Set
   updateBullets(deltaTime: number): void {
     const now = Date.now();
-    const bulletsToRemove = new Set<string>(); // Step4: 用Set避免O(n^2)
+    const bulletsToRemove = new Set<string>(); // Step4: ��Set����O(n^2)
     
     for (const bullet of this.bullets) {
-      // Step4: 子弹TTL检测（防止极端情况下子弹无限存在）
-      if (now - bullet.spawnAt > 2000) { // 2秒TTL
+      // Step4: �ӵ�TTL���⣨��ֹ�����������ӵ����޴��ڣ�
+      if (now - bullet.spawnAt > 2000) { // 2��TTL
         bulletsToRemove.add(bullet.id);
         continue;
       }
       
-      // 修复: 子弹与障碍物碰撞检测（使用简化步进方法）
+      // �޸�: �ӵ����ϰ�����ײ���⣨ʹ�ü򻯲���������
       const oldX = bullet.x;
       const oldY = bullet.y;
       const newX = bullet.x + bullet.vx * deltaTime;
       const newY = bullet.y + bullet.vy * deltaTime;
       
-      // 将移动拆成 4 子步，每步检测障碍物碰撞
+      // ���ƶ����� 4 �Ӳ���ÿ�������ϰ�����ײ
       const steps = 4;
       let hitObstacle = false;
       for (let step = 1; step <= steps; step++) {
@@ -2742,9 +3831,9 @@ export class Room {
         const stepX = oldX + (newX - oldX) * t;
         const stepY = oldY + (newY - oldY) * t;
         
-        // 检查是否与障碍物碰撞（子弹视作点）
+        // �����Ƿ����ϰ�����ײ���ӵ������㣩
         for (const obstacle of this.obstacles) {
-          // 点是否在矩形内（AABB 包含检测）
+          // ���Ƿ��ھ����ڣ�AABB �������⣩
           if (stepX >= obstacle.x && stepX <= obstacle.x + obstacle.w &&
               stepY >= obstacle.y && stepY <= obstacle.y + obstacle.h) {
             hitObstacle = true;
@@ -2757,38 +3846,43 @@ export class Room {
       }
       
       if (hitObstacle) {
-        // 命中障碍物，删除子弹
+        // �����ϰ��ɾ���ӵ�
         bulletsToRemove.add(bullet.id);
         continue;
       }
       
-      // 移动子弹
+      // �ƶ��ӵ�
       bullet.x = newX;
       bullet.y = newY;
       
-      // 检查出界
+      // ��������
       if (bullet.x < 0 || bullet.x > this.mapConfig.width || 
           bullet.y < 0 || bullet.y > this.mapConfig.height) {
         bulletsToRemove.add(bullet.id);
         continue;
       }
       
-      // 修复: 使用连续碰撞检测（CCD）检查命中玩家
-      // 检测 oldPos -> newPos 的线段是否与玩家圆相交，避免高速子弹穿人
+      // �޸�: ʹ��������ײ���⣨CCD��������������
+      // ���� oldPos -> newPos ���߶��Ƿ�������Բ�ཻ�����������ӵ�����
       const PLAYER_HIT_RADIUS = 16;
       for (const [playerId, player] of this.players.entries()) {
-        // 不命中自己，不命中已死亡玩家
+        // �������Լ�������������������
         if (playerId === bullet.ownerId || player.status !== 'ALIVE') {
           continue;
         }
         
-        // 使用线段 vs 圆的连续碰撞检测
+        // ʹ���߶� vs Բ��������ײ����
         if (segmentIntersectsCircle(oldX, oldY, bullet.x, bullet.y, player.x, player.y, PLAYER_HIT_RADIUS)) {
-          // 命中！
+          // ���У�
           const oldHp = player.hp;
           const wasAlive = player.status === 'ALIVE';
           player.takeDamage(10);
           const isDead = player.hp <= 0;
+          
+          // ����: ��������ʱ���ɵ�����
+          if (isDead) {
+            this.handlePlayerDeath(player.id);
+          }
           
           log('HIT', {
             room: this.id,
@@ -2800,10 +3894,10 @@ export class Room {
             hp: `${oldHp}->${player.hp}`,
           });
           
-          // 游戏化增强: 推送命中事件
+          // ��Ϸ����ǿ: ���������¼�
           this.pushEvent(`${bullet.ownerId} hit ${playerId} (-10)`);
           
-          // 如果玩家死亡，记录日志
+          // ����������������¼��־
           if (wasAlive && isDead) {
             log('PLAYER_DEAD', {
               room: this.id,
@@ -2811,48 +3905,289 @@ export class Room {
               tick: this.tick,
               killer: bullet.ownerId,
             });
-            // 游戏化增强: 推送击杀事件
+            // ��Ϸ����ǿ: ���ͻ�ɱ�¼�
             this.pushEvent(`${playerId} killed by ${bullet.ownerId}`);
           }
           
-          bulletsToRemove.add(bullet.id); // Step4: 用Set.add
-          break; // 一颗子弹只能命中一个目标
+          bulletsToRemove.add(bullet.id); // Step4: ��Set.add
+          break; // һ���ӵ�ֻ������һ��Ŀ��
         }
       }
     }
     
-    // Step4: 移除出界或命中的子弹（用Set.has，O(1)查找）
+    // Step4: �Ƴ����������е��ӵ�����Set.has��O(1)���ң�
     this.bullets = this.bullets.filter(b => !bulletsToRemove.has(b.id));
   }
 
-  // 获取当前状态快照
-  // Step4: 输出时只返回BULLET_STATE字段（不包含spawnAt），保证协议兼容
-  // 修复: obstacles 已移至 WORLD_INIT，不再在 snapshot 中发送
+  // ��ȡ��ǰ״̬����
+  // Step4: ����ʱֻ����BULLET_STATE�ֶΣ�������spawnAt������֤Э������
+  // �޸�: obstacles ������ WORLD_INIT�������� snapshot �з���
   getSnapshot(): {
     players: PLAYER_STATE[];
     bullets: BULLET_STATE[];
     items: ITEM_STATE[];
+    worldItems: WorldItem[];
+    lootBags: LootBag[];
   } {
     return {
       players: Array.from(this.players.values()).map((p) => p.toState()),
-      // Step4: 映射内部Bullet类型到BULLET_STATE（去掉spawnAt字段）
+      // Step4: ӳ���ڲ�Bullet���͵�BULLET_STATE��ȥ��spawnAt�ֶΣ�
       bullets: this.bullets.map(({ spawnAt, ...b }) => b),
-      items: this.items,
-      // 修复: obstacles 已移至 S2C_WORLD_INIT，不再在 snapshot 中发送（减少带宽）
+      items: [], // P2-1: 旧 items 系统已停用，返回空数组
+      worldItems: this.getWorldItems(), // ����: ������Ʒ
+      lootBags: this.getLootBags(), // ����: ������
+      // �޸�: obstacles ������ S2C_WORLD_INIT�������� snapshot �з��ͣ����ٴ�����
     };
   }
   
-  // 修复: 获取静态障碍物列表（用于 WORLD_INIT）
+  // �޸�: ��ȡ��̬�ϰ����б������� WORLD_INIT��
   getObstacles(): OBSTACLE_STATE[] {
     return [...this.obstacles];
   }
   
-  // 修复: 获取当前物品列表（用于 WORLD_INIT）
+  // P2-1: 旧 items 系统已停用，返回空数组（保持协议兼容）
   getItems(): ITEM_STATE[] {
-    return [...this.items];
+    return []; // 返回空数组，不再使用旧 items
+  }
+
+  // ����: ʰȡ������Ʒ
+  tryPickupWorldItem(playerId: string, player: Player): boolean {
+    let nearestWorldItem: WorldItem | null = null;
+    let nearestWid: string | null = null;
+    let nearestDist = this.PICKUP_RADIUS + 1;
+    
+    for (const [wid, worldItem] of this.worldItems.entries()) {
+      const dx = worldItem.x - player.x;
+      const dy = worldItem.y - player.y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      
+      if (dist < nearestDist) {
+        nearestWorldItem = worldItem;
+        nearestWid = wid;
+        nearestDist = dist;
+      }
+    }
+    
+    if (nearestWorldItem && nearestWid) {
+      const result = player.addItem(nearestWorldItem.typeId, nearestWorldItem.qty);
+      if (result.success) {
+        this.worldItems.delete(nearestWid);
+        const itemType = getItemType(nearestWorldItem.typeId);
+        this.pushEvent(`Player ${playerId} picked up ${itemType.name} x${result.added}`);
+        log('PICKUP_WORLD_ITEM', {
+          room: this.id,
+          player: playerId,
+          wid: nearestWid,
+          typeId: nearestWorldItem.typeId,
+          qty: result.added,
+          tick: this.tick,
+        });
+        return true;
+      }
+    }
+    return false;
+  }
+
+  // ����: ʰȡ������
+  tryPickupLootBag(playerId: string, player: Player): boolean {
+    let nearestBag: LootBag | null = null;
+    let nearestBid: string | null = null;
+    let nearestDist = this.PICKUP_RADIUS + 1;
+    
+    for (const [bid, bag] of this.lootBags.entries()) {
+      if (bag.items.length === 0) continue;
+      
+      const dx = bag.x - player.x;
+      const dy = bag.y - player.y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      
+      if (dist < nearestDist) {
+        nearestBag = bag;
+        nearestBid = bid;
+        nearestDist = dist;
+      }
+    }
+    
+    if (nearestBag && nearestBid) {
+      const remainingItems: typeof nearestBag.items = [];
+      let pickedAny = false;
+      
+      for (const item of nearestBag.items) {
+        const result = player.addItem(item.typeId, item.qty);
+        if (result.success && result.added === item.qty) {
+          pickedAny = true;
+        } else if (result.success && result.added > 0) {
+          remainingItems.push({
+            iid: item.iid,
+            typeId: item.typeId,
+            qty: item.qty - result.added,
+          });
+          pickedAny = true;
+        } else {
+          remainingItems.push(item);
+        }
+      }
+      
+      if (pickedAny) {
+        if (remainingItems.length === 0) {
+          this.lootBags.delete(nearestBid);
+        } else {
+          nearestBag.items = remainingItems;
+        }
+        
+        this.pushEvent(`Player ${playerId} picked up loot bag`);
+        log('PICKUP_LOOT_BAG', {
+          room: this.id,
+          player: playerId,
+          bid: nearestBid,
+          tick: this.tick,
+        });
+        return true;
+      }
+    }
+    return false;
+  }
+
+  // ����: �����������������ɵ�������
+  handlePlayerDeath(playerId: string): void {
+    const player = this.players.get(playerId);
+    if (!player || player.status !== 'DEAD') return;
+    
+    const droppedItems = player.clearInventory();
+    if (droppedItems.length > 0) {
+      const bid = `bag_${this.seed}_${this.lootBagIdCounter++}_${Date.now().toString(36)}`;
+      this.lootBags.set(bid, {
+        bid,
+        x: player.x,
+        y: player.y,
+        items: droppedItems,
+      });
+      
+      this.pushEvent(`Player ${playerId} died and dropped loot`);
+      log('LOOT_BAG_CREATED', {
+        room: this.id,
+        player: playerId,
+        bid,
+        itemCount: droppedItems.length,
+        tick: this.tick,
+      });
+    }
+  }
+
+  // ����: �������ҳ��루inventory -> stash��
+  // �����Ƿ��ɹ����������ڴ��� Profile ���ͣ�
+  handlePlayerExtract(playerId: string): boolean {
+    const player = this.players.get(playerId);
+    if (!player || player.status !== 'EXTRACTED') return false;
+    
+    const items = [...player.inventory.items];
+    if (items.length > 0) {
+      this.profileManager.addToStash(playerId, items);
+      player.clearInventory();
+      
+      this.pushEvent(`Player ${playerId} extracted with ${items.length} items`);
+      log('PLAYER_EXTRACT', {
+        room: this.id,
+        player: playerId,
+        itemCount: items.length,
+        tick: this.tick,
+      });
+      return true; // P1-1: ���� true ��ʾ��Ҫ���� Profile
+    }
+    return false;
+  }
+
+  // ����: ����ʰȡ������Ʒ�������ӿͻ�����Ϣ��
+  handlePickupWorldItem(playerId: string, wid: string): { success: boolean; message?: string } {
+    const player = this.players.get(playerId);
+    if (!player || player.status !== 'ALIVE') {
+      return { success: false, message: 'Player not alive' };
+    }
+    
+    const worldItem = this.worldItems.get(wid);
+    if (!worldItem) {
+      return { success: false, message: 'World item not found' };
+    }
+    
+    const dx = worldItem.x - player.x;
+    const dy = worldItem.y - player.y;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    if (dist > this.PICKUP_RADIUS) {
+      return { success: false, message: 'Too far away' };
+    }
+    
+    const result = player.addItem(worldItem.typeId, worldItem.qty);
+    if (result.success) {
+      this.worldItems.delete(wid);
+      const itemType = getItemType(worldItem.typeId);
+      this.pushEvent(`Player ${playerId} picked up ${itemType.name} x${result.added}`);
+      return { success: true };
+    } else {
+      return { success: false, message: 'Inventory full' };
+    }
+  }
+
+  // ����: ����ʰȡ�������������ӿͻ�����Ϣ��
+  handlePickupLootBag(playerId: string, bid: string): { success: boolean; message?: string } {
+    const player = this.players.get(playerId);
+    if (!player || player.status !== 'ALIVE') {
+      return { success: false, message: 'Player not alive' };
+    }
+    
+    const bag = this.lootBags.get(bid);
+    if (!bag || bag.items.length === 0) {
+      return { success: false, message: 'Loot bag not found or empty' };
+    }
+    
+    const dx = bag.x - player.x;
+    const dy = bag.y - player.y;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    if (dist > this.PICKUP_RADIUS) {
+      return { success: false, message: 'Too far away' };
+    }
+    
+    const remainingItems: typeof bag.items = [];
+    let pickedAny = false;
+    
+    for (const item of bag.items) {
+      const result = player.addItem(item.typeId, item.qty);
+      if (result.success && result.added === item.qty) {
+        pickedAny = true;
+      } else if (result.success && result.added > 0) {
+        remainingItems.push({
+          iid: item.iid,
+          typeId: item.typeId,
+          qty: item.qty - result.added,
+        });
+        pickedAny = true;
+      } else {
+        remainingItems.push(item);
+      }
+    }
+    
+    if (pickedAny) {
+      if (remainingItems.length === 0) {
+        this.lootBags.delete(bid);
+      } else {
+        bag.items = remainingItems;
+      }
+      this.pushEvent(`Player ${playerId} picked up loot bag`);
+      return { success: true };
+    } else {
+      return { success: false, message: 'Inventory full' };
+    }
+  }
+
+  // ����: ��ȡ������Ʒ�б������� snapshot��
+  getWorldItems(): WorldItem[] {
+    return Array.from(this.worldItems.values());
+  }
+
+  // ����: ��ȡ�������б������� snapshot��
+  getLootBags(): LootBag[] {
+    return Array.from(this.lootBags.values());
   }
 }
-
 
 
 ==========================================================================================
@@ -3232,7 +4567,6 @@ runSmokeTest()
   });
 
 
-
 ==========================================================================================
 FILE: shared/src/content.ts
 STATUS: OK
@@ -3316,9 +4650,114 @@ export * from './sim.js';
 // 内容配置
 export * from './content.js';
 
+// 物品系统类型和目录
+export * from './types.js';
+export * from './item_catalog.js';
+
 // 显式导出内容加载器函数
 export { loadMapConfig, loadItemTypes } from './content.js';
 
+
+
+==========================================================================================
+FILE: shared/src/item_catalog.ts
+STATUS: OK
+------------------------------------------------------------------------------------------
+/**
+ * 物品目录（Item Catalog）
+ * 数据驱动的物品类型定义，新增道具只需修改此文件
+ */
+import type { ItemType, Rarity } from './types.js';
+
+export const ITEM_CATALOG: Record<string, ItemType> = {
+  // COMMON items (2个)
+  scrap_metal: {
+    id: 'scrap_metal',
+    name: 'Scrap Metal',
+    rarity: 'COMMON',
+    value: 5,
+    stackMax: 20,
+  },
+  cloth: {
+    id: 'cloth',
+    name: 'Cloth',
+    rarity: 'COMMON',
+    value: 3,
+    stackMax: 30,
+  },
+  
+  // RARE items (3个)
+  electronics: {
+    id: 'electronics',
+    name: 'Electronics',
+    rarity: 'RARE',
+    value: 25,
+    stackMax: 10,
+  },
+  medical_supplies: {
+    id: 'medical_supplies',
+    name: 'Medical Supplies',
+    rarity: 'RARE',
+    value: 30,
+    stackMax: 5,
+  },
+  weapon_parts: {
+    id: 'weapon_parts',
+    name: 'Weapon Parts',
+    rarity: 'RARE',
+    value: 40,
+    stackMax: 8,
+  },
+  
+  // QUEST items (3个)
+  keycard_alpha: {
+    id: 'keycard_alpha',
+    name: 'Keycard Alpha',
+    rarity: 'QUEST',
+    value: 100,
+    stackMax: 1,
+  },
+  keycard_beta: {
+    id: 'keycard_beta',
+    name: 'Keycard Beta',
+    rarity: 'QUEST',
+    value: 150,
+    stackMax: 1,
+  },
+  intel_document: {
+    id: 'intel_document',
+    name: 'Intel Document',
+    rarity: 'QUEST',
+    value: 200,
+    stackMax: 1,
+  },
+};
+
+/**
+ * 获取物品类型（带校验）
+ * @throws 如果 typeId 不存在
+ */
+export function getItemType(typeId: string): ItemType {
+  const itemType = ITEM_CATALOG[typeId];
+  if (!itemType) {
+    throw new Error(`Unknown item type: ${typeId}`);
+  }
+  return itemType;
+}
+
+/**
+ * 获取所有物品类型列表
+ */
+export function getAllItemTypes(): ItemType[] {
+  return Object.values(ITEM_CATALOG);
+}
+
+/**
+ * 根据稀有度获取物品类型列表
+ */
+export function getItemTypesByRarity(rarity: Rarity): ItemType[] {
+  return Object.values(ITEM_CATALOG).filter(item => item.rarity === rarity);
+}
 
 
 ==========================================================================================
@@ -3544,13 +4983,45 @@ export const C2S_PING_SCHEMA = z.object({
   timestamp: z.number(), // 客户端发送时间戳
 });
 
+// 新增: 客户端动作消息
+export const C2S_PICKUP_WORLD_ITEM_SCHEMA = z.object({
+  type: z.literal('C2S_PICKUP_WORLD_ITEM'),
+  wid: z.string(),
+});
+
+export const C2S_PICKUP_LOOT_BAG_SCHEMA = z.object({
+  type: z.literal('C2S_PICKUP_LOOT_BAG'),
+  bid: z.string(),
+});
+
+export const C2S_SELL_FROM_STASH_SCHEMA = z.object({
+  type: z.literal('C2S_SELL_FROM_STASH'),
+  iid: z.string(),
+  qty: z.number().int().positive(),
+});
+
 export const C2S_MESSAGE_SCHEMA = z.discriminatedUnion('type', [
   C2S_HELLO_SCHEMA,
   C2S_INPUT_SCHEMA,
   C2S_PING_SCHEMA, // Day5: Ping 消息
+  C2S_PICKUP_WORLD_ITEM_SCHEMA, // 新增: 拾取世界物品
+  C2S_PICKUP_LOOT_BAG_SCHEMA, // 新增: 拾取掉落包
+  C2S_SELL_FROM_STASH_SCHEMA, // 新增: 从仓库卖出
 ]);
 
 // S2C (Server to Client) 消息
+// 新增: 物品系统类型 schema（必须在 PLAYER_STATE_SCHEMA 之前定义）
+export const ITEM_INSTANCE_SCHEMA = z.object({
+  iid: z.string(),
+  typeId: z.string(),
+  qty: z.number().int().positive(),
+});
+
+export const PLAYER_INVENTORY_SCHEMA = z.object({
+  bagCap: z.number().int().positive(),
+  items: z.array(ITEM_INSTANCE_SCHEMA),
+});
+
 export const PLAYER_STATE_SCHEMA = z.object({
   id: z.string(),
   x: z.number(),
@@ -3559,8 +5030,9 @@ export const PLAYER_STATE_SCHEMA = z.object({
   status: z.enum(['ALIVE', 'DEAD', 'EXTRACTED']),
   lastInputSeq: z.number().int(),
   lastInputTick: z.number().int(),
-  lootCount: z.number().int().min(0).default(0), // Day3: 战利品计数
+  lootCount: z.number().int().min(0).default(0).optional(), // Day3: 战利品计数（已废弃，保留兼容）
   extractProgress: z.number().int().min(0).max(2000).default(0), // 游戏化增强: 撤离进度（毫秒，0-2000）
+  inventory: PLAYER_INVENTORY_SCHEMA.optional(), // 新增: 背包系统
 });
 
 export const BULLET_STATE_SCHEMA = z.object({
@@ -3580,6 +5052,22 @@ export const ITEM_STATE_SCHEMA = z.object({
   quantity: z.number().int().positive(),
 });
 
+// 新增: 世界物品和掉落包 schema
+export const WORLD_ITEM_SCHEMA = z.object({
+  wid: z.string(),
+  typeId: z.string(),
+  qty: z.number().int().positive(),
+  x: z.number(),
+  y: z.number(),
+});
+
+export const LOOT_BAG_SCHEMA = z.object({
+  bid: z.string(),
+  x: z.number(),
+  y: z.number(),
+  items: z.array(ITEM_INSTANCE_SCHEMA),
+});
+
 // Day4-2: 障碍物状态（矩形 AABB）
 export const OBSTACLE_STATE_SCHEMA = z.object({
   x: z.number().nonnegative(), // 矩形左上角 x
@@ -3594,7 +5082,9 @@ export const S2C_SNAPSHOT_SCHEMA = z.object({
   timestamp: z.number(),
   players: z.array(PLAYER_STATE_SCHEMA),
   bullets: z.array(BULLET_STATE_SCHEMA),
-  items: z.array(ITEM_STATE_SCHEMA),
+  items: z.array(ITEM_STATE_SCHEMA).optional(), // 保留兼容
+  worldItems: z.array(WORLD_ITEM_SCHEMA).optional(), // 新增: 世界物品列表（MVP 全量，未来做 delta）
+  lootBags: z.array(LOOT_BAG_SCHEMA).optional(), // 新增: 掉落包列表
   // 修复: obstacles 已移至 S2C_WORLD_INIT，不再在 snapshot 中发送（减少带宽）
 });
 
@@ -3618,7 +5108,8 @@ export const S2C_WORLD_INIT_SCHEMA = z.object({
   seed: z.number().int(),
   mapConfig: MAP_CONFIG_SCHEMA,
   obstacles: z.array(OBSTACLE_STATE_SCHEMA),
-  items: z.array(ITEM_STATE_SCHEMA),
+  items: z.array(ITEM_STATE_SCHEMA).optional(), // 保留兼容
+  worldItems: z.array(WORLD_ITEM_SCHEMA).optional(), // 新增: 世界物品列表
 });
 
 // 游戏化增强: 服务端事件流 -> HUD Event Log
@@ -3636,6 +5127,14 @@ export const S2C_PONG_SCHEMA = z.object({
   serverTimestamp: z.number(), // 服务器接收时间戳
 });
 
+// P1-1 新增: Profile 消息（仅发给本人，包含 stash/money/bagCap）
+export const S2C_PROFILE_SCHEMA = z.object({
+  type: z.literal('S2C_PROFILE'),
+  money: z.number().int().nonnegative(),
+  stash: z.array(ITEM_INSTANCE_SCHEMA),
+  bagCap: z.number().int().positive(),
+});
+
 export const S2C_MESSAGE_SCHEMA = z.discriminatedUnion('type', [
   S2C_SNAPSHOT_SCHEMA,
   S2C_ERROR_SCHEMA,
@@ -3643,6 +5142,7 @@ export const S2C_MESSAGE_SCHEMA = z.discriminatedUnion('type', [
   S2C_WORLD_INIT_SCHEMA, // 静态世界初始化消息
   S2C_EVENT_SCHEMA, // 游戏化增强: 事件消息
   S2C_PONG_SCHEMA, // Day5: Pong 消息
+  S2C_PROFILE_SCHEMA, // P1-1: Profile 消息
 ]);
 
 // TypeScript 类型推导
@@ -3661,8 +5161,19 @@ export type S2C_WELCOME = z.infer<typeof S2C_WELCOME_SCHEMA>;
 export type S2C_WORLD_INIT = z.infer<typeof S2C_WORLD_INIT_SCHEMA>; // 静态世界初始化类型
 export type S2C_EVENT = z.infer<typeof S2C_EVENT_SCHEMA>; // 游戏化增强: 事件类型
 export type S2C_PONG = z.infer<typeof S2C_PONG_SCHEMA>; // Day5: Pong 类型
+export type S2C_PROFILE = z.infer<typeof S2C_PROFILE_SCHEMA>; // P1-1: Profile 类型
 export type S2C_MESSAGE = z.infer<typeof S2C_MESSAGE_SCHEMA>;
 
+// 新增: 物品系统类型导出
+export type ITEM_INSTANCE = z.infer<typeof ITEM_INSTANCE_SCHEMA>;
+export type WORLD_ITEM = z.infer<typeof WORLD_ITEM_SCHEMA>;
+export type LOOT_BAG = z.infer<typeof LOOT_BAG_SCHEMA>;
+export type PLAYER_INVENTORY = z.infer<typeof PLAYER_INVENTORY_SCHEMA>;
+
+// 新增: 客户端动作消息类型
+export type C2S_PICKUP_WORLD_ITEM = z.infer<typeof C2S_PICKUP_WORLD_ITEM_SCHEMA>;
+export type C2S_PICKUP_LOOT_BAG = z.infer<typeof C2S_PICKUP_LOOT_BAG_SCHEMA>;
+export type C2S_SELL_FROM_STASH = z.infer<typeof C2S_SELL_FROM_STASH_SCHEMA>;
 
 
 ==========================================================================================
@@ -3670,27 +5181,27 @@ FILE: shared/src/rng.ts
 STATUS: OK
 ------------------------------------------------------------------------------------------
 /**
- * 基于 seed 的伪随机数生成器
- * 使用 mulberry32 算法，简单高效，适合游戏场景
+ * 可复现的随机数生成器
+ * 基于 Mulberry32 算法，速度快且分布均匀
  */
 
 /**
- * 创建一个基于 seed 的伪随机数生成器
- * @param seed 随机种子（整数）
- * @returns 返回一个函数，每次调用返回 [0, 1) 范围内的随机数
+ * 创建一个可复现的随机数生成器
+ * @param seed 种子值（整数）
+ * @returns 返回一个函数，每次调用生成 0-1 之间的随机数
  */
 export function createRng(seed: number): () => number {
-  let state = seed;
+  // Mulberry32 算法
+  let state = seed >>> 0; // 确保是 32 位无符号整数
   
   return function(): number {
-    // mulberry32 算法
-    state = (state + 0x6d2b79f5) | 0;
-    let t = Math.imul(state ^ (state >>> 15), state | 1);
-    t = t ^ (t + Math.imul(t ^ (t >>> 7), state | 61));
+    state = (state + 0x6D2B79F5) >>> 0;
+    let t = state;
+    t = Math.imul(t ^ (t >>> 15), t | 1) >>> 0;
+    t = (t + Math.imul(t ^ (t >>> 7), t | 61)) >>> 0;
     return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
   };
 }
-
 
 
 
@@ -3699,33 +5210,29 @@ FILE: shared/src/sim.ts
 STATUS: OK
 ------------------------------------------------------------------------------------------
 /**
- * 共享的玩家移动模拟逻辑
- * 确保 client 和 server 使用完全相同的移动/碰撞算法，避免位置漂移
+ * 共享的游戏模拟逻辑
+ * 用于客户端预测和服务端权威计算，确保双端一致
  */
-import { circleVsAABB, clampCircleInBounds } from './math.js';
+
+import { circleVsAABB, clamp } from './math.js';
 import type { OBSTACLE_STATE } from './protocol.js';
 
-/**
- * 玩家移动速度（像素/秒）
- */
-export const PLAYER_SPEED = 200; // 200px/s，在20Hz tick下约10px/tick
+// 玩家移动速度（像素/秒）
+const PLAYER_SPEED = 200;
+
+// 玩家碰撞半径
+const PLAYER_RADIUS = 10;
 
 /**
- * 玩家碰撞半径（与 server Player.processInput 一致）
- */
-export const PLAYER_RADIUS = 10;
-
-/**
- * 模拟玩家移动（分轴移动，实现沿墙滑动）
- * 这个函数必须与 server/src/player.ts 的 processInput 逻辑完全一致
+ * 模拟玩家移动（包含碰撞检测）
  * 
- * @param pos 当前位置 {x, y}
- * @param keys 按键状态 {up, down, left, right}
- * @param deltaTime 时间步长（秒）
+ * @param pos 当前位置 { x, y }
+ * @param keys 按键状态 { up, down, left, right }
+ * @param deltaTime 时间间隔（秒）
  * @param mapWidth 地图宽度
  * @param mapHeight 地图高度
  * @param obstacles 障碍物列表
- * @returns 新位置 {x, y}
+ * @returns 新位置 { x, y }
  */
 export function simulatePlayerMove(
   pos: { x: number; y: number },
@@ -3735,78 +5242,130 @@ export function simulatePlayerMove(
   mapHeight: number,
   obstacles: OBSTACLE_STATE[] = []
 ): { x: number; y: number } {
-  // 计算移动方向
+  // 计算移动向量
   let dx = 0;
   let dy = 0;
-
+  
   if (keys.up) dy -= 1;
   if (keys.down) dy += 1;
   if (keys.left) dx -= 1;
   if (keys.right) dx += 1;
-
-  // 归一化对角线移动
-  if (dx !== 0 && dy !== 0) {
-    dx *= 0.707; // 1/sqrt(2)
-    dy *= 0.707;
-  }
-
-  // 计算期望的新位置
-  const desiredX = pos.x + dx * PLAYER_SPEED * deltaTime;
-  const desiredY = pos.y + dy * PLAYER_SPEED * deltaTime;
   
-  // 第一步：尝试 X 轴移动（newX, oldY）
-  let finalX = pos.x;
-  if (dx !== 0) {
-    let testX = desiredX;
-    // 边界检测
-    const clampedX = clampCircleInBounds(testX, pos.y, PLAYER_RADIUS, 0, 0, mapWidth, mapHeight);
-    testX = clampedX.x;
-    
-    // 障碍物碰撞检测
-    let xCollided = false;
-    for (const obstacle of obstacles) {
-      if (circleVsAABB(testX, pos.y, PLAYER_RADIUS, obstacle)) {
-        xCollided = true;
-        break;
-      }
-    }
-    
-    if (!xCollided) {
-      finalX = testX;
+  // 归一化对角线移动（避免对角移动更快）
+  const len = Math.sqrt(dx * dx + dy * dy);
+  if (len > 0) {
+    dx = dx / len;
+    dy = dy / len;
+  }
+  
+  // 计算移动距离
+  const moveX = dx * PLAYER_SPEED * deltaTime;
+  const moveY = dy * PLAYER_SPEED * deltaTime;
+  
+  // 新位置（未检查碰撞）
+  let newX = pos.x + moveX;
+  let newY = pos.y + moveY;
+  
+  // 分离轴碰撞检测：先处理 X 轴，再处理 Y 轴
+  // 这样可以实现"滑动"效果，而不是完全停止
+  
+  // 检查 X 轴移动
+  const testX = newX;
+  let xBlocked = false;
+  
+  for (const obstacle of obstacles) {
+    if (circleVsAABB(testX, pos.y, PLAYER_RADIUS, obstacle)) {
+      xBlocked = true;
+      break;
     }
   }
   
-  // 第二步：尝试 Y 轴移动（finalX, newY）
-  let finalY = pos.y;
-  if (dy !== 0) {
-    let testY = desiredY;
-    // 边界检测
-    const clampedY = clampCircleInBounds(finalX, testY, PLAYER_RADIUS, 0, 0, mapWidth, mapHeight);
-    testY = clampedY.y;
-    
-    // 障碍物碰撞检测
-    let yCollided = false;
-    for (const obstacle of obstacles) {
-      if (circleVsAABB(finalX, testY, PLAYER_RADIUS, obstacle)) {
-        yCollided = true;
-        break;
-      }
-    }
-    
-    if (!yCollided) {
-      finalY = testY;
+  if (xBlocked) {
+    newX = pos.x; // 回退 X 轴移动
+  }
+  
+  // 检查 Y 轴移动
+  const testY = newY;
+  let yBlocked = false;
+  
+  for (const obstacle of obstacles) {
+    if (circleVsAABB(newX, testY, PLAYER_RADIUS, obstacle)) {
+      yBlocked = true;
+      break;
     }
   }
   
-  return { x: finalX, y: finalY };
+  if (yBlocked) {
+    newY = pos.y; // 回退 Y 轴移动
+  }
+  
+  // 世界边界限制（考虑玩家半径）
+  newX = clamp(newX, PLAYER_RADIUS, mapWidth - PLAYER_RADIUS);
+  newY = clamp(newY, PLAYER_RADIUS, mapHeight - PLAYER_RADIUS);
+  
+  return { x: newX, y: newY };
 }
 
 
 
+==========================================================================================
+FILE: shared/src/types.ts
+STATUS: OK
+------------------------------------------------------------------------------------------
+/**
+ * 物品系统类型定义
+ * 用于替换 lootCount，实现完整的背包/仓库/经济系统
+ */
+
+export type Rarity = "COMMON" | "RARE" | "QUEST";
+
+export type ItemType = {
+  id: string;        // "scrap_metal"
+  name: string;      // "Scrap Metal"
+  rarity: Rarity;
+  value: number;     // sell price for 1 qty
+  stackMax: number;  // e.g. 20
+  weight?: number;   // optional future use
+};
+
+export type ItemInstance = {
+  iid: string;       // instance id (uuid-like)
+  typeId: string;    // references ItemType.id
+  qty: number;
+};
+
+export type WorldItem = {
+  wid: string;       // world item id
+  typeId: string;
+  qty: number;
+  x: number;
+  y: number;
+  // optional future: spawnTime, ttl
+};
+
+export type LootBag = {
+  bid: string;       // bag id
+  x: number;
+  y: number;
+  items: ItemInstance[]; // dropped inventory
+};
+
+export type PlayerInventory = {
+  bagCap: number;          // max slots by count (MVP)
+  items: ItemInstance[];
+};
+
+export type PlayerProfile = {
+  money: number;
+  stash: ItemInstance[];   // out-of-raid storage
+  bagCap: number;          // 背包容量（从 profile 读取，用于初始化 Player）
+  // optional: loadout later
+};
+
 
 ==========================================================================================
 # SUMMARY
-# dumped: 18 files
+# dumped: 22 files
 # skipped: 0 files
 # missing (optional): 0 files
 # missing (required): 0 files

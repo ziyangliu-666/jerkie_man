@@ -369,4 +369,3 @@ runSmokeTest()
     }
     process.exit(1);
   });
-

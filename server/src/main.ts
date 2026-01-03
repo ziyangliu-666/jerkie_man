@@ -9,6 +9,7 @@ import {
   S2C_WORLD_INIT_SCHEMA, // 静态世界初始化消息
   S2C_EVENT_SCHEMA, // 游戏化增强: 事件消息
   S2C_PONG_SCHEMA, // Day5: Pong 消息
+  S2C_PROFILE_SCHEMA, // P1-1: Profile 消息
   type C2S_MESSAGE,
 } from '@jerkie-man/shared';
 
@@ -39,6 +40,17 @@ const INPUT_QUEUE_MAX_LENGTH = 32;
 const inputQueues = new Map<string, Array<{ input: C2S_MESSAGE & { type: 'C2S_INPUT' }; ws: WebSocket }>>();
 let lastQueueWarnTime = 0;
 
+// P2-3: Pickup 队列（入队列 tick 处理，确保移动和拾取对齐）
+type PickupReq = 
+  | { type: 'world'; wid: string; ws: WebSocket }
+  | { type: 'bag'; bid: string; ws: WebSocket };
+const pickupQueues = new Map<string, PickupReq[]>();
+
+// P1-1 修复: lastProfileSentTick 移至模块级，避免每 tick 重新创建导致重复发送
+const lastProfileSentTick = new Map<string, number>();
+// 新增: 记录玩家撤离时的背包物品数（用于判断"刚完成撤离"）
+const lastExtractedInventoryCount = new Map<string, number>();
+
 wss.on('connection', (ws: WebSocket) => {
   let playerId: string | null = null;
 
@@ -66,6 +78,7 @@ ws.on('message', (data: Buffer) => {
             connections.set(ws, playerId);
             room.addPlayer(playerId);
             inputQueues.set(playerId, []);
+            pickupQueues.set(playerId, []); // P2-3: 初始化 pickup 队列
 
         log('CONNECT', {
           room: room.id,
@@ -93,7 +106,21 @@ ws.on('message', (data: Buffer) => {
               seed: room.seed,
               mapConfig: room.mapConfig,
               obstacles: room.getObstacles(),
-              items: room.getItems(),
+              items: room.getItems(), // 保留兼容
+              worldItems: room.getWorldItems(), // 新增: 世界物品列表
+            })
+          )
+        );
+        
+        // P1-1 新增: 发送 Profile 消息（WELCOME 后立即发送一次）
+        const initialProfile = room.profileManager.getProfileData(playerId);
+        ws.send(
+          JSON.stringify(
+            S2C_PROFILE_SCHEMA.parse({
+              type: 'S2C_PROFILE',
+              money: initialProfile.money,
+              stash: initialProfile.stash,
+              bagCap: initialProfile.bagCap,
             })
           )
         );
@@ -106,6 +133,95 @@ ws.on('message', (data: Buffer) => {
                 type: 'S2C_PONG',
                 clientTimestamp: parsed.timestamp,
                 serverTimestamp: Date.now(),
+              })
+            )
+          );
+        }
+      } else if (parsed.type === 'C2S_PICKUP_WORLD_ITEM') {
+        // P2-3: 拾取改成入队列，在 tick 中处理（确保移动和拾取对齐）
+        if (!playerId) {
+          ws.send(
+            JSON.stringify(
+              S2C_ERROR_SCHEMA.parse({
+                type: 'S2C_ERROR',
+                code: 'NOT_AUTHENTICATED',
+                message: 'Must send C2S_HELLO first',
+              })
+            )
+          );
+          return;
+        }
+        // 入队列，不立即处理
+        const queue = pickupQueues.get(playerId);
+        if (queue) {
+          queue.push({ type: 'world', wid: parsed.wid, ws });
+          log('PICKUP_ENQUEUE', { player: playerId, type: 'world', wid: parsed.wid, tick: room.tick });
+        }
+      } else if (parsed.type === 'C2S_PICKUP_LOOT_BAG') {
+        // P2-3: 拾取改成入队列，在 tick 中处理（确保移动和拾取对齐）
+        if (!playerId) {
+          ws.send(
+            JSON.stringify(
+              S2C_ERROR_SCHEMA.parse({
+                type: 'S2C_ERROR',
+                code: 'NOT_AUTHENTICATED',
+                message: 'Must send C2S_HELLO first',
+              })
+            )
+          );
+          return;
+        }
+        // 入队列，不立即处理
+        const queue = pickupQueues.get(playerId);
+        if (queue) {
+          queue.push({ type: 'bag', bid: parsed.bid, ws });
+          log('PICKUP_ENQUEUE', { player: playerId, type: 'bag', bid: parsed.bid, tick: room.tick });
+        }
+      } else if (parsed.type === 'C2S_SELL_FROM_STASH') {
+        // 新增: 处理从仓库卖出物品
+        if (!playerId) {
+          ws.send(
+            JSON.stringify(
+              S2C_ERROR_SCHEMA.parse({
+                type: 'S2C_ERROR',
+                code: 'NOT_AUTHENTICATED',
+                message: 'Must send C2S_HELLO first',
+              })
+            )
+          );
+          return;
+        }
+        const result = room.profileManager.sellFromStash(playerId, parsed.iid, parsed.qty);
+        if (!result.success) {
+          ws.send(
+            JSON.stringify(
+              S2C_ERROR_SCHEMA.parse({
+                type: 'S2C_ERROR',
+                code: 'SELL_FAILED',
+                message: 'Failed to sell from stash',
+              })
+            )
+          );
+        } else {
+          // 发送成功消息：立即回发 S2C_PROFILE 刷新客户端 HUD
+          log('SELL_FROM_STASH', {
+            room: room.id,
+            player: playerId,
+            iid: parsed.iid,
+            qty: parsed.qty,
+            money: result.money,
+            tick: room.tick,
+          });
+          
+          // 卖出成功后立即发送 Profile（不然 client HUD 不刷新）
+          const updatedProfile = room.profileManager.getProfileData(playerId);
+          ws.send(
+            JSON.stringify(
+              S2C_PROFILE_SCHEMA.parse({
+                type: 'S2C_PROFILE',
+                money: updatedProfile.money,
+                stash: updatedProfile.stash,
+                bagCap: updatedProfile.bagCap,
               })
             )
           );
@@ -188,6 +304,7 @@ ws.on('message', (data: Buffer) => {
       room.removePlayer(playerId);
       connections.delete(ws);
       inputQueues.delete(playerId);
+      pickupQueues.delete(playerId); // P2-3: 清理 pickup 队列
     }
   });
 
@@ -205,35 +322,146 @@ setInterval(() => {
   room.tick++;
 
   // Day2: 先处理输入（可能生成子弹）
-  // Day3 修复B: 使用最新的 movement/aim/shoot，但对 interact/extract 做 OR 聚合
+  // 修复: 按序处理最多 N 条，避免队列为空时不移动（解决 err=10 问题）
+  const MAX_STEPS = 4; // 每 tick 最多追 4 步，避免被恶意灌爆
   for (const [playerId, queue] of inputQueues.entries()) {
-    if (queue.length === 0) continue;
-    
-    // 按seq排序，只处理最新的一个（避免积压导致越跑越慢）
-    queue.sort((a, b) => b.input.seq - a.input.seq); // 降序，最新的在前
-    const latest = queue.shift();
-    if (latest) {
-      // Day3 修复B: 聚合队列中所有 input 的 interact/extract（OR 操作）
-      let aggregatedInteract = latest.input.interact ?? false;
-      let aggregatedExtract = latest.input.extract ?? false;
-      
-      for (const entry of queue) {
-        if (entry.input.interact) aggregatedInteract = true;
-        if (entry.input.extract) aggregatedExtract = true;
+    if (queue.length === 0) {
+      // 修复: 记录队列为空的情况，便于诊断
+      if (room.tick % 100 === 0) { // 每 5 秒记录一次，避免日志过多
+        log('NO_INPUT_THIS_TICK', { player: playerId, tick: room.tick });
       }
-      
-      // 使用最新的 input，但替换 interact/extract 为聚合值
-      const aggregatedInput = {
-        ...latest.input,
-        interact: aggregatedInteract,
-        extract: aggregatedExtract,
-      };
-      
-      room.processInput(playerId, aggregatedInput);
+      continue;
     }
     
-    // 清空队列（只保留最新输入）
+    // 修复: 按 seq 升序排序，按序处理（而不是只处理最新一条）
+    queue.sort((a, b) => a.input.seq - b.input.seq);
+    
+    // 只处理最后 MAX_STEPS 条，避免被恶意灌爆
+    const slice = queue.length > MAX_STEPS ? queue.slice(queue.length - MAX_STEPS) : queue;
+    
+    // 聚合一次性事件（interact/extract）只在最后一条处理
+    let aggregatedInteract = false;
+    let aggregatedExtract = false;
+    for (const e of slice) {
+      if (e.input.interact) aggregatedInteract = true;
+      if (e.input.extract) aggregatedExtract = true;
+    }
+    
+    // 按序处理每条 input（保证移动连续性）
+    for (let i = 0; i < slice.length; i++) {
+      const raw = slice[i].input;
+      const isLast = i === slice.length - 1;
+      room.processInput(playerId, {
+        ...raw,
+        // 只在最后一条处理一次性事件，避免重复触发
+        interact: isLast ? aggregatedInteract : false,
+        extract: isLast ? aggregatedExtract : false,
+      });
+    }
+    
+    // 清空队列
     queue.length = 0;
+  }
+  
+  // P2-3: 处理 pickup 队列（在移动处理之后，确保位置对齐）
+  for (const [playerId, queue] of pickupQueues.entries()) {
+    if (queue.length === 0) continue;
+    
+    // 只处理最后一个请求（避免重复拾取）
+    const lastReq = queue[queue.length - 1];
+    
+    if (lastReq.type === 'world') {
+      const result = room.handlePickupWorldItem(playerId, lastReq.wid);
+      if (!result.success) {
+        const player = room.getPlayer(playerId);
+        log('PICKUP_FAIL', {
+          player: playerId,
+          type: 'world',
+          wid: lastReq.wid,
+          reason: result.message,
+          playerPos: player ? `(${player.x.toFixed(1)},${player.y.toFixed(1)})` : 'N/A',
+          tick: room.tick,
+        });
+        if (lastReq.ws.readyState === WebSocket.OPEN) {
+          lastReq.ws.send(
+            JSON.stringify(
+              S2C_ERROR_SCHEMA.parse({
+                type: 'S2C_ERROR',
+                code: 'PICKUP_FAILED',
+                message: result.message || 'Failed to pickup world item',
+              })
+            )
+          );
+        }
+      } else {
+        log('PICKUP_OK', { player: playerId, type: 'world', wid: lastReq.wid, tick: room.tick });
+      }
+    } else {
+      const result = room.handlePickupLootBag(playerId, lastReq.bid);
+      if (!result.success) {
+        const player = room.getPlayer(playerId);
+        log('PICKUP_FAIL', {
+          player: playerId,
+          type: 'bag',
+          bid: lastReq.bid,
+          reason: result.message,
+          playerPos: player ? `(${player.x.toFixed(1)},${player.y.toFixed(1)})` : 'N/A',
+          tick: room.tick,
+        });
+        if (lastReq.ws.readyState === WebSocket.OPEN) {
+          lastReq.ws.send(
+            JSON.stringify(
+              S2C_ERROR_SCHEMA.parse({
+                type: 'S2C_ERROR',
+                code: 'PICKUP_FAILED',
+                message: result.message || 'Failed to pickup loot bag',
+              })
+            )
+          );
+        }
+      } else {
+        log('PICKUP_OK', { player: playerId, type: 'bag', bid: lastReq.bid, tick: room.tick });
+      }
+    }
+    
+    // 清空队列
+    queue.length = 0;
+  }
+  
+  // P1-1 修复: 检查所有玩家是否刚完成撤离，发送更新的 Profile
+  // 只在"玩家状态变为 EXTRACTED 且背包已清空"的那一刻发送一次
+  for (const [playerId, player] of room.players.entries()) {
+    if (player.status === 'EXTRACTED') {
+      const lastSent = lastProfileSentTick.get(playerId) ?? -1;
+      const lastInvCount = lastExtractedInventoryCount.get(playerId) ?? -1;
+      
+      // 判断是否刚完成撤离：
+      // 1. 背包已清空（items.length === 0）
+      // 2. 上次记录的背包数量 !== 0（说明刚刚被清空）
+      // 3. 还没在这个 tick 发送过 Profile
+      const justExtracted = player.inventory.items.length === 0 && lastInvCount !== 0;
+      
+      if (justExtracted && lastSent < room.tick) {
+        const ws = Array.from(connections.entries()).find(([, pid]) => pid === playerId)?.[0];
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          const profile = room.profileManager.getProfileData(playerId);
+          ws.send(
+            JSON.stringify(
+              S2C_PROFILE_SCHEMA.parse({
+                type: 'S2C_PROFILE',
+                money: profile.money,
+                stash: profile.stash,
+                bagCap: profile.bagCap,
+              })
+            )
+          );
+          lastProfileSentTick.set(playerId, room.tick);
+        }
+      }
+      
+      // 更新记录的背包数量
+      lastExtractedInventoryCount.set(playerId, player.inventory.items.length);
+    }
   }
 
   // Day2: 更新子弹位置并检测命中（20Hz tick = 50ms = 0.05s）
@@ -261,7 +489,9 @@ setInterval(() => {
     timestamp: Date.now(),
     players: snapshot.players,
     bullets: snapshot.bullets,
-    items: snapshot.items,
+    items: snapshot.items, // 保留兼容
+    worldItems: snapshot.worldItems, // 新增: 世界物品列表（MVP 全量，未来做 delta）
+    lootBags: snapshot.lootBags, // 新增: 掉落包列表
     // 修复: obstacles 已移至 S2C_WORLD_INIT，不再在 snapshot 中发送（减少带宽）
   });
 

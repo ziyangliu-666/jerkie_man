@@ -30,13 +30,45 @@ export const C2S_PING_SCHEMA = z.object({
   timestamp: z.number(), // 客户端发送时间戳
 });
 
+// 新增: 客户端动作消息
+export const C2S_PICKUP_WORLD_ITEM_SCHEMA = z.object({
+  type: z.literal('C2S_PICKUP_WORLD_ITEM'),
+  wid: z.string(),
+});
+
+export const C2S_PICKUP_LOOT_BAG_SCHEMA = z.object({
+  type: z.literal('C2S_PICKUP_LOOT_BAG'),
+  bid: z.string(),
+});
+
+export const C2S_SELL_FROM_STASH_SCHEMA = z.object({
+  type: z.literal('C2S_SELL_FROM_STASH'),
+  iid: z.string(),
+  qty: z.number().int().positive(),
+});
+
 export const C2S_MESSAGE_SCHEMA = z.discriminatedUnion('type', [
   C2S_HELLO_SCHEMA,
   C2S_INPUT_SCHEMA,
   C2S_PING_SCHEMA, // Day5: Ping 消息
+  C2S_PICKUP_WORLD_ITEM_SCHEMA, // 新增: 拾取世界物品
+  C2S_PICKUP_LOOT_BAG_SCHEMA, // 新增: 拾取掉落包
+  C2S_SELL_FROM_STASH_SCHEMA, // 新增: 从仓库卖出
 ]);
 
 // S2C (Server to Client) 消息
+// 新增: 物品系统类型 schema（必须在 PLAYER_STATE_SCHEMA 之前定义）
+export const ITEM_INSTANCE_SCHEMA = z.object({
+  iid: z.string(),
+  typeId: z.string(),
+  qty: z.number().int().positive(),
+});
+
+export const PLAYER_INVENTORY_SCHEMA = z.object({
+  bagCap: z.number().int().positive(),
+  items: z.array(ITEM_INSTANCE_SCHEMA),
+});
+
 export const PLAYER_STATE_SCHEMA = z.object({
   id: z.string(),
   x: z.number(),
@@ -45,8 +77,9 @@ export const PLAYER_STATE_SCHEMA = z.object({
   status: z.enum(['ALIVE', 'DEAD', 'EXTRACTED']),
   lastInputSeq: z.number().int(),
   lastInputTick: z.number().int(),
-  lootCount: z.number().int().min(0).default(0), // Day3: 战利品计数
+  lootCount: z.number().int().min(0).default(0).optional(), // Day3: 战利品计数（已废弃，保留兼容）
   extractProgress: z.number().int().min(0).max(2000).default(0), // 游戏化增强: 撤离进度（毫秒，0-2000）
+  inventory: PLAYER_INVENTORY_SCHEMA.optional(), // 新增: 背包系统
 });
 
 export const BULLET_STATE_SCHEMA = z.object({
@@ -66,6 +99,22 @@ export const ITEM_STATE_SCHEMA = z.object({
   quantity: z.number().int().positive(),
 });
 
+// 新增: 世界物品和掉落包 schema
+export const WORLD_ITEM_SCHEMA = z.object({
+  wid: z.string(),
+  typeId: z.string(),
+  qty: z.number().int().positive(),
+  x: z.number(),
+  y: z.number(),
+});
+
+export const LOOT_BAG_SCHEMA = z.object({
+  bid: z.string(),
+  x: z.number(),
+  y: z.number(),
+  items: z.array(ITEM_INSTANCE_SCHEMA),
+});
+
 // Day4-2: 障碍物状态（矩形 AABB）
 export const OBSTACLE_STATE_SCHEMA = z.object({
   x: z.number().nonnegative(), // 矩形左上角 x
@@ -80,7 +129,9 @@ export const S2C_SNAPSHOT_SCHEMA = z.object({
   timestamp: z.number(),
   players: z.array(PLAYER_STATE_SCHEMA),
   bullets: z.array(BULLET_STATE_SCHEMA),
-  items: z.array(ITEM_STATE_SCHEMA),
+  items: z.array(ITEM_STATE_SCHEMA).optional(), // 保留兼容
+  worldItems: z.array(WORLD_ITEM_SCHEMA).optional(), // 新增: 世界物品列表（MVP 全量，未来做 delta）
+  lootBags: z.array(LOOT_BAG_SCHEMA).optional(), // 新增: 掉落包列表
   // 修复: obstacles 已移至 S2C_WORLD_INIT，不再在 snapshot 中发送（减少带宽）
 });
 
@@ -104,7 +155,8 @@ export const S2C_WORLD_INIT_SCHEMA = z.object({
   seed: z.number().int(),
   mapConfig: MAP_CONFIG_SCHEMA,
   obstacles: z.array(OBSTACLE_STATE_SCHEMA),
-  items: z.array(ITEM_STATE_SCHEMA),
+  items: z.array(ITEM_STATE_SCHEMA).optional(), // 保留兼容
+  worldItems: z.array(WORLD_ITEM_SCHEMA).optional(), // 新增: 世界物品列表
 });
 
 // 游戏化增强: 服务端事件流 -> HUD Event Log
@@ -122,6 +174,14 @@ export const S2C_PONG_SCHEMA = z.object({
   serverTimestamp: z.number(), // 服务器接收时间戳
 });
 
+// P1-1 新增: Profile 消息（仅发给本人，包含 stash/money/bagCap）
+export const S2C_PROFILE_SCHEMA = z.object({
+  type: z.literal('S2C_PROFILE'),
+  money: z.number().int().nonnegative(),
+  stash: z.array(ITEM_INSTANCE_SCHEMA),
+  bagCap: z.number().int().positive(),
+});
+
 export const S2C_MESSAGE_SCHEMA = z.discriminatedUnion('type', [
   S2C_SNAPSHOT_SCHEMA,
   S2C_ERROR_SCHEMA,
@@ -129,6 +189,7 @@ export const S2C_MESSAGE_SCHEMA = z.discriminatedUnion('type', [
   S2C_WORLD_INIT_SCHEMA, // 静态世界初始化消息
   S2C_EVENT_SCHEMA, // 游戏化增强: 事件消息
   S2C_PONG_SCHEMA, // Day5: Pong 消息
+  S2C_PROFILE_SCHEMA, // P1-1: Profile 消息
 ]);
 
 // TypeScript 类型推导
@@ -147,5 +208,16 @@ export type S2C_WELCOME = z.infer<typeof S2C_WELCOME_SCHEMA>;
 export type S2C_WORLD_INIT = z.infer<typeof S2C_WORLD_INIT_SCHEMA>; // 静态世界初始化类型
 export type S2C_EVENT = z.infer<typeof S2C_EVENT_SCHEMA>; // 游戏化增强: 事件类型
 export type S2C_PONG = z.infer<typeof S2C_PONG_SCHEMA>; // Day5: Pong 类型
+export type S2C_PROFILE = z.infer<typeof S2C_PROFILE_SCHEMA>; // P1-1: Profile 类型
 export type S2C_MESSAGE = z.infer<typeof S2C_MESSAGE_SCHEMA>;
 
+// 新增: 物品系统类型导出
+export type ITEM_INSTANCE = z.infer<typeof ITEM_INSTANCE_SCHEMA>;
+export type WORLD_ITEM = z.infer<typeof WORLD_ITEM_SCHEMA>;
+export type LOOT_BAG = z.infer<typeof LOOT_BAG_SCHEMA>;
+export type PLAYER_INVENTORY = z.infer<typeof PLAYER_INVENTORY_SCHEMA>;
+
+// 新增: 客户端动作消息类型
+export type C2S_PICKUP_WORLD_ITEM = z.infer<typeof C2S_PICKUP_WORLD_ITEM_SCHEMA>;
+export type C2S_PICKUP_LOOT_BAG = z.infer<typeof C2S_PICKUP_LOOT_BAG_SCHEMA>;
+export type C2S_SELL_FROM_STASH = z.infer<typeof C2S_SELL_FROM_STASH_SCHEMA>;

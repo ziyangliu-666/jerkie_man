@@ -1,5 +1,5 @@
-import type { PLAYER_STATE, OBSTACLE_STATE } from '@jerkie-man/shared';
-import { simulatePlayerMove } from '@jerkie-man/shared';
+import type { PLAYER_STATE, OBSTACLE_STATE, PlayerInventory, ItemInstance } from '@jerkie-man/shared';
+import { simulatePlayerMove, getItemType } from '@jerkie-man/shared';
 
 export class Player {
   public id: string;
@@ -9,8 +9,9 @@ export class Player {
   public status: 'ALIVE' | 'DEAD' | 'EXTRACTED';
   public lastInputSeq: number;
   public lastInputTick: number;
-  public lootCount: number; // Day3: 战利品计数
+  public lootCount: number; // Day3: 战利品计数（已废弃，保留兼容）
   public extractProgress: number = 0; // 游戏化增强: 撤离进度（毫秒，0-2000）
+  public inventory: PlayerInventory; // 新增: 背包系统
 
   // 修复: 移动速度已移至 shared/sim.ts，这里不再需要（保留注释用于文档）
   // SPEED = 200 (在 shared/sim.ts 中定义)
@@ -20,7 +21,7 @@ export class Player {
   private readonly FIRE_COOLDOWN_MS = 150; // 150ms冷却，约6.67发/秒
   private readonly EXTRACT_DURATION_MS = 2000; // 游戏化增强: 撤离需要持续2秒
 
-  constructor(id: string, x: number = 0, y: number = 0) {
+  constructor(id: string, x: number = 0, y: number = 0, bagCap: number = 8) {
     this.id = id;
     this.x = x;
     this.y = y;
@@ -28,7 +29,12 @@ export class Player {
     this.status = 'ALIVE';
     this.lastInputSeq = 0;
     this.lastInputTick = 0;
-    this.lootCount = 0; // Day3: 初始化为0
+    this.lootCount = 0; // Day3: 初始化为0（已废弃，保留兼容）
+    // 新增: 初始化背包
+    this.inventory = {
+      bagCap,
+      items: [],
+    };
   }
 
   // 处理输入，更新位置
@@ -84,6 +90,82 @@ export class Player {
     }
   }
 
+  /**
+   * 添加物品到背包（堆叠合并）
+   * P2-4: 修复 stackMax 拆分逻辑，确保每个堆叠不超过 stackMax
+   */
+  addItem(typeId: string, qty: number): { success: boolean; added: number } {
+    const itemType = getItemType(typeId);
+    let remaining = qty;
+    let totalAdded = 0;
+    
+    // 1. 先尝试合并到现有堆叠
+    for (const item of this.inventory.items) {
+      if (remaining <= 0) break;
+      if (item.typeId !== typeId) continue;
+      if (item.qty >= itemType.stackMax) continue;
+      
+      const spaceLeft = itemType.stackMax - item.qty;
+      const toAdd = Math.min(spaceLeft, remaining);
+      item.qty += toAdd;
+      remaining -= toAdd;
+      totalAdded += toAdd;
+    }
+    
+    // 2. 如果还有剩余，创建新堆叠（每个不超过 stackMax）
+    while (remaining > 0) {
+      if (this.inventory.items.length >= this.inventory.bagCap) {
+        // 背包满了，返回部分成功（如果有添加过）
+        return { success: totalAdded > 0, added: totalAdded };
+      }
+      
+      // 每个新堆叠最多 stackMax
+      const stackQty = Math.min(remaining, itemType.stackMax);
+      this.inventory.items.push({
+        iid: this.generateIid(),
+        typeId,
+        qty: stackQty,
+      });
+      remaining -= stackQty;
+      totalAdded += stackQty;
+    }
+    
+    return { success: true, added: totalAdded };
+  }
+
+  /**
+   * 从背包移除物品
+   */
+  removeItem(iid: string, qty: number): boolean {
+    const item = this.inventory.items.find(i => i.iid === iid);
+    if (!item || item.qty < qty) {
+      return false;
+    }
+    
+    item.qty -= qty;
+    if (item.qty <= 0) {
+      const index = this.inventory.items.indexOf(item);
+      this.inventory.items.splice(index, 1);
+    }
+    return true;
+  }
+
+  /**
+   * 清空背包（用于死亡掉落）
+   */
+  clearInventory(): ItemInstance[] {
+    const items = [...this.inventory.items];
+    this.inventory.items = [];
+    return items;
+  }
+
+  /**
+   * 生成物品实例 ID
+   */
+  private generateIid(): string {
+    return `i${Date.now()}_${Math.random().toString(36).substring(2, 11)}`;
+  }
+
   toState(): PLAYER_STATE {
     return {
       id: this.id,
@@ -93,9 +175,9 @@ export class Player {
       status: this.status,
       lastInputSeq: this.lastInputSeq,
       lastInputTick: this.lastInputTick,
-      lootCount: this.lootCount, // Day3: 包含战利品计数
+      lootCount: this.lootCount, // Day3: 包含战利品计数（已废弃，保留兼容）
       extractProgress: this.extractProgress, // 游戏化增强: 包含撤离进度
+      inventory: this.inventory, // 新增: 包含背包
     };
   }
 }
-

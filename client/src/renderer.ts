@@ -1,4 +1,5 @@
-import type { PLAYER_STATE, BULLET_STATE, ITEM_STATE, OBSTACLE_STATE } from '@jerkie-man/shared';
+import type { PLAYER_STATE, BULLET_STATE, ITEM_STATE, OBSTACLE_STATE, WorldItem, LootBag } from '@jerkie-man/shared';
+import { getItemType } from '@jerkie-man/shared';
 
 export class Renderer {
   private canvas: HTMLCanvasElement;
@@ -12,6 +13,10 @@ export class Renderer {
   // camera跟随本地玩家，让玩家始终在屏幕中心附近可见
   private camX = 0;
   private camY = 0;
+  
+  // P0-3 修复: 世界边界（用于 camera clamp）
+  private worldWidth: number = 0;
+  private worldHeight: number = 0;
   
   // P2 优化: 缓存 canvas rect，避免每帧 getBoundingClientRect()
   private cachedRectLeft: number = 0;
@@ -74,9 +79,14 @@ export class Renderer {
     };
   }
 
-  // 清除画布（使用缓存的尺寸，避免每帧getBoundingClientRect）
+  // 清除画布（使用 device-pixel 尺寸清屏，避免 transform/dpr/合成导致的残留）
   clear(): void {
-    this.ctx.clearRect(0, 0, this.cssWidth, this.cssHeight);
+    const ctx = this.ctx;
+    ctx.save();
+    // 用真实 backing store 清屏，避免 transform / dpr / 合成导致的残留
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+    ctx.restore();
   }
 
   // 绘制玩家（简单方块）
@@ -84,8 +94,9 @@ export class Renderer {
   drawPlayer(player: PLAYER_STATE, isLocal: boolean = false): void {
     const size = 20; // 像素大小
     // 将世界坐标转换为屏幕坐标（减去camera偏移）
-    const screenX = player.x - this.camX;
-    const screenY = player.y - this.camY;
+    // 修复: round 到整数像素，避免子像素抗锯齿导致的重影
+    const screenX = Math.round(player.x - this.camX);
+    const screenY = Math.round(player.y - this.camY);
 
     // 玩家颜色（本地玩家蓝色，其他红色）
     this.ctx.fillStyle = isLocal ? '#00aaff' : '#ff4444';
@@ -131,8 +142,9 @@ export class Renderer {
   // Day2: 绘制子弹
   // Step5: 使用BULLET_STATE类型，后续要画ownerId颜色时不需要改签名
   drawBullet(bullet: BULLET_STATE): void {
-    const screenX = bullet.x - this.camX;
-    const screenY = bullet.y - this.camY;
+    // 修复: round 到整数像素，避免子像素抗锯齿导致的重影
+    const screenX = Math.round(bullet.x - this.camX);
+    const screenY = Math.round(bullet.y - this.camY);
     
     // 绘制小圆点
     this.ctx.fillStyle = '#ffff00'; // 黄色
@@ -141,20 +153,70 @@ export class Renderer {
     this.ctx.fill();
   }
 
-  // Day3: 绘制物品
+  // Day3: 绘制物品（保留兼容）
   drawItem(item: ITEM_STATE): void {
-    const screenX = item.x - this.camX;
-    const screenY = item.y - this.camY;
+    // 修复: round 到整数像素，避免子像素抗锯齿导致的重影
+    const screenX = Math.round(item.x - this.camX);
+    const screenY = Math.round(item.y - this.camY);
     const size = 12; // 物品大小
     
     // 绘制小方块（先用统一颜色，后续可按type区分）
     this.ctx.fillStyle = '#00ff00'; // 绿色
     this.ctx.fillRect(screenX - size / 2, screenY - size / 2, size, size);
-    
+
     // 边框
     this.ctx.strokeStyle = '#fff';
     this.ctx.lineWidth = 1;
     this.ctx.strokeRect(screenX - size / 2, screenY - size / 2, size, size);
+  }
+
+  // 新增: 绘制世界物品
+  drawWorldItem(worldItem: WorldItem): void {
+    const screenX = Math.round(worldItem.x - this.camX);
+    const screenY = Math.round(worldItem.y - this.camY);
+    const size = 12;
+    
+    try {
+      const itemType = getItemType(worldItem.typeId);
+      // 根据稀有度设置颜色
+      if (itemType.rarity === 'COMMON') {
+        this.ctx.fillStyle = '#00ff00'; // 绿色
+      } else if (itemType.rarity === 'RARE') {
+        this.ctx.fillStyle = '#0088ff'; // 蓝色
+      } else {
+        this.ctx.fillStyle = '#ff8800'; // 橙色（QUEST）
+      }
+    } catch {
+      this.ctx.fillStyle = '#00ff00'; // 默认绿色
+    }
+    
+    this.ctx.fillRect(screenX - size / 2, screenY - size / 2, size, size);
+    this.ctx.strokeStyle = '#000000';
+    this.ctx.lineWidth = 1;
+    this.ctx.strokeRect(screenX - size / 2, screenY - size / 2, size, size);
+  }
+
+  // 新增: 绘制掉落包
+  drawLootBag(bag: LootBag): void {
+    const screenX = Math.round(bag.x - this.camX);
+    const screenY = Math.round(bag.y - this.camY);
+    const size = 16; // 掉落包稍大一些
+    
+    // 掉落包用棕色表示
+    this.ctx.fillStyle = '#8b4513';
+    this.ctx.fillRect(screenX - size / 2, screenY - size / 2, size, size);
+    this.ctx.strokeStyle = '#654321';
+    this.ctx.lineWidth = 2;
+    this.ctx.strokeRect(screenX - size / 2, screenY - size / 2, size, size);
+    
+    // 显示物品数量（如果有）
+    if (bag.items.length > 0) {
+      this.ctx.fillStyle = '#ffffff';
+      this.ctx.font = '10px monospace';
+      this.ctx.textAlign = 'center';
+      this.ctx.textBaseline = 'middle';
+      this.ctx.fillText(bag.items.length.toString(), screenX, screenY);
+    }
   }
 
   // Day3: 绘制撤离区
@@ -174,13 +236,14 @@ export class Renderer {
 
   // Day4-2: 绘制障碍物（灰色矩形）
   drawObstacle(obstacle: OBSTACLE_STATE): void {
-    const screenX = obstacle.x - this.camX;
-    const screenY = obstacle.y - this.camY;
+    // 修复: round 到整数像素，避免子像素抗锯齿导致的重影
+    const screenX = Math.round(obstacle.x - this.camX);
+    const screenY = Math.round(obstacle.y - this.camY);
 
     // 填充（深灰色）
     this.ctx.fillStyle = '#666';
     this.ctx.fillRect(screenX, screenY, obstacle.w, obstacle.h);
-    
+
     // 边框（深色）
     this.ctx.strokeStyle = '#333';
     this.ctx.lineWidth = 2;
@@ -198,7 +261,9 @@ export class Renderer {
     bullets: BULLET_STATE[] = [],
     items: ITEM_STATE[] = [],
     extractZone?: { x: number; y: number; w: number; h: number },
-    obstacles: OBSTACLE_STATE[] = [] // Day4-2: 障碍物列表
+    obstacles: OBSTACLE_STATE[] = [], // Day4-2: 障碍物列表
+    worldItems: WorldItem[] = [], // 新增: 世界物品列表
+    lootBags: LootBag[] = [] // 新增: 掉落包列表
   ): void {
     this.clear();
 
@@ -208,8 +273,17 @@ export class Renderer {
       if (localPlayer) {
         // camera位置 = 玩家世界坐标 - 屏幕中心偏移
         // 这样玩家就会显示在屏幕中心（screenX = player.x - camX = cssWidth/2）
-        this.camX = localPlayer.x - this.cssWidth / 2;
-        this.camY = localPlayer.y - this.cssHeight / 2;
+        let targetCamX = localPlayer.x - this.cssWidth / 2;
+        let targetCamY = localPlayer.y - this.cssHeight / 2;
+        
+        // P0-3 修复: Clamp camera 到世界边界（避免看到出界空白）
+        if (this.worldWidth > 0 && this.worldHeight > 0) {
+          targetCamX = Math.max(0, Math.min(targetCamX, this.worldWidth - this.cssWidth));
+          targetCamY = Math.max(0, Math.min(targetCamY, this.worldHeight - this.cssHeight));
+        }
+        
+        this.camX = targetCamX;
+        this.camY = targetCamY;
       }
     }
     // 如果本地玩家不存在，camX/camY保持0（不移动camera）
@@ -224,9 +298,19 @@ export class Renderer {
       this.drawExtractZone(extractZone);
     }
 
-    // Day3: 绘制所有物品
-    for (const item of items) {
-      this.drawItem(item);
+    // P2-1: 旧 items 系统已停用，不再绘制
+    // for (const item of items) {
+    //   this.drawItem(item);
+    // }
+
+    // 绘制世界物品（只使用新系统）
+    for (const worldItem of worldItems) {
+      this.drawWorldItem(worldItem);
+    }
+
+    // 新增: 绘制掉落包
+    for (const bag of lootBags) {
+      this.drawLootBag(bag);
     }
 
     // 绘制所有玩家（使用屏幕坐标）
@@ -255,9 +339,16 @@ export class Renderer {
     }
   }
 
+  // P0-3 修复: 设置世界边界（用于 camera clamp）
+  setWorldBounds(width: number, height: number): void {
+    this.worldWidth = width;
+    this.worldHeight = height;
+  }
+
   // Resize方法：由外部调用，负责所有canvas尺寸和transform设置
   // 单一真相：所有resize逻辑都在这里，不再有内部自动resize
   // P2 优化: 在 resize 时缓存 rect，避免每帧 getBoundingClientRect()
+
   resize(cssWidth: number, cssHeight: number): void {
     this.cssWidth = cssWidth;
     this.cssHeight = cssHeight;
@@ -271,8 +362,17 @@ export class Renderer {
     this.canvas.width = cssWidth * dpr;
     this.canvas.height = cssHeight * dpr;
 
-    // 重置transform，然后设置scale（避免重复scale）
-    this.ctx.resetTransform();
+    // P0-4 修复: resetTransform 兼容性（Safari 等环境可能不支持）
+    // 使用 setTransform(1,0,0,1,0,0) 作为 fallback
+    try {
+      if (this.ctx.resetTransform) {
+        this.ctx.resetTransform();
+      } else {
+        this.ctx.setTransform(1, 0, 0, 1, 0, 0);
+      }
+    } catch {
+      this.ctx.setTransform(1, 0, 0, 1, 0, 0);
+    }
     this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     this.scale = dpr;
     

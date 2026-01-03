@@ -13,6 +13,10 @@ export * from './sim.js';
 // 内容配置
 export * from './content.js';
 
+// 物品系统类型和目录
+export * from './types.js';
+export * from './item_catalog.js';
+
 // 显式导出内容加载器函数
 export { loadMapConfig, loadItemTypes } from './content.js';
 

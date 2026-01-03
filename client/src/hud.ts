@@ -1,4 +1,5 @@
-import type { PLAYER_STATE, S2C_SNAPSHOT } from '@jerkie-man/shared';
+import type { PLAYER_STATE, S2C_SNAPSHOT, PlayerInventory, ItemInstance } from '@jerkie-man/shared';
+import { getItemType, ITEM_CATALOG } from '@jerkie-man/shared';
 
 /**
  * HTML 转义函数（防止 XSS）
@@ -27,10 +28,15 @@ export interface HUDData {
   players: PLAYER_STATE[];
   counts: {
     bullets: number;
-    items: number;
+    worldItems: number; // P2-1: 改用 worldItems（旧 items 已停用）
+    lootBags: number; // P2-1: 新增掉落包计数
   };
   selectedEntity: PLAYER_STATE | null;
   events: string[]; // 最近30条事件
+  // 新增: 物品系统数据
+  inventory?: PlayerInventory; // 本地玩家背包
+  stash?: ItemInstance[]; // 仓库（需要从服务器获取，暂时留空）
+  money?: number; // 钱（需要从服务器获取，暂时留空）
 }
 
 export class HUD {
@@ -57,6 +63,15 @@ export class HUD {
       
       <h3>Counts</h3>
       <div id="hud-counts"></div>
+      
+      <h3>Inventory (In-Raid)</h3>
+      <div id="hud-inventory"></div>
+      
+      <h3>Stash (Out-of-Raid)</h3>
+      <div id="hud-stash"></div>
+      
+      <h3>Money</h3>
+      <div id="hud-money"></div>
       
       <h3>Selected Entity</h3>
       <div id="hud-selected"></div>
@@ -132,8 +147,69 @@ export class HUD {
     if (countsEl) {
       countsEl.innerHTML = `
         <div>Bullets: ${data.counts.bullets}</div>
-        <div>Items: ${data.counts.items}</div>
+        <div>World Items: ${data.counts.worldItems}</div>
+        <div>Loot Bags: ${data.counts.lootBags}</div>
       `;
+    }
+
+    // 新增: Inventory (In-Raid)
+    const inventoryEl = document.getElementById('hud-inventory');
+    if (inventoryEl) {
+      if (data.inventory) {
+        const items = data.inventory.items;
+        if (items.length === 0) {
+          inventoryEl.innerHTML = '<div>Empty</div>';
+        } else {
+          let html = `<div><strong>Capacity:</strong> ${items.length}/${data.inventory.bagCap}</div><ul>`;
+          for (const item of items) {
+            try {
+              const itemType = getItemType(item.typeId);
+              html += `<li>${escapeHtml(itemType.name)} x${escapeHtml(item.qty)}</li>`;
+            } catch {
+              html += `<li>${escapeHtml(item.typeId)} x${escapeHtml(item.qty)}</li>`;
+            }
+          }
+          html += '</ul>';
+          inventoryEl.innerHTML = html;
+        }
+      } else {
+        inventoryEl.innerHTML = '<div>Not available</div>';
+      }
+    }
+
+    // 新增: Stash (Out-of-Raid)
+    const stashEl = document.getElementById('hud-stash');
+    if (stashEl) {
+      if (data.stash && data.stash.length > 0) {
+        // 按 typeId 聚合显示
+        const stashMap = new Map<string, number>();
+        for (const item of data.stash) {
+          stashMap.set(item.typeId, (stashMap.get(item.typeId) || 0) + item.qty);
+        }
+        let html = '<ul>';
+        for (const [typeId, qty] of stashMap.entries()) {
+          try {
+            const itemType = getItemType(typeId);
+            html += `<li>${escapeHtml(itemType.name)} x${escapeHtml(qty)}</li>`;
+          } catch {
+            html += `<li>${escapeHtml(typeId)} x${escapeHtml(qty)}</li>`;
+          }
+        }
+        html += '</ul>';
+        stashEl.innerHTML = html;
+      } else {
+        stashEl.innerHTML = '<div>Empty</div>';
+      }
+    }
+
+    // 新增: Money
+    const moneyEl = document.getElementById('hud-money');
+    if (moneyEl) {
+      if (data.money !== undefined) {
+        moneyEl.innerHTML = `<div><strong>${escapeHtml(data.money)}</strong></div>`;
+      } else {
+        moneyEl.innerHTML = '<div>Not available</div>';
+      }
     }
 
     // Selected Entity
@@ -175,4 +251,3 @@ export class HUD {
     }
   }
 }
-

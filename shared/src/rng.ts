@@ -1,23 +1,23 @@
 /**
- * 基于 seed 的伪随机数生成器
- * 使用 mulberry32 算法，简单高效，适合游戏场景
+ * 可复现的随机数生成器
+ * 基于 Mulberry32 算法，速度快且分布均匀
  */
 
 /**
- * 创建一个基于 seed 的伪随机数生成器
- * @param seed 随机种子（整数）
- * @returns 返回一个函数，每次调用返回 [0, 1) 范围内的随机数
+ * 创建一个可复现的随机数生成器
+ * @param seed 种子值（整数）
+ * @returns 返回一个函数，每次调用生成 0-1 之间的随机数
  */
 export function createRng(seed: number): () => number {
-  let state = seed;
+  // Mulberry32 算法
+  let state = seed >>> 0; // 确保是 32 位无符号整数
   
   return function(): number {
-    // mulberry32 算法
-    state = (state + 0x6d2b79f5) | 0;
-    let t = Math.imul(state ^ (state >>> 15), state | 1);
-    t = t ^ (t + Math.imul(t ^ (t >>> 7), state | 61));
+    state = (state + 0x6D2B79F5) >>> 0;
+    let t = state;
+    t = Math.imul(t ^ (t >>> 15), t | 1) >>> 0;
+    t = (t + Math.imul(t ^ (t >>> 7), t | 61)) >>> 0;
     return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
   };
 }
-
 
