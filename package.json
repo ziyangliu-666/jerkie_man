@@ -1,0 +1,24 @@
+{
+  "name": "jerkie-man",
+  "version": "0.1.0",
+  "private": true,
+  "workspaces": [
+    "shared",
+    "server",
+    "client"
+  ],
+  "scripts": {
+    "dev:all": "concurrently \"npm run dev:server\" \"npm run dev:client\"",
+    "dev:server": "npm run dev --workspace=server",
+    "dev:client": "npm run dev --workspace=client",
+    "build": "npm run build --workspaces --if-present",
+    "clean": "rimraf node_modules shared/node_modules server/node_modules client/node_modules",
+    "test:smoke": "npm run build --workspace=shared && tsx server/src/smoke.ts"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2",
+    "rimraf": "^5.0.5",
+    "typescript": "^5.3.3"
+  }
+}
+

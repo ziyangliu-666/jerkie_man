@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Jerkie Man - 搜打撤</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: 'Courier New', monospace;
+      background: #1a1a1a;
+      color: #fff;
+      overflow: hidden;
+    }
+
+    #game-container {
+      position: relative;
+      width: 100vw;
+      height: 100vh;
+    }
+
+    #canvas {
+      display: block;
+      background: #2a2a2a;
+    }
+
+    #hud {
+      position: fixed;
+      top: 0;
+      right: 0;
+      width: 300px;
+      height: 100vh;
+      background: rgba(0, 0, 0, 0.8);
+      border-left: 2px solid #444;
+      padding: 10px;
+      overflow-y: auto;
+      font-size: 12px;
+      line-height: 1.4;
+    }
+
+    #hud h3 {
+      color: #0ff;
+      margin: 10px 0 5px 0;
+      font-size: 14px;
+    }
+
+    #hud table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 5px 0;
+    }
+
+    #hud td {
+      padding: 2px 5px;
+      border-bottom: 1px solid #333;
+    }
+
+    #hud .event-log {
+      max-height: 200px;
+      overflow-y: auto;
+      font-size: 11px;
+      color: #aaa;
+    }
+
+    #hud .event-log div {
+      margin: 2px 0;
+    }
+  </style>
+</head>
+<body>
+  <div id="game-container">
+    <canvas id="canvas"></canvas>
+    <div id="hud"></div>
+  </div>
+  <script type="module" src="/src/main.ts"></script>
+</body>
+</html>
+

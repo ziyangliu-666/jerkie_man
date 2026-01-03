@@ -1,0 +1,17 @@
+{
+  "name": "@jerkie-man/client",
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "build": "tsc && vite build",
+    "dev": "vite"
+  },
+  "dependencies": {
+    "@jerkie-man/shared": "*"
+  },
+  "devDependencies": {
+    "typescript": "^5.3.3",
+    "vite": "^5.0.11"
+  }
+}
+
