@@ -31,26 +31,30 @@ export class Renderer {
     this.canvas.style.width = `${width}px`;
     this.canvas.style.height = `${height}px`;
 
-    // 缩放上下文以匹配DPI
-    this.ctx.scale(dpr, dpr);
+    // 重置transform，然后设置scale（避免重复scale）
+    this.ctx.resetTransform();
+    this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     this.scale = dpr;
   }
 
   // 屏幕坐标转世界坐标
   screenToWorld(screenX: number, screenY: number): { x: number; y: number } {
     const rect = this.canvas.getBoundingClientRect();
+    // 由于使用了setTransform(dpr,0,0,dpr,0,0)，坐标已经自动缩放
+    // 所以只需要减去rect偏移，不需要再除以scale
     return {
-      x: (screenX - rect.left) / this.scale,
-      y: (screenY - rect.top) / this.scale,
+      x: screenX - rect.left,
+      y: screenY - rect.top,
     };
   }
 
   // 世界坐标转屏幕坐标
   worldToScreen(worldX: number, worldY: number): { x: number; y: number } {
     const rect = this.canvas.getBoundingClientRect();
+    // 由于使用了setTransform，世界坐标直接对应屏幕坐标（已缩放）
     return {
-      x: worldX * this.scale + rect.left,
-      y: worldY * this.scale + rect.top,
+      x: worldX + rect.left,
+      y: worldY + rect.top,
     };
   }
 
@@ -114,6 +118,20 @@ export class Renderer {
     // 绘制所有玩家
     for (const player of players) {
       this.drawPlayer(player, player.id === localPlayerId);
+    }
+
+    // 临时调试：显示本地玩家坐标文本
+    if (localPlayerId) {
+      const localPlayer = players.find((p) => p.id === localPlayerId);
+      if (localPlayer) {
+        this.ctx.fillStyle = '#fff';
+        this.ctx.font = '12px monospace';
+        this.ctx.fillText(
+          `Local: (${localPlayer.x.toFixed(1)}, ${localPlayer.y.toFixed(1)})`,
+          10,
+          20
+        );
+      }
     }
   }
 }

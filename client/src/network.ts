@@ -12,6 +12,7 @@ export interface NetworkCallbacks {
   onError?: (error: string) => void;
   onConnect?: () => void;
   onDisconnect?: () => void;
+  onWelcome?: (playerId: string) => void;
 }
 
 export class Network {
@@ -56,6 +57,15 @@ export class Network {
       this.ws.onmessage = (event) => {
         try {
           const raw = JSON.parse(event.data.toString());
+          
+          // 处理S2C_WELCOME消息（不在schema中，需要特殊处理）
+          if (raw.type === 'S2C_WELCOME' && raw.playerId) {
+            if (this.callbacks.onWelcome) {
+              this.callbacks.onWelcome(raw.playerId);
+            }
+            return;
+          }
+
           const message = S2C_MESSAGE_SCHEMA.parse(raw) as S2C_MESSAGE;
 
           if (message.type === 'S2C_SNAPSHOT') {

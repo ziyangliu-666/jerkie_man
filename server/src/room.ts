@@ -50,15 +50,21 @@ export class Room {
     return this.players.get(playerId);
   }
 
+  // 节流日志：每200ms打印一次
+  private lastProcessLog = new Map<string, number>();
+
   // 处理输入（由tick循环调用）
   processInput(playerId: string, input: C2S_INPUT): void {
     const player = this.players.get(playerId);
     if (!player) return;
 
-    // 丢弃过期输入（seq小于等于已处理的）
+    // 只使用seq去重，不检查tick（简化策略）
     if (input.seq <= player.lastInputSeq) {
       return;
     }
+
+    const oldX = player.x;
+    const oldY = player.y;
 
     player.lastInputSeq = input.seq;
     player.lastInputTick = input.tick;
@@ -67,16 +73,19 @@ export class Room {
     const deltaTime = 0.05;
     player.processInput(input.keys, deltaTime, this.mapConfig.width, this.mapConfig.height);
 
-    log('INPUT', {
-      room: this.id,
-      player: playerId,
-      tick: this.tick,
-      seq: input.seq,
-      up: input.keys.up ? 1 : 0,
-      down: input.keys.down ? 1 : 0,
-      left: input.keys.left ? 1 : 0,
-      right: input.keys.right ? 1 : 0,
-    });
+    // 节流日志：每200ms打印一次
+    const lastLog = this.lastProcessLog.get(playerId) || 0;
+    const now = Date.now();
+    if (now - lastLog >= 200) {
+      log('PROCESS_INPUT', {
+        room: this.id,
+        player: playerId,
+        tick: this.tick,
+        seq: input.seq,
+        pos: `(${oldX.toFixed(1)},${oldY.toFixed(1)})->(${player.x.toFixed(1)},${player.y.toFixed(1)})`,
+      });
+      this.lastProcessLog.set(playerId, now);
+    }
   }
 
   // 获取当前状态快照

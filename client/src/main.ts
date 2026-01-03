@@ -42,17 +42,12 @@ const network = new Network('ws://localhost:8080', 'local', {
     console.log('Disconnected from server');
     hud.addEvent('Disconnected from server');
   },
+  onWelcome: (playerId: string) => {
+    localPlayerId = playerId;
+    console.log(`Received welcome, local player ID: ${localPlayerId}`);
+    hud.addEvent(`Local player ID: ${localPlayerId}`);
+  },
   onSnapshot: (snapshot: S2C_SNAPSHOT) => {
-    // 从第一个snapshot中确定本地玩家ID（简单策略：第一个玩家）
-    if (localPlayerId === null && snapshot.players.length > 0) {
-      // 找到我们自己的玩家（通过比较输入seq）
-      // Day1简化：假设第一个玩家是我们
-      localPlayerId = snapshot.players[0]?.id ?? null;
-      if (localPlayerId) {
-        hud.addEvent(`Local player ID: ${localPlayerId}`);
-      }
-    }
-
     // 更新选中实体的数据（如果已选中）
     if (selectedEntity) {
       const updated = snapshot.players.find((p) => p.id === selectedEntity!.id);
@@ -83,6 +78,7 @@ canvas.addEventListener('click', (e) => {
 });
 
 // 渲染循环
+let lastLogTime = 0;
 function renderLoop(): void {
   // 获取插值后的状态
   const state = network.getSnapshotBuffer().getInterpolatedState(120);
@@ -95,6 +91,14 @@ function renderLoop(): void {
   const aim = inputManager.getAimAngle(canvas);
   inputSeq++;
   network.sendInput(inputSeq, keys, aim);
+
+  // 节流日志：每200ms打印一次
+  const now = Date.now();
+  if (now - lastLogTime >= 200) {
+    const connState = network.getConnectionState();
+    console.log(`[CLIENT] seq=${inputSeq} tick=${connState.lastServerTick} keys=${JSON.stringify(keys)}`);
+    lastLogTime = now;
+  }
 
   // 更新HUD
   const connState = network.getConnectionState();

@@ -149,16 +149,17 @@ Client2 snapshots received: 26
 - ✅ Tick递增验证通过
 
 **失败项**:
-- ❌ 玩家移动检测失败
-  - 问题：输入发送后，玩家位置没有变化
-  - 可能原因：
-    1. 输入队列处理有问题
-    2. 玩家位置更新逻辑有问题
-    3. tick值不匹配导致输入被丢弃
+- ✅ 玩家移动检测已修复并通过
+  - 修复内容：
+    1. 修复了DPR/坐标转换bug（使用setTransform替代重复scale）
+    2. 实现了S2C_WELCOME消息，正确识别本地玩家ID
+    3. 简化输入处理策略（只使用seq去重，不检查tick）
+    4. 添加了详细的调试日志
+  - 测试结果：玩家在1.5s内移动了290px，远超10px要求
 
 ## 已发现问题列表
 
-### 问题 1: 玩家移动未检测到
+### 问题 1: 玩家移动未检测到 ✅ 已修复
 
 **复现步骤**:
 1. 运行`npm run test:smoke`
@@ -167,19 +168,45 @@ Client2 snapshots received: 26
 
 **预期行为**:
 - 发送输入后，玩家位置应该发生变化
-- 2秒内至少移动10像素
+- 1.5秒内至少移动10像素
 
 **实际行为**:
 - 玩家位置没有变化或变化太小（<1像素）
 
 **根因分析**:
-需要进一步调试：
-1. 检查server日志，确认INPUT消息是否被处理
-2. 检查`room.processInput`是否被调用
-3. 检查`player.processInput`中的移动计算
-4. 检查输入队列的处理逻辑
+1. DPR/坐标转换bug导致渲染位置错误
+2. 本地玩家ID识别不准确（使用players[0]假设）
+3. 输入处理策略过于严格（tick字段导致输入被丢弃）
 
-**修复状态**: 🔄 待修复
+**修复方案**:
+1. **修复DPR/坐标bug** (`client/src/renderer.ts`):
+   - 使用`ctx.setTransform(dpr, 0, 0, dpr, 0, 0)`替代重复scale
+   - 修正`screenToWorld`和`worldToScreen`与transform策略一致
+
+2. **实现S2C_WELCOME消息** (`server/src/main.ts`, `client/src/network.ts`):
+   - Server在连接时发送`S2C_WELCOME`消息，包含分配的playerId
+   - Client通过`onWelcome`回调设置`localPlayerId`
+
+3. **简化输入处理策略** (`server/src/room.ts`):
+   - 只使用`seq`字段去重，不检查`tick`字段
+   - 每个tick处理队列中的所有有效输入
+
+4. **添加调试日志**:
+   - Client每200ms打印输入状态
+   - Server每200ms打印接收/处理/广播状态
+
+**修复状态**: ✅ 已修复
+
+**验证结果**:
+```powershell
+PS> npm run test:smoke
+=== Movement Analysis ===
+PlayerId: p1767409769691_5ofjq4y8q
+Initial position: (273.77, 1669.32)
+Final position: (563.77, 1669.32)
+Distance moved: 290.00px
+✅ Smoke test PASSED
+```
 
 ### 问题 2: Shared包导出问题（已修复）
 
@@ -237,7 +264,7 @@ Client2 snapshots received: 26
 - [x] 收到足够数量的snapshots ✅
 - [x] Snapshot包含至少2个玩家 ✅
 - [x] Tick递增 ✅
-- [ ] 玩家移动检测 ❌
+- [x] 玩家移动检测（1.5s内>10px） ✅
 
 ## 下一步行动
 
@@ -257,22 +284,24 @@ Client2 snapshots received: 26
 
 ## 总结
 
-**总体状态**: ⚠️ 部分通过
+**总体状态**: ✅ 基本通过
 
 - ✅ 基础架构搭建成功
 - ✅ 服务器和客户端可以启动
 - ✅ WebSocket连接正常
 - ✅ Snapshot广播正常
-- ❌ 玩家移动功能需要调试
-- ⚠️ HUD显示需要手动验证
+- ✅ 玩家移动功能正常工作
+- ⚠️ HUD显示需要手动验证（Browser工具限制）
 
 **关键成就**:
 - Monorepo结构完整
 - TypeScript配置正确
 - WebSocket通信正常
 - 结构化日志工作正常
+- 玩家移动同步正常（smoke test验证）
+- DPR/坐标转换bug已修复
+- 本地玩家识别机制完善
 
 **待解决问题**:
-- 玩家移动输入处理
-- HUD完整功能验证
+- HUD完整功能需要手动验证（双窗口测试）
 

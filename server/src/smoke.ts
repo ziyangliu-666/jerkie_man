@@ -14,6 +14,7 @@ interface TestClient {
   id: string;
   snapshots: S2C_SNAPSHOT[];
   connected: boolean;
+  playerId: string | null; // 服务器分配的playerId
 }
 
 async function createClient(id: string): Promise<TestClient> {
@@ -24,6 +25,7 @@ async function createClient(id: string): Promise<TestClient> {
       id,
       snapshots: [],
       connected: false,
+      playerId: null,
     };
 
     ws.on('open', () => {
@@ -41,6 +43,14 @@ async function createClient(id: string): Promise<TestClient> {
     ws.on('message', (data: Buffer) => {
       try {
         const raw = JSON.parse(data.toString());
+        
+        // 处理S2C_WELCOME消息
+        if (raw.type === 'S2C_WELCOME' && raw.playerId) {
+          client.playerId = raw.playerId;
+          console.log(`[${id}] Received welcome, playerId: ${client.playerId}`);
+          return;
+        }
+
         const message = S2C_MESSAGE_SCHEMA.parse(raw);
 
         if (message.type === 'S2C_SNAPSHOT') {
@@ -180,25 +190,40 @@ async function runSmokeTest(): Promise<void> {
     }
   }
 
-  // 断言：至少一个玩家坐标发生变化
+  // 断言：至少一个玩家坐标发生变化（1.5s内移动距离>10px）
   const firstSnapshot1 = client1.snapshots[0];
-  const player1First = firstSnapshot1.players[0];
-  const player1Last = lastSnapshot1.players.find((p) => p.id === player1First.id);
-
-  if (!player1Last) {
-    throw new Error('Player1 not found in last snapshot');
+  if (firstSnapshot1.players.length === 0) {
+    throw new Error('No players in first snapshot');
   }
 
-  const moved =
-    Math.abs(player1Last.x - player1First.x) > 1 ||
-    Math.abs(player1Last.y - player1First.y) > 1;
+  // 找到client1对应的玩家
+  const player1First = firstSnapshot1.players.find((p) => p.id === client1.playerId);
+  if (!player1First) {
+    throw new Error(`Client1 player (${client1.playerId}) not found in first snapshot`);
+  }
 
-  if (!moved) {
-    throw new Error('No player movement detected');
+  const player1Last = lastSnapshot1.players.find((p) => p.id === client1.playerId);
+  if (!player1Last) {
+    throw new Error(`Client1 player (${client1.playerId}) not found in last snapshot`);
+  }
+
+  const dx = player1Last.x - player1First.x;
+  const dy = player1Last.y - player1First.y;
+  const distance = Math.sqrt(dx * dx + dy * dy);
+
+  console.log(`\n=== Movement Analysis ===`);
+  console.log(`PlayerId: ${client1.playerId}`);
+  console.log(`Initial position: (${player1First.x.toFixed(2)}, ${player1First.y.toFixed(2)})`);
+  console.log(`Final position: (${player1Last.x.toFixed(2)}, ${player1Last.y.toFixed(2)})`);
+  console.log(`Distance moved: ${distance.toFixed(2)}px`);
+
+  if (distance < 10) {
+    throw new Error(
+      `Player movement too small: ${distance.toFixed(2)}px < 10px. PlayerId: ${client1.playerId}`
+    );
   }
 
   console.log('✓ All assertions passed!');
-  console.log(`✓ Players moved: Player1 from (${player1First.x.toFixed(1)}, ${player1First.y.toFixed(1)}) to (${player1Last.x.toFixed(1)}, ${player1Last.y.toFixed(1)})`);
   console.log(`✓ Tick range: ${ticks1[0]} -> ${ticks1[ticks1.length - 1]}`);
 }
 

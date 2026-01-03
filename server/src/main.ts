@@ -33,7 +33,10 @@ const inputQueues = new Map<string, Array<{ input: C2S_MESSAGE & { type: 'C2S_IN
 wss.on('connection', (ws: WebSocket) => {
   let playerId: string | null = null;
 
-  ws.on('message', (data: Buffer) => {
+// 节流日志：每200ms打印一次
+const messageLogThrottle = new Map<WebSocket, number>();
+
+ws.on('message', (data: Buffer) => {
     try {
       const raw = JSON.parse(data.toString());
       const parsed = C2S_MESSAGE_SCHEMA.parse(raw);
@@ -50,6 +53,14 @@ wss.on('connection', (ws: WebSocket) => {
           player: playerId,
           tick: room.tick,
         });
+
+        // 发送WELCOME消息，告知客户端自己的playerId
+        ws.send(
+          JSON.stringify({
+            type: 'S2C_WELCOME',
+            playerId: playerId,
+          })
+        );
       } else if (parsed.type === 'C2S_INPUT') {
         if (!playerId) {
           ws.send(
@@ -62,6 +73,21 @@ wss.on('connection', (ws: WebSocket) => {
             )
           );
           return;
+        }
+
+        // 节流日志：每200ms打印一次
+        const lastLog = messageLogThrottle.get(ws) || 0;
+        const now = Date.now();
+        if (now - lastLog >= 200) {
+          log('RECV_INPUT', {
+            room: room.id,
+            player: playerId,
+            tick: room.tick,
+            seq: parsed.seq,
+            inputTick: parsed.tick,
+            keys: `${parsed.keys.up ? 'U' : ''}${parsed.keys.down ? 'D' : ''}${parsed.keys.left ? 'L' : ''}${parsed.keys.right ? 'R' : ''}`,
+          });
+          messageLogThrottle.set(ws, now);
         }
 
         // 将输入加入队列（tick循环会处理）
