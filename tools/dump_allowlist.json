@@ -1,0 +1,65 @@
+{
+  "plan": {
+    "includeFiles": [
+      "client/src/main.ts",
+      "server/src/main.ts",
+      "shared/src/protocol.ts",
+      "shared/src/content.ts",
+      "package.json"
+    ],
+    "includeGlobs": [
+      "client/src/**/*.ts",
+      "server/src/**/*.ts",
+      "shared/src/**/*.ts"
+    ],
+    "excludeFiles": [],
+    "excludeGlobs": [
+      "**/*.md",
+      "**/*.test.ts",
+      "**/*.spec.ts"
+    ],
+    "optionalFiles": [
+      "TEST_REPORT_DAY1.md"
+    ]
+  },
+  "debug": {
+    "includeFiles": [],
+    "includeGlobs": [
+      "client/src/**/*.ts",
+      "server/src/**/*.ts",
+      "shared/src/**/*.ts"
+    ],
+    "excludeFiles": [],
+    "excludeGlobs": [
+      "**/*.md",
+      "**/*.test.ts",
+      "**/*.spec.ts",
+      "**/node_modules/**",
+      "**/dist/**",
+      "**/build/**",
+      "**/.git/**"
+    ],
+    "optionalFiles": []
+  },
+  "full": {
+    "includeFiles": [],
+    "includeGlobs": [
+      "shared/src/**/*.ts",
+      "client/src/**/*.ts",
+      "server/src/**/*.ts",
+      "**/*.md",
+      "package.json"
+    ],
+    "excludeFiles": [],
+    "excludeGlobs": [
+      "**/node_modules/**",
+      "**/dist/**",
+      "**/build/**",
+      "**/.git/**"
+    ],
+    "optionalFiles": [
+      "TEST_REPORT_DAY1.md"
+    ]
+  }
+}
+

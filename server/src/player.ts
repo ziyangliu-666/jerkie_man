@@ -1,4 +1,5 @@
-import type { PLAYER_STATE } from '@jerkie-man/shared';
+import type { PLAYER_STATE, OBSTACLE_STATE } from '@jerkie-man/shared';
+import { simulatePlayerMove } from '@jerkie-man/shared';
 
 export class Player {
   public id: string;
@@ -8,9 +9,16 @@ export class Player {
   public status: 'ALIVE' | 'DEAD' | 'EXTRACTED';
   public lastInputSeq: number;
   public lastInputTick: number;
+  public lootCount: number; // Day3: 战利品计数
+  public extractProgress: number = 0; // 游戏化增强: 撤离进度（毫秒，0-2000）
 
-  // 移动速度（像素/秒）
-  private readonly SPEED = 200; // 200px/s，在20Hz tick下约10px/tick
+  // 修复: 移动速度已移至 shared/sim.ts，这里不再需要（保留注释用于文档）
+  // SPEED = 200 (在 shared/sim.ts 中定义)
+  
+  // Day2: 开火冷却（毫秒）
+  private lastFireTime = 0;
+  private readonly FIRE_COOLDOWN_MS = 150; // 150ms冷却，约6.67发/秒
+  private readonly EXTRACT_DURATION_MS = 2000; // 游戏化增强: 撤离需要持续2秒
 
   constructor(id: string, x: number = 0, y: number = 0) {
     this.id = id;
@@ -20,36 +28,60 @@ export class Player {
     this.status = 'ALIVE';
     this.lastInputSeq = 0;
     this.lastInputTick = 0;
+    this.lootCount = 0; // Day3: 初始化为0
   }
 
   // 处理输入，更新位置
+  // Day2: 如果玩家已死亡，不允许移动
+  // Day3: EXTRACTED 玩家也不能移动
+  // Day4-2: 添加碰撞检测（世界边界 + obstacles）
   processInput(
     keys: { up: boolean; down: boolean; left: boolean; right: boolean },
     deltaTime: number, // 秒
     mapWidth: number,
-    mapHeight: number
+    mapHeight: number,
+    obstacles: OBSTACLE_STATE[] = [] // Day4-2: 障碍物列表
   ): void {
-    let dx = 0;
-    let dy = 0;
-
-    if (keys.up) dy -= 1;
-    if (keys.down) dy += 1;
-    if (keys.left) dx -= 1;
-    if (keys.right) dx += 1;
-
-    // 归一化对角线移动
-    if (dx !== 0 && dy !== 0) {
-      dx *= 0.707; // 1/sqrt(2)
-      dy *= 0.707;
+    // Day2/Day3: 死亡或已撤离的玩家不能移动
+    if (this.status === 'DEAD' || this.status === 'EXTRACTED') {
+      return;
     }
 
-    // 计算新位置
-    const newX = this.x + dx * this.SPEED * deltaTime;
-    const newY = this.y + dy * this.SPEED * deltaTime;
+    // 修复: 使用 shared 的 simulatePlayerMove，确保 client/server 逻辑一致
+    const newPos = simulatePlayerMove(
+      { x: this.x, y: this.y },
+      keys,
+      deltaTime,
+      mapWidth,
+      mapHeight,
+      obstacles
+    );
+    
+    // 更新位置
+    this.x = newPos.x;
+    this.y = newPos.y;
+  }
 
-    // 边界clamp
-    this.x = Math.max(0, Math.min(mapWidth, newX));
-    this.y = Math.max(0, Math.min(mapHeight, newY));
+  // Day2: 检查是否可以开火（冷却时间）
+  canFire(now: number): boolean {
+    return now - this.lastFireTime >= this.FIRE_COOLDOWN_MS;
+  }
+
+  // Day2: 记录开火时间
+  recordFire(now: number): void {
+    this.lastFireTime = now;
+  }
+
+  // Day2: 受到伤害
+  takeDamage(amount: number): void {
+    if (this.status === 'DEAD') {
+      return; // 已死亡不再扣血
+    }
+    this.hp = Math.max(0, this.hp - amount);
+    if (this.hp <= 0) {
+      this.hp = 0;
+      this.status = 'DEAD';
+    }
   }
 
   toState(): PLAYER_STATE {
@@ -61,6 +93,8 @@ export class Player {
       status: this.status,
       lastInputSeq: this.lastInputSeq,
       lastInputTick: this.lastInputTick,
+      lootCount: this.lootCount, // Day3: 包含战利品计数
+      extractProgress: this.extractProgress, // 游戏化增强: 包含撤离进度
     };
   }
 }

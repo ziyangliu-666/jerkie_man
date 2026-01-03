@@ -1,9 +1,24 @@
-import type { PLAYER_STATE } from '@jerkie-man/shared';
+import type { PLAYER_STATE, BULLET_STATE, ITEM_STATE, OBSTACLE_STATE } from '@jerkie-man/shared';
 
 export class Renderer {
   private canvas: HTMLCanvasElement;
   private ctx: CanvasRenderingContext2D;
   private scale: number = 1; // DPI缩放因子
+
+  private cssWidth: number = 0;
+  private cssHeight: number = 0;
+  
+  // P0-3: Camera位置（世界坐标），用于将世界坐标转换为屏幕坐标
+  // camera跟随本地玩家，让玩家始终在屏幕中心附近可见
+  private camX = 0;
+  private camY = 0;
+  
+  // P2 优化: 缓存 canvas rect，避免每帧 getBoundingClientRect()
+  private cachedRectLeft: number = 0;
+  private cachedRectTop: number = 0;
+  // 修复: 兜底刷新策略 - 记录上次刷新时间
+  private lastRectUpdateAt: number = 0;
+  private readonly RECT_REFRESH_INTERVAL_MS = 250; // 最多每 250ms 刷新一次
 
   constructor(canvas: HTMLCanvasElement) {
     this.canvas = canvas;
@@ -12,78 +27,80 @@ export class Renderer {
       throw new Error('Failed to get 2d context');
     }
     this.ctx = ctx;
-
-    this.setupCanvas();
-    window.addEventListener('resize', () => this.setupCanvas());
-  }
-
-  private setupCanvas(): void {
-    const dpr = window.devicePixelRatio || 1;
-    const rect = this.canvas.getBoundingClientRect();
-    const width = rect.width;
-    const height = rect.height;
-
-    // 设置实际渲染尺寸（backing store）
-    this.canvas.width = width * dpr;
-    this.canvas.height = height * dpr;
-
-    // 设置CSS显示尺寸
-    this.canvas.style.width = `${width}px`;
-    this.canvas.style.height = `${height}px`;
-
-    // 重置transform，然后设置scale（避免重复scale）
-    this.ctx.resetTransform();
-    this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    this.scale = dpr;
+    // 不再自动resize，由外部调用resize()方法
   }
 
   // 屏幕坐标转世界坐标
+  // P0-3: 考虑camera偏移，确保点击选中准确
+  // P2 优化: 使用缓存的 rect，避免每帧 getBoundingClientRect()
+  // 修复: 兜底刷新策略 - 如果距离上次刷新超过 250ms，自动刷新
   screenToWorld(screenX: number, screenY: number): { x: number; y: number } {
-    const rect = this.canvas.getBoundingClientRect();
-    // 由于使用了setTransform(dpr,0,0,dpr,0,0)，坐标已经自动缩放
-    // 所以只需要减去rect偏移，不需要再除以scale
+    // 兜底刷新：如果距离上次刷新超过阈值，自动刷新 rect
+    const now = Date.now();
+    if (now - this.lastRectUpdateAt > this.RECT_REFRESH_INTERVAL_MS) {
+      this.refreshRect();
+    }
+    
+    // screenX/Y是浏览器窗口坐标（clientX/clientY）
+    // 先减去canvas的rect偏移，得到canvas内的屏幕坐标（CSS像素）
+    const canvasScreenX = screenX - this.cachedRectLeft;
+    const canvasScreenY = screenY - this.cachedRectTop;
+    // 加上camera偏移，得到世界坐标
+    // 因为camera是世界坐标，所以：worldX = screenX + camX
     return {
-      x: screenX - rect.left,
-      y: screenY - rect.top,
+      x: canvasScreenX + this.camX,
+      y: canvasScreenY + this.camY,
     };
   }
 
   // 世界坐标转屏幕坐标
+  // P0-3: 考虑camera偏移
+  // P2 优化: 使用缓存的 rect，避免每帧 getBoundingClientRect()
+  // 修复: 兜底刷新策略 - 如果距离上次刷新超过 250ms，自动刷新
   worldToScreen(worldX: number, worldY: number): { x: number; y: number } {
-    const rect = this.canvas.getBoundingClientRect();
-    // 由于使用了setTransform，世界坐标直接对应屏幕坐标（已缩放）
+    // 兜底刷新：如果距离上次刷新超过阈值，自动刷新 rect
+    const now = Date.now();
+    if (now - this.lastRectUpdateAt > this.RECT_REFRESH_INTERVAL_MS) {
+      this.refreshRect();
+    }
+    
+    // 世界坐标减去camera偏移，得到canvas内的屏幕坐标（CSS像素）
+    const canvasScreenX = worldX - this.camX;
+    const canvasScreenY = worldY - this.camY;
+    // 加上缓存的rect偏移，得到浏览器窗口坐标
     return {
-      x: worldX + rect.left,
-      y: worldY + rect.top,
+      x: canvasScreenX + this.cachedRectLeft,
+      y: canvasScreenY + this.cachedRectTop,
     };
   }
 
-  // 清除画布
+  // 清除画布（使用缓存的尺寸，避免每帧getBoundingClientRect）
   clear(): void {
-    const rect = this.canvas.getBoundingClientRect();
-    this.ctx.clearRect(0, 0, rect.width, rect.height);
+    this.ctx.clearRect(0, 0, this.cssWidth, this.cssHeight);
   }
 
   // 绘制玩家（简单方块）
+  // P0-3: 使用屏幕坐标绘制，考虑camera偏移
   drawPlayer(player: PLAYER_STATE, isLocal: boolean = false): void {
     const size = 20; // 像素大小
-    const x = player.x;
-    const y = player.y;
+    // 将世界坐标转换为屏幕坐标（减去camera偏移）
+    const screenX = player.x - this.camX;
+    const screenY = player.y - this.camY;
 
     // 玩家颜色（本地玩家蓝色，其他红色）
     this.ctx.fillStyle = isLocal ? '#00aaff' : '#ff4444';
-    this.ctx.fillRect(x - size / 2, y - size / 2, size, size);
+    this.ctx.fillRect(screenX - size / 2, screenY - size / 2, size, size);
 
     // 边框
     this.ctx.strokeStyle = '#fff';
     this.ctx.lineWidth = 2;
-    this.ctx.strokeRect(x - size / 2, y - size / 2, size, size);
+    this.ctx.strokeRect(screenX - size / 2, screenY - size / 2, size, size);
 
     // HP条
     const barWidth = size;
     const barHeight = 4;
-    const barX = x - barWidth / 2;
-    const barY = y - size / 2 - 8;
+    const barX = screenX - barWidth / 2;
+    const barY = screenY - size / 2 - 8;
 
     this.ctx.fillStyle = '#333';
     this.ctx.fillRect(barX, barY, barWidth, barHeight);
@@ -111,21 +128,124 @@ export class Renderer {
     return null;
   }
 
-  // 渲染所有玩家
-  render(players: PLAYER_STATE[], localPlayerId: string | null): void {
+  // Day2: 绘制子弹
+  // Step5: 使用BULLET_STATE类型，后续要画ownerId颜色时不需要改签名
+  drawBullet(bullet: BULLET_STATE): void {
+    const screenX = bullet.x - this.camX;
+    const screenY = bullet.y - this.camY;
+    
+    // 绘制小圆点
+    this.ctx.fillStyle = '#ffff00'; // 黄色
+    this.ctx.beginPath();
+    this.ctx.arc(screenX, screenY, 3, 0, Math.PI * 2);
+    this.ctx.fill();
+  }
+
+  // Day3: 绘制物品
+  drawItem(item: ITEM_STATE): void {
+    const screenX = item.x - this.camX;
+    const screenY = item.y - this.camY;
+    const size = 12; // 物品大小
+    
+    // 绘制小方块（先用统一颜色，后续可按type区分）
+    this.ctx.fillStyle = '#00ff00'; // 绿色
+    this.ctx.fillRect(screenX - size / 2, screenY - size / 2, size, size);
+    
+    // 边框
+    this.ctx.strokeStyle = '#fff';
+    this.ctx.lineWidth = 1;
+    this.ctx.strokeRect(screenX - size / 2, screenY - size / 2, size, size);
+  }
+
+  // Day3: 绘制撤离区
+  drawExtractZone(zone: { x: number; y: number; w: number; h: number }): void {
+    const screenX = zone.x - this.camX;
+    const screenY = zone.y - this.camY;
+    
+    // 半透明矩形填充
+    this.ctx.fillStyle = 'rgba(0, 255, 0, 0.2)';
+    this.ctx.fillRect(screenX, screenY, zone.w, zone.h);
+    
+    // 边框线
+    this.ctx.strokeStyle = '#0f0';
+    this.ctx.lineWidth = 2;
+    this.ctx.strokeRect(screenX, screenY, zone.w, zone.h);
+  }
+
+  // Day4-2: 绘制障碍物（灰色矩形）
+  drawObstacle(obstacle: OBSTACLE_STATE): void {
+    const screenX = obstacle.x - this.camX;
+    const screenY = obstacle.y - this.camY;
+
+    // 填充（深灰色）
+    this.ctx.fillStyle = '#666';
+    this.ctx.fillRect(screenX, screenY, obstacle.w, obstacle.h);
+    
+    // 边框（深色）
+    this.ctx.strokeStyle = '#333';
+    this.ctx.lineWidth = 2;
+    this.ctx.strokeRect(screenX, screenY, obstacle.w, obstacle.h);
+  }
+
+  // 渲染所有玩家和子弹
+  // P0-3: 计算camera让本地玩家居中，保证玩家永远可见
+  // Step5: bullets参数类型改为BULLET_STATE[]，类型明确且可扩展
+  // Day3: 增加items和extractZone参数
+  render(
+    players: PLAYER_STATE[],
+    localPlayerId: string | null,
+    debug: boolean = false,
+    bullets: BULLET_STATE[] = [],
+    items: ITEM_STATE[] = [],
+    extractZone?: { x: number; y: number; w: number; h: number },
+    obstacles: OBSTACLE_STATE[] = [] // Day4-2: 障碍物列表
+  ): void {
     this.clear();
 
-    // 绘制所有玩家
+    // P0-3: 计算camera位置，让本地玩家显示在屏幕中心
+    if (localPlayerId) {
+      const localPlayer = players.find((p) => p.id === localPlayerId);
+      if (localPlayer) {
+        // camera位置 = 玩家世界坐标 - 屏幕中心偏移
+        // 这样玩家就会显示在屏幕中心（screenX = player.x - camX = cssWidth/2）
+        this.camX = localPlayer.x - this.cssWidth / 2;
+        this.camY = localPlayer.y - this.cssHeight / 2;
+      }
+    }
+    // 如果本地玩家不存在，camX/camY保持0（不移动camera）
+
+    // Day4-2: 先绘制障碍物（背景层）
+    for (const obstacle of obstacles) {
+      this.drawObstacle(obstacle);
+    }
+
+    // Day3: 绘制撤离区（如果有）
+    if (extractZone) {
+      this.drawExtractZone(extractZone);
+    }
+
+    // Day3: 绘制所有物品
+    for (const item of items) {
+      this.drawItem(item);
+    }
+
+    // 绘制所有玩家（使用屏幕坐标）
     for (const player of players) {
       this.drawPlayer(player, player.id === localPlayerId);
     }
 
-    // 临时调试：显示本地玩家坐标文本
-    if (localPlayerId) {
+    // Day2: 绘制所有子弹
+    for (const bullet of bullets) {
+      this.drawBullet(bullet);
+    }
+
+    // Debug模式：显示本地玩家坐标文本（使用屏幕坐标，固定在左上角）
+    if (debug && localPlayerId) {
       const localPlayer = players.find((p) => p.id === localPlayerId);
       if (localPlayer) {
         this.ctx.fillStyle = '#fff';
         this.ctx.font = '12px monospace';
+        // 使用屏幕坐标绘制，固定在左上角（10, 20）
         this.ctx.fillText(
           `Local: (${localPlayer.x.toFixed(1)}, ${localPlayer.y.toFixed(1)})`,
           10,
@@ -133,6 +253,41 @@ export class Renderer {
         );
       }
     }
+  }
+
+  // Resize方法：由外部调用，负责所有canvas尺寸和transform设置
+  // 单一真相：所有resize逻辑都在这里，不再有内部自动resize
+  // P2 优化: 在 resize 时缓存 rect，避免每帧 getBoundingClientRect()
+  resize(cssWidth: number, cssHeight: number): void {
+    this.cssWidth = cssWidth;
+    this.cssHeight = cssHeight;
+    const dpr = window.devicePixelRatio || 1;
+    
+    // 设置CSS显示尺寸
+    this.canvas.style.width = `${cssWidth}px`;
+    this.canvas.style.height = `${cssHeight}px`;
+
+    // 设置实际渲染尺寸（backing store）
+    this.canvas.width = cssWidth * dpr;
+    this.canvas.height = cssHeight * dpr;
+
+    // 重置transform，然后设置scale（避免重复scale）
+    this.ctx.resetTransform();
+    this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    this.scale = dpr;
+    
+    // P2 优化: 缓存 canvas rect（resize 时更新，避免每帧读取 DOM）
+    this.refreshRect();
+  }
+  
+  // P1-2 修复: 提供 refreshRect 方法，在 layout shift 时手动刷新
+  // 用于处理页面滚动、浏览器 UI 变化、CSS 变化等导致的 canvas 位置偏移
+  // 修复: 更新 lastRectUpdateAt 时间戳
+  refreshRect(): void {
+    const rect = this.canvas.getBoundingClientRect();
+    this.cachedRectLeft = rect.left;
+    this.cachedRectTop = rect.top;
+    this.lastRectUpdateAt = Date.now();
   }
 }
 

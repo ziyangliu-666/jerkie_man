@@ -9,6 +9,10 @@ interface SnapshotEntry {
 export class SnapshotBuffer {
   private buffer: SnapshotEntry[] = [];
   private readonly maxSize = 10; // 保留最近10条（约1秒）
+  
+  // P0-1: 服务器时间偏移估计（serverNow - clientNow）
+  // 用于跨机器时钟偏移补偿，避免插值时找不到t0/t1或alpha跳变
+  private serverOffsetMs = 0;
 
   add(snapshot: S2C_SNAPSHOT): void {
     const entry: SnapshotEntry = {
@@ -25,16 +29,29 @@ export class SnapshotBuffer {
 
     // 按timestamp排序（确保顺序）
     this.buffer.sort((a, b) => a.snapshot.timestamp - b.snapshot.timestamp);
+    
+    // P0-1: 更新服务器时间偏移估计（平滑更新，避免单次抖动）
+    // snapshot.timestamp是服务器发送时的时间戳（server时间域）
+    // Date.now()是客户端当前时间（client时间域）
+    // offsetNow = serverNow - clientNow，即服务器时间比客户端快多少
+    const offsetNow = snapshot.timestamp - Date.now();
+    // 使用指数移动平均（90%旧值 + 10%新值）平滑更新，避免网络抖动影响
+    this.serverOffsetMs = this.serverOffsetMs * 0.9 + offsetNow * 0.1;
   }
 
   // 获取插值后的状态
+  // 修复: obstacles 已移至 WORLD_INIT，不再从 snapshot 获取
   getInterpolatedState(renderDelay: number = 120): {
     players: PLAYER_STATE[];
     bullets: BULLET_STATE[];
     items: ITEM_STATE[];
   } {
-    const now = Date.now();
-    const renderTime = now - renderDelay; // 120ms延迟补偿
+    // P0-1: 使用服务器时间域计算renderTime，避免跨机器时钟偏移导致插值失败
+    // 将客户端时间转换为服务器时间域：clientNow + offset = serverNow
+    const clientNow = Date.now();
+    const serverNow = clientNow + this.serverOffsetMs;
+    // renderTime是服务器时间域中的目标渲染时间点（考虑延迟补偿）
+    const renderTimeServer = serverNow - renderDelay;
 
     if (this.buffer.length === 0) {
       return { players: [], bullets: [], items: [] };
@@ -48,7 +65,8 @@ export class SnapshotBuffer {
       };
     }
 
-    // 找到t0（<=renderTime）和t1（>renderTime）
+    // 找到t0（<=renderTimeServer）和t1（>renderTimeServer）
+    // 注意：所有时间比较都在服务器时间域中进行
     let t0: SnapshotEntry | null = null;
     let t1: SnapshotEntry | null = null;
 
@@ -56,8 +74,8 @@ export class SnapshotBuffer {
       const a = this.buffer[i];
       const b = this.buffer[i + 1];
 
-      // 使用server的timestamp（不是receivedAt）
-      if (a.snapshot.timestamp <= renderTime && b.snapshot.timestamp > renderTime) {
+      // 使用server的timestamp（服务器时间域），与renderTimeServer比较
+      if (a.snapshot.timestamp <= renderTimeServer && b.snapshot.timestamp > renderTimeServer) {
         t0 = a;
         t1 = b;
         break;
@@ -74,9 +92,9 @@ export class SnapshotBuffer {
       };
     }
 
-    // 计算插值alpha
+    // 计算插值alpha（在服务器时间域中计算）
     const timeRange = t1.snapshot.timestamp - t0.snapshot.timestamp;
-    const alpha = timeRange > 0 ? (renderTime - t0.snapshot.timestamp) / timeRange : 0;
+    const alpha = timeRange > 0 ? (renderTimeServer - t0.snapshot.timestamp) / timeRange : 0;
     const clampedAlpha = Math.max(0, Math.min(1, alpha));
 
     // 插值玩家位置
@@ -111,6 +129,7 @@ export class SnapshotBuffer {
     }
 
     // Day1子弹和物品不做插值（占位）
+    // 修复: obstacles 已移至 WORLD_INIT，不再从 snapshot 获取
     return {
       players: interpolatedPlayers,
       bullets: t1.snapshot.bullets,
@@ -120,6 +139,12 @@ export class SnapshotBuffer {
 
   getLatest(): S2C_SNAPSHOT | null {
     return this.buffer.length > 0 ? this.buffer[this.buffer.length - 1].snapshot : null;
+  }
+
+  clear(): void {
+    this.buffer = [];
+    // P0-1: 清空时重置时间偏移，避免重连后使用旧的偏移值
+    this.serverOffsetMs = 0;
   }
 }
 

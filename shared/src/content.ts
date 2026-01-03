@@ -5,6 +5,12 @@ export const MAP_CONFIG_SCHEMA = z.object({
   width: z.number().positive(),
   height: z.number().positive(),
   seed: z.number().int(),
+  extractZone: z.object({
+    x: z.number().nonnegative(),
+    y: z.number().nonnegative(),
+    w: z.number().positive(),
+    h: z.number().positive(),
+  }),
 });
 
 export type MAP_CONFIG = z.infer<typeof MAP_CONFIG_SCHEMA>;
@@ -14,6 +20,12 @@ export const DEFAULT_MAP_CONFIG: MAP_CONFIG = {
   width: 2000,
   height: 2000,
   seed: 12345, // Day1固定seed，后续由server生成
+  extractZone: {
+    x: 1800, // Day3: 地图右下角，200x200区域
+    y: 1800,
+    w: 200,
+    h: 200,
+  },
 };
 
 // 物品类型配置（Day1占位）
@@ -36,6 +48,7 @@ export function loadMapConfig(seed?: number): MAP_CONFIG {
   return {
     ...DEFAULT_MAP_CONFIG,
     seed: seed ?? DEFAULT_MAP_CONFIG.seed,
+    // extractZone 使用默认值（已在 DEFAULT_MAP_CONFIG 中定义）
   };
 }
 

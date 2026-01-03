@@ -2,12 +2,31 @@ export class InputManager {
   private keys: Map<string, boolean> = new Map();
   private mouseX = 0;
   private mouseY = 0;
+  private shoot = false; // Day2: 开火状态
+  private interactFlag = false; // Day3: 拾取脉冲事件标志（E键）
+  private extractFlag = false; // Day3: 撤离脉冲事件标志（F键）
 
-  constructor() {
+  // P0-3 修复: 使用 pointer events + 捕获，解决鼠标拖出 canvas 松开导致开火卡住的问题
+  private capturedPointerId: number | null = null;
+
+  constructor(canvas: HTMLCanvasElement) {
     window.addEventListener('keydown', (e) => {
-      this.keys.set(e.key.toLowerCase(), true);
+      const key = e.key.toLowerCase();
+      this.keys.set(key, true);
+      
+      // Day3: 脉冲事件（edge-trigger）
+      // P1 修复: 处理 keydown repeat，避免长按导致疯狂发包
+      // 如果 e.repeat 为 true，说明是系统自动重复，忽略（只处理第一次按下）
+      if (key === 'e' && !e.repeat) {
+        this.interactFlag = true;
+        e.preventDefault();
+      } else if (key === 'f' && !e.repeat) {
+        this.extractFlag = true;
+        e.preventDefault();
+      }
+      
       // 防止默认行为（如页面滚动）
-      if (['w', 'a', 's', 'd', ' '].includes(e.key.toLowerCase())) {
+      if (['w', 'a', 's', 'd', ' ', 'e', 'f'].includes(key)) {
         e.preventDefault();
       }
     });
@@ -21,9 +40,64 @@ export class InputManager {
       this.mouseY = e.clientY;
     });
 
+    // P0-3 修复: 使用 pointerdown/pointerup/pointercancel 替换 mousedown/mouseup
+    canvas.addEventListener('pointerdown', (e) => {
+      if (e.button === 0 && e.isPrimary) { // 左键 + 主指针
+        this.shoot = true;
+        this.capturedPointerId = e.pointerId;
+        // 尝试捕获指针（兼容性处理）
+        try {
+          canvas.setPointerCapture(e.pointerId);
+        } catch (err) {
+          // 某些浏览器可能不支持，忽略错误
+        }
+        e.preventDefault();
+      }
+    });
+
+    canvas.addEventListener('pointerup', (e) => {
+      if (e.pointerId === this.capturedPointerId) {
+        this.shoot = false;
+        this.capturedPointerId = null;
+        // 释放捕获
+        try {
+          canvas.releasePointerCapture(e.pointerId);
+        } catch (err) {
+          // 忽略错误
+        }
+        e.preventDefault();
+      }
+    });
+
+    canvas.addEventListener('pointercancel', (e) => {
+      if (e.pointerId === this.capturedPointerId) {
+        this.shoot = false;
+        this.capturedPointerId = null;
+        // 释放捕获
+        try {
+          canvas.releasePointerCapture(e.pointerId);
+        } catch (err) {
+          // 忽略错误
+        }
+        e.preventDefault();
+      }
+    });
+
+    // P0-3 修复: 兜底处理 - 如果指针在 canvas 外松开，也能清理状态
+    window.addEventListener('pointerup', (e) => {
+      if (this.shoot && e.pointerId === this.capturedPointerId) {
+        this.shoot = false;
+        this.capturedPointerId = null;
+      }
+    });
+
     // 窗口失去焦点时清除所有按键状态
     window.addEventListener('blur', () => {
       this.keys.clear();
+      this.shoot = false;
+      this.capturedPointerId = null;
+      this.interactFlag = false; // Day3: 清除脉冲事件标志
+      this.extractFlag = false;
     });
   }
 
@@ -38,20 +112,49 @@ export class InputManager {
   }
 
   // 计算鼠标角度（相对于canvas中心，弧度）
+  // 保留此方法以兼容旧代码，但推荐使用getAimAngleFromPoint
   getAimAngle(canvas: HTMLCanvasElement): number {
     const rect = canvas.getBoundingClientRect();
     const centerX = rect.left + rect.width / 2;
     const centerY = rect.top + rect.height / 2;
+    return this.getAimAngleFromPoint(centerX, centerY);
+  }
 
-    const dx = this.mouseX - centerX;
-    const dy = this.mouseY - centerY;
-
+  // Step2: 计算鼠标角度（相对于指定点，弧度）
+  // 用于瞄准角度计算：鼠标相对本地玩家屏幕位置的角度（永远正确）
+  getAimAngleFromPoint(originClientX: number, originClientY: number): number {
+    const dx = this.mouseX - originClientX;
+    const dy = this.mouseY - originClientY;
     return Math.atan2(dy, dx);
   }
 
   // 获取鼠标世界坐标（需要renderer的screenToWorld）
   getMouseWorldPos(screenToWorld: (x: number, y: number) => { x: number; y: number }): { x: number; y: number } {
     return screenToWorld(this.mouseX, this.mouseY);
+  }
+
+  // Day2: 获取开火状态
+  getShoot(): boolean {
+    return this.shoot;
+  }
+
+  // Day3: 消费拾取脉冲事件（edge-trigger：返回当前值并清零）
+  consumeInteract(): boolean {
+    const value = this.interactFlag;
+    this.interactFlag = false;
+    return value;
+  }
+
+  // Day3: 消费撤离脉冲事件（edge-trigger：返回当前值并清零）
+  consumeExtract(): boolean {
+    const value = this.extractFlag;
+    this.extractFlag = false;
+    return value;
+  }
+
+  // 游戏化增强: 获取撤离持续状态（按住F键）
+  getExtractHeld(): boolean {
+    return this.keys.get('f') ?? false;
   }
 }
 

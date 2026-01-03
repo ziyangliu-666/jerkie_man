@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { MAP_CONFIG_SCHEMA } from './content.js';
 
 // C2S (Client to Server) 消息
 export const C2S_HELLO_SCHEMA = z.object({
@@ -16,12 +17,23 @@ export const C2S_INPUT_SCHEMA = z.object({
     left: z.boolean(),
     right: z.boolean(),
   }),
-  aim: z.number(), // 鼠标角度（弧度），Day1占位
+  aim: z.number(), // 鼠标角度（弧度）
+  shoot: z.boolean().optional(), // Day2: 开火标志
+  interact: z.boolean().optional(), // Day3: 拾取脉冲事件（E键）
+  extract: z.boolean().optional(), // Day3: 撤离脉冲事件（F键，已废弃，保留兼容）
+  extractHeld: z.boolean().optional(), // 游戏化增强: 撤离持续状态（按住F）
+});
+
+// Day5: Ping/Pong 消息（用于测量网络延迟）
+export const C2S_PING_SCHEMA = z.object({
+  type: z.literal('C2S_PING'),
+  timestamp: z.number(), // 客户端发送时间戳
 });
 
 export const C2S_MESSAGE_SCHEMA = z.discriminatedUnion('type', [
   C2S_HELLO_SCHEMA,
   C2S_INPUT_SCHEMA,
+  C2S_PING_SCHEMA, // Day5: Ping 消息
 ]);
 
 // S2C (Server to Client) 消息
@@ -33,6 +45,8 @@ export const PLAYER_STATE_SCHEMA = z.object({
   status: z.enum(['ALIVE', 'DEAD', 'EXTRACTED']),
   lastInputSeq: z.number().int(),
   lastInputTick: z.number().int(),
+  lootCount: z.number().int().min(0).default(0), // Day3: 战利品计数
+  extractProgress: z.number().int().min(0).max(2000).default(0), // 游戏化增强: 撤离进度（毫秒，0-2000）
 });
 
 export const BULLET_STATE_SCHEMA = z.object({
@@ -52,6 +66,14 @@ export const ITEM_STATE_SCHEMA = z.object({
   quantity: z.number().int().positive(),
 });
 
+// Day4-2: 障碍物状态（矩形 AABB）
+export const OBSTACLE_STATE_SCHEMA = z.object({
+  x: z.number().nonnegative(), // 矩形左上角 x
+  y: z.number().nonnegative(), // 矩形左上角 y
+  w: z.number().positive(),    // 宽度
+  h: z.number().positive(),    // 高度
+});
+
 export const S2C_SNAPSHOT_SCHEMA = z.object({
   type: z.literal('S2C_SNAPSHOT'),
   tick: z.number().int().nonnegative(),
@@ -59,6 +81,7 @@ export const S2C_SNAPSHOT_SCHEMA = z.object({
   players: z.array(PLAYER_STATE_SCHEMA),
   bullets: z.array(BULLET_STATE_SCHEMA),
   items: z.array(ITEM_STATE_SCHEMA),
+  // 修复: obstacles 已移至 S2C_WORLD_INIT，不再在 snapshot 中发送（减少带宽）
 });
 
 export const S2C_ERROR_SCHEMA = z.object({
@@ -67,20 +90,62 @@ export const S2C_ERROR_SCHEMA = z.object({
   message: z.string(),
 });
 
+export const S2C_WELCOME_SCHEMA = z.object({
+  type: z.literal('S2C_WELCOME'),
+  playerId: z.string(),
+  // Day4-1: server 下发世界配置（可选，用于兼容）
+  seed: z.number().int().optional(),
+  mapConfig: MAP_CONFIG_SCHEMA.optional(),
+});
+
+// 静态世界初始化消息（一次性下发，减少 snapshot 带宽）
+export const S2C_WORLD_INIT_SCHEMA = z.object({
+  type: z.literal('S2C_WORLD_INIT'),
+  seed: z.number().int(),
+  mapConfig: MAP_CONFIG_SCHEMA,
+  obstacles: z.array(OBSTACLE_STATE_SCHEMA),
+  items: z.array(ITEM_STATE_SCHEMA),
+});
+
+// 游戏化增强: 服务端事件流 -> HUD Event Log
+export const S2C_EVENT_SCHEMA = z.object({
+  type: z.literal('S2C_EVENT'),
+  tick: z.number().int().nonnegative(),
+  timestamp: z.number(),
+  message: z.string(),
+});
+
+// Day5: Ping/Pong 消息（用于测量网络延迟）
+export const S2C_PONG_SCHEMA = z.object({
+  type: z.literal('S2C_PONG'),
+  clientTimestamp: z.number(), // 客户端原始时间戳（回传）
+  serverTimestamp: z.number(), // 服务器接收时间戳
+});
+
 export const S2C_MESSAGE_SCHEMA = z.discriminatedUnion('type', [
   S2C_SNAPSHOT_SCHEMA,
   S2C_ERROR_SCHEMA,
+  S2C_WELCOME_SCHEMA,
+  S2C_WORLD_INIT_SCHEMA, // 静态世界初始化消息
+  S2C_EVENT_SCHEMA, // 游戏化增强: 事件消息
+  S2C_PONG_SCHEMA, // Day5: Pong 消息
 ]);
 
 // TypeScript 类型推导
 export type C2S_HELLO = z.infer<typeof C2S_HELLO_SCHEMA>;
 export type C2S_INPUT = z.infer<typeof C2S_INPUT_SCHEMA>;
+export type C2S_PING = z.infer<typeof C2S_PING_SCHEMA>; // Day5: Ping 类型
 export type C2S_MESSAGE = z.infer<typeof C2S_MESSAGE_SCHEMA>;
 
 export type PLAYER_STATE = z.infer<typeof PLAYER_STATE_SCHEMA>;
 export type BULLET_STATE = z.infer<typeof BULLET_STATE_SCHEMA>;
 export type ITEM_STATE = z.infer<typeof ITEM_STATE_SCHEMA>;
+export type OBSTACLE_STATE = z.infer<typeof OBSTACLE_STATE_SCHEMA>; // Day4-2: 障碍物类型
 export type S2C_SNAPSHOT = z.infer<typeof S2C_SNAPSHOT_SCHEMA>;
 export type S2C_ERROR = z.infer<typeof S2C_ERROR_SCHEMA>;
+export type S2C_WELCOME = z.infer<typeof S2C_WELCOME_SCHEMA>;
+export type S2C_WORLD_INIT = z.infer<typeof S2C_WORLD_INIT_SCHEMA>; // 静态世界初始化类型
+export type S2C_EVENT = z.infer<typeof S2C_EVENT_SCHEMA>; // 游戏化增强: 事件类型
+export type S2C_PONG = z.infer<typeof S2C_PONG_SCHEMA>; // Day5: Pong 类型
 export type S2C_MESSAGE = z.infer<typeof S2C_MESSAGE_SCHEMA>;
 

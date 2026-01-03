@@ -1,18 +1,31 @@
 import {
   C2S_HELLO_SCHEMA,
   C2S_INPUT_SCHEMA,
+  C2S_PING_SCHEMA, // Day5: Ping 消息
   S2C_MESSAGE_SCHEMA,
   type S2C_MESSAGE,
   type S2C_SNAPSHOT,
+  type MAP_CONFIG, // P0-1 修复: 使用 shared 的 MAP_CONFIG 类型，避免类型漂移
+  type OBSTACLE_STATE, // 修复: 静态世界初始化
+  type ITEM_STATE, // 修复: 静态世界初始化
 } from '@jerkie-man/shared';
 import { SnapshotBuffer } from './snapshot.js';
+
+// P0-1 修复: 使用 shared 的 MAP_CONFIG 类型，避免类型漂移
+// 如果 shared 的 MAP_CONFIG 未来加字段/改字段，这里会自动同步
+export interface RoomInfo {
+  seed?: number;
+  mapConfig?: MAP_CONFIG;
+}
 
 export interface NetworkCallbacks {
   onSnapshot?: (snapshot: S2C_SNAPSHOT) => void;
   onError?: (error: string) => void;
   onConnect?: () => void;
   onDisconnect?: () => void;
-  onWelcome?: (playerId: string) => void;
+  onWelcome?: (playerId: string, roomInfo?: RoomInfo) => void;
+  onEvent?: (message: string) => void; // 游戏化增强: 服务端事件回调
+  onWorldInit?: (world: { seed: number; mapConfig: MAP_CONFIG; obstacles: OBSTACLE_STATE[]; items: ITEM_STATE[] }) => void; // 修复: 静态世界初始化回调
 }
 
 export class Network {
@@ -27,12 +40,27 @@ export class Network {
   private snapshotBuffer: SnapshotBuffer;
   private isConnected = false;
   private lastServerTick = 0;
+  private isDebug: boolean = false;
+  private lastParseWarnTime = 0; // 节流：5秒最多一次
+  
+  // P0-2: 控制是否应该自动重连的标志
+  // 当调用disconnect()时设为false，阻止自动重连
+  private shouldReconnect = true;
+  
+  // P1-2 修复: 记录下次重连的绝对时间（用于计算真实剩余时间）
+  private nextReconnectAt: number | null = null;
+  
+  // Day5: Ping/Pong 相关
+  private pingTimer: number | null = null;
+  private currentPing: number | null = null; // 当前 ping 值（毫秒）
+  private readonly PING_INTERVAL_MS = 2000; // 每 2 秒发送一次 ping
 
-  constructor(url: string, room: string, callbacks: NetworkCallbacks = {}) {
+  constructor(url: string, room: string, callbacks: NetworkCallbacks = {}, isDebug: boolean = false) {
     this.url = url;
     this.room = room;
     this.callbacks = callbacks;
     this.snapshotBuffer = new SnapshotBuffer();
+    this.isDebug = isDebug;
     this.connect();
   }
 
@@ -41,13 +69,39 @@ export class Network {
       this.ws = new WebSocket(this.url);
 
       this.ws.onopen = () => {
+        // 修复: 如果用户已手动断开，立即关闭连接
+        if (!this.shouldReconnect) {
+          if (this.ws) {
+            this.ws.close();
+            this.ws = null;
+          }
+          return;
+        }
+        
         this.isConnected = true;
         this.reconnectAttempts = 0;
         this.reconnectDelay = 1000;
+        
+        // P0-2: 连接成功时重置shouldReconnect，确保正常断线仍会自动重连
+        this.shouldReconnect = true;
+        
+        // P1-2 修复: 连接成功时清除重连倒计时
+        this.nextReconnectAt = null;
+        
+        // 重置插值相关状态
+        this.lastServerTick = 0;
+        this.snapshotBuffer.clear();
+        
+        // Day5: 重置 ping
+        this.currentPing = null;
+
         console.log('Connected to server');
 
         // 发送HELLO
         this.sendHello();
+        
+        // Day5: 启动 ping 定时器
+        this.startPingTimer();
 
         if (this.callbacks.onConnect) {
           this.callbacks.onConnect();
@@ -57,23 +111,43 @@ export class Network {
       this.ws.onmessage = (event) => {
         try {
           const raw = JSON.parse(event.data.toString());
-          
-          // 处理S2C_WELCOME消息（不在schema中，需要特殊处理）
-          if (raw.type === 'S2C_WELCOME' && raw.playerId) {
-            if (this.callbacks.onWelcome) {
-              this.callbacks.onWelcome(raw.playerId);
-            }
-            return;
-          }
-
           const message = S2C_MESSAGE_SCHEMA.parse(raw) as S2C_MESSAGE;
 
-          if (message.type === 'S2C_SNAPSHOT') {
+          // 统一通过schema解析，未知类型会被zod拒绝
+          if (message.type === 'S2C_WELCOME') {
+            if (this.callbacks.onWelcome) {
+              // Day4-1: 传递 roomInfo（seed + mapConfig）
+              this.callbacks.onWelcome(message.playerId, {
+                seed: message.seed,
+                mapConfig: message.mapConfig,
+              });
+            }
+          } else if (message.type === 'S2C_SNAPSHOT') {
             this.lastServerTick = message.tick;
             this.snapshotBuffer.add(message);
             if (this.callbacks.onSnapshot) {
               this.callbacks.onSnapshot(message);
             }
+          } else if (message.type === 'S2C_WORLD_INIT') {
+            // 修复: 处理静态世界初始化消息
+            if (this.callbacks.onWorldInit) {
+              this.callbacks.onWorldInit({
+                seed: message.seed,
+                mapConfig: message.mapConfig,
+                obstacles: message.obstacles,
+                items: message.items,
+              });
+            }
+          } else if (message.type === 'S2C_EVENT') {
+            // 游戏化增强: 处理服务端事件
+            if (this.callbacks.onEvent) {
+              this.callbacks.onEvent(message.message);
+            }
+          } else if (message.type === 'S2C_PONG') {
+            // Day5: 处理 Pong 消息，计算 RTT
+            const now = Date.now();
+            const rtt = now - message.clientTimestamp;
+            this.currentPing = rtt;
           } else if (message.type === 'S2C_ERROR') {
             console.error('Server error:', message.message);
             if (this.callbacks.onError) {
@@ -81,7 +155,17 @@ export class Network {
             }
           }
         } catch (error) {
-          console.error('Failed to parse message:', error);
+          // 解析失败：静默忽略（策略：只在debug模式下或节流打印）
+          if (this.isDebug) {
+            console.warn('Failed to parse message (ignored):', error);
+          } else {
+            // 非debug模式：节流警告（5秒最多一次）
+            const now = Date.now();
+            if (now - this.lastParseWarnTime >= 5000) {
+              console.warn('Failed to parse message (ignored, throttled):', error);
+              this.lastParseWarnTime = now;
+            }
+          }
         }
       };
 
@@ -89,12 +173,22 @@ export class Network {
         this.isConnected = false;
         console.log('Disconnected from server');
 
+        // P0-2 修复: 断线时清理 snapshot buffer，避免显示旧世界
+        this.snapshotBuffer.clear();
+        
+        // Day5: 停止 ping 定时器
+        this.stopPingTimer();
+        this.currentPing = null;
+
         if (this.callbacks.onDisconnect) {
           this.callbacks.onDisconnect();
         }
 
-        // 自动重连
-        this.scheduleReconnect();
+        // P0-2: 只有shouldReconnect为true时才自动重连
+        // 当用户主动调用disconnect()时，shouldReconnect=false，不会重连
+        if (this.shouldReconnect) {
+          this.scheduleReconnect();
+        }
       };
 
       this.ws.onerror = (error) => {
@@ -105,25 +199,38 @@ export class Network {
       };
     } catch (error) {
       console.error('Failed to connect:', error);
-      this.scheduleReconnect();
+      // 修复: 手动断开后不应再重连
+      if (this.shouldReconnect) {
+        this.scheduleReconnect();
+      }
     }
   }
 
   private scheduleReconnect(): void {
+    // 修复: 手动断开后不应再重连
+    if (!this.shouldReconnect) {
+      return;
+    }
+    
     if (this.reconnectTimer !== null) {
       return; // 已经安排了重连
     }
 
     if (this.reconnectAttempts >= this.maxReconnectAttempts) {
       console.error('Max reconnect attempts reached');
+      this.nextReconnectAt = null; // P1-2 修复: 不再重连时清除倒计时
+      this.shouldReconnect = false; // 修复: 达到上限时停止重连，避免 HUD 一直显示 reconnecting
       return;
     }
 
     this.reconnectAttempts++;
+    // P1-2 修复: 记录下次重连的绝对时间
+    this.nextReconnectAt = Date.now() + this.reconnectDelay;
     console.log(`Reconnecting in ${this.reconnectDelay}ms (attempt ${this.reconnectAttempts})`);
 
     this.reconnectTimer = window.setTimeout(() => {
       this.reconnectTimer = null;
+      this.nextReconnectAt = null; // P1-2 修复: 重连开始前清除倒计时
       this.connect();
       // 指数退避，最多10秒
       this.reconnectDelay = Math.min(this.reconnectDelay * 1.5, 10000);
@@ -143,9 +250,18 @@ export class Network {
     this.ws.send(JSON.stringify(message));
   }
 
-  sendInput(seq: number, keys: { up: boolean; down: boolean; left: boolean; right: boolean }, aim: number): void {
+  // P0-1 修复: 返回 boolean 表示是否真的发送成功
+  sendInput(
+    seq: number,
+    keys: { up: boolean; down: boolean; left: boolean; right: boolean },
+    aim: number,
+    shoot: boolean = false,
+    interact: boolean = false,
+    extract: boolean = false,
+    extractHeld: boolean = false // 游戏化增强: 撤离持续状态
+  ): boolean {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
-      return;
+      return false; // P0-1: 发送失败，返回 false
     }
 
     const message = C2S_INPUT_SCHEMA.parse({
@@ -154,34 +270,106 @@ export class Network {
       tick: this.lastServerTick, // 使用最后收到的server tick
       keys,
       aim,
+      shoot, // Day2: 传递开火标志
+      interact, // Day3: 传递拾取脉冲事件
+      extract, // Day3: 传递撤离脉冲事件（已废弃，保留兼容）
+      extractHeld, // 游戏化增强: 传递撤离持续状态
     });
 
     this.ws.send(JSON.stringify(message));
+    return true; // P0-1: 发送成功，返回 true
   }
 
   getSnapshotBuffer(): SnapshotBuffer {
     return this.snapshotBuffer;
   }
 
+  // P1-2 修复: 暴露重连状态，供 HUD 显示（返回真实剩余时间）
+  public getReconnectState(): { attempts: number; nextReconnectInMs: number | null } {
+    let nextReconnectInMs: number | null = null;
+    if (this.nextReconnectAt !== null) {
+      // 计算真实剩余时间（至少为0，避免负数）
+      nextReconnectInMs = Math.max(0, this.nextReconnectAt - Date.now());
+    }
+    return {
+      attempts: this.reconnectAttempts,
+      nextReconnectInMs,
+    };
+  }
+
   getConnectionState(): {
     connected: boolean;
+    reconnecting: boolean; // P1-2 修复: 暴露重连状态
+    reconnectAttempts: number; // P1-2 修复: 暴露重连尝试次数
+    nextReconnectInMs: number | null; // P1-2 修复: 暴露下次重连倒计时
     lastServerTick: number;
+    ping: number | null; // Day5: 暴露 ping 值
   } {
+    const reconnectState = this.getReconnectState();
     return {
       connected: this.isConnected,
+      reconnecting: !this.isConnected && this.shouldReconnect && reconnectState.attempts > 0, // P1-2 修复
+      reconnectAttempts: reconnectState.attempts, // P1-2 修复
+      nextReconnectInMs: reconnectState.nextReconnectInMs, // P1-2 修复
       lastServerTick: this.lastServerTick,
+      ping: this.currentPing, // Day5: 暴露 ping 值
     };
   }
 
   disconnect(): void {
+    // P0-2: 设置shouldReconnect=false，阻止onclose时自动重连
+    this.shouldReconnect = false;
+    
+    // 清理重连定时器
     if (this.reconnectTimer !== null) {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;
     }
+    
+    // P1-2 修复: 清除重连倒计时
+    this.nextReconnectAt = null;
+    
+    // Day5: 停止 ping 定时器
+    this.stopPingTimer();
+    this.currentPing = null;
 
+    // 关闭WebSocket连接
     if (this.ws) {
       this.ws.close();
       this.ws = null;
+    }
+  }
+  
+  // Day5: 启动 ping 定时器
+  private startPingTimer(): void {
+    this.stopPingTimer(); // 先清理旧的定时器
+    
+    const sendPing = () => {
+      if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+        return;
+      }
+      
+      const timestamp = Date.now();
+      const message = C2S_PING_SCHEMA.parse({
+        type: 'C2S_PING',
+        timestamp,
+      });
+      
+      this.ws.send(JSON.stringify(message));
+    };
+    
+    // 立即发送一次
+    sendPing();
+    
+    // 然后每 2 秒发送一次
+    this.pingTimer = window.setInterval(sendPing, this.PING_INTERVAL_MS);
+  }
+  
+  // Day5: 停止 ping 定时器
+  private stopPingTimer(): void {
+    if (this.pingTimer !== null) {
+      clearInterval(this.pingTimer);
+      this.pingTimer = null;
     }
   }
 }

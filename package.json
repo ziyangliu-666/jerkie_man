@@ -13,7 +13,8 @@
     "dev:client": "npm run dev --workspace=client",
     "build": "npm run build --workspaces --if-present",
     "clean": "rimraf node_modules shared/node_modules server/node_modules client/node_modules",
-    "test:smoke": "npm run build --workspace=shared && tsx server/src/smoke.ts"
+    "test:smoke": "npm run build --workspace=shared && tsx server/src/smoke.ts",
+    "dump:key": "node tools/dump_key_code.mjs"
   },
   "devDependencies": {
     "concurrently": "^8.2.2",

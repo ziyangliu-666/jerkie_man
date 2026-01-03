@@ -6,6 +6,13 @@
 
 ## 技术栈
 
+### 世界配置（Day4-1）
+- **Server 权威配置**：地图配置（mapConfig）和随机种子（seed）由 server 生成并下发
+- **Client 使用 server 配置**：client 不再本地生成 mapConfig，使用 server 下发的配置作为单一真相来源
+- **兼容模式**：如果 server 未下发 mapConfig，client 会 fallback 到本地配置并显示警告（HUD event）
+
+## 技术栈
+
 - **Monorepo**: npm workspaces
 - **TypeScript**: 全栈TypeScript
 - **Client**: Vite + Canvas 2D
@@ -154,7 +161,7 @@ npm run clean
 ### C2S (Client to Server)
 
 - `C2S_HELLO`: 连接时发送，包含room名称
-- `C2S_INPUT`: 每帧发送，包含seq、tick、keys（WASD）、aim（鼠标角度）
+- `C2S_INPUT`: 25Hz节流发送（40ms间隔），只在keys/aim变化时发送，包含seq、tick、keys（WASD）、aim（鼠标角度）
 
 ### S2C (Server to Client)
 
@@ -167,14 +174,14 @@ npm run clean
 - **Snapshot广播**: 10Hz（100ms间隔）
 - **Client插值**: 120ms延迟补偿，在snapshot buffer中lerp
 
-## 已知限制（Day1）
+## 已知限制（当前状态）
 
 - 单房间（`local`），不做匹配系统
-- 无射击/伤害系统（shoot字段占位）
-- 无物品拾取（items占位）
-- 无撤离点（extract字段占位）
+- ✅ 射击/伤害系统已实现（Day2）：开火、子弹、命中扣血、死亡状态
+- 无物品拾取（items占位，计划Day3）
+- 无撤离点（extract字段占位，计划Day3）
 - 无客户端预测（只做插值）
-- 本地玩家ID识别简化（第一个玩家）
+- ✅ 本地玩家ID识别：通过 `S2C_WELCOME` 消息机制识别
 
 ## 故障排查
 
@@ -203,9 +210,9 @@ npm run clean
 
 ## 下一步（后续增量）
 
-- [ ] 射击系统（子弹实体、伤害计算）
-- [ ] 物品系统（生成、拾取、背包）
-- [ ] 撤离点系统（结算逻辑）
+- [x] 射击系统（子弹实体、伤害计算）✅ Day2完成
+- [ ] 物品系统（生成、拾取、背包）→ Day3计划
+- [ ] 撤离点系统（结算逻辑）→ Day3计划
 - [ ] 客户端预测（减少延迟感）
 - [ ] 房间匹配系统
 - [ ] 地图生成（基于seed）
