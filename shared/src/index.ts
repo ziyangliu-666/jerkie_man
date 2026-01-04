@@ -23,6 +23,12 @@ export * from './equipment.js';
 // 国际化支持
 export * from './i18n.js';
 
+// 常量（单一数据源）
+export * from './constants.js';
+
+// Profile工具函数（单一数据源）
+export * from './profileUtils.js';
+
 // 显式导出内容加载器函数
 export { loadMapConfig, loadItemTypes } from './content.js';
 

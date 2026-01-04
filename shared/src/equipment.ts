@@ -3,10 +3,14 @@
  * 包含武器、背包、防具的详细属性
  */
 
+// 武器种类（为手雷/火箭筒预留）
+export type WeaponKind = 'gun' | 'throwable' | 'launcher';
+
 // 武器定义
 export interface WeaponDef {
   typeId: string;
   name: string;
+  weaponKind?: WeaponKind; // 武器种类（默认为gun）
   magSize: number; // 弹匣容量
   reloadMs: number; // 换弹时间（毫秒）
   fireIntervalMs: number; // 开火间隔（毫秒）
@@ -17,6 +21,15 @@ export interface WeaponDef {
   burstCount?: number; // 连发数量（例如3表示三连发，未定义或1表示单发）
   burstIntervalMs?: number; // 连发间隔（毫秒，默认等于fireIntervalMs）
   pelletCount?: number; // 弹丸数量（霰弹枪使用，例如8表示一次发射8颗子弹）
+}
+
+// 投射物定义（为手雷/火箭弹预留，当前仅作为类型定义）
+export interface ProjectileDef {
+  speed: number; // 飞行速度
+  ttl: number; // 生命周期（毫秒）
+  explosionRadius?: number; // 爆炸半径（像素）
+  explosionDamage?: number; // 爆炸伤害
+  fuseMs?: number; // 引信时间（手雷专用，毫秒）
 }
 
 // 背包定义

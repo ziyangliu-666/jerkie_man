@@ -1,7 +1,7 @@
 ﻿import { Player } from './player.js';
 import { ProfileManager } from './profile.js';
-import type { PLAYER_STATE, BULLET_STATE, ITEM_STATE, C2S_INPUT, MAP_CONFIG, OBSTACLE_STATE, WorldItem, LootBag, ItemInstance, WeaponRuntime } from '@jerkie-man/shared';
-import { loadMapConfig, loadItemTypes, circleVsAABB, createRng, rectIntersects, segmentIntersectsCircle, getItemType, getAllItemTypes, getItemTypesByRarity, getWeaponDef, getArmorDef, applySpread } from '@jerkie-man/shared';
+import type { PLAYER_STATE, BULLET_STATE, ITEM_STATE, C2S_INPUT, MAP_CONFIG, OBSTACLE_STATE, WorldItem, LootBag, ItemInstance, WeaponRuntime, WeaponDef } from '@jerkie-man/shared';
+import { loadMapConfig, loadItemTypes, circleVsAABB, createRng, rectIntersects, segmentIntersectsCircle, getItemType, getAllItemTypes, getItemTypesByRarity, getWeaponDef, getArmorDef, applySpread, msToTicks } from '@jerkie-man/shared';
 import { log } from './logger.js';
 
 // Step4: 内部子弹类型（包含spawnAt、damage和bulletLifeMs用于TTL检查和伤害计算）
@@ -867,8 +867,8 @@ export class Room {
     }
   }
   
-  // 新增: 发射子弹的公共方法
-  private spawnBullet(playerId: string, player: Player, aimRad: number, weaponDef: any, shotId: number | undefined): string {
+  // 新增: 发射子弹的公共方法（修复：weaponDef使用强类型而非any）
+  private spawnBullet(playerId: string, player: Player, aimRad: number, weaponDef: WeaponDef, shotId: number | undefined): string {
     const pelletCount = weaponDef.pelletCount ?? 1; // 默认1颗子弹
     
     // 调试日志：打印weaponDef内容
