@@ -364,11 +364,6 @@
     "money": 11297,
     "stash": [
       {
-        "iid": "i1767513119490_vxu6fvp60",
-        "typeId": "armor_plate",
-        "qty": 3
-      },
-      {
         "iid": "i1767513120724_7k49ikwyx",
         "typeId": "keycard_alpha",
         "qty": 1
@@ -439,7 +434,7 @@
     "equipment": {
       "weaponIid": null,
       "bagIid": null,
-      "armorIid": "i1767513119490_vxu6fvp60"
+      "armorIid": null
     },
     "lastDeathTime": 1767512870941
   },

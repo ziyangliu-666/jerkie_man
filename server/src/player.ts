@@ -1,5 +1,5 @@
 import type { PLAYER_STATE, OBSTACLE_STATE, PlayerInventory, ItemInstance, WeaponRuntime } from '@jerkie-man/shared';
-import { simulatePlayerMove, getItemType } from '@jerkie-man/shared';
+import { simulatePlayerMove, getItemType, PositionHistory } from '@jerkie-man/shared';
 
 export class Player {
   public id: string;
@@ -17,6 +17,7 @@ export class Player {
   public armorReduction: number = 0; // 新增: 护甲减伤（0-1，例如0.25表示减少25%伤害）
   public killedBy: string | undefined; // 新增: 击杀者玩家ID
   public killedByWeaponName: string | undefined; // 新增: 击杀使用的武器名称
+  public positionHistory: PositionHistory; // 延迟补偿: 位置历史记录
 
   // 修复: 移动速度已移至 shared/sim.ts，这里不再需要（保留注释用于文档）
   // SPEED = 200 (在 shared/sim.ts 中定义)
@@ -39,6 +40,7 @@ export class Player {
     };
     this.name = name; // 新增: 设置玩家昵称
     this.weaponRuntime = weaponRuntime; // 新增: 设置武器运行时状态
+    this.positionHistory = new PositionHistory(50); // 延迟补偿: 保留50帧（2.5秒@20Hz）
   }
 
   // 处理输入，更新位置

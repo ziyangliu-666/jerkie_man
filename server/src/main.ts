@@ -58,6 +58,14 @@ const pickupQueues = new Map<string, PickupReq[]>();
 
 // P1-1 修复: lastProfileSentTick 移至模块级，避免每 tick 重新创建导致重复发送
 const lastProfileSentTick = new Map<string, number>();
+
+// 延迟补偿: 玩家延迟追踪（记录每个玩家的 RTT）
+type PlayerLatency = {
+  rtt: number;           // 往返延迟（Round-Trip Time，毫秒）
+  lastPongAt: number;    // 上次收到 Pong 的时间戳
+  pongCount: number;     // 收到的 Pong 数量（用于平滑）
+};
+const playerLatencies = new Map<string, PlayerLatency>(); // playerId -> PlayerLatency
 // 新增: 记录玩家撤离时的背包物品数（用于判断"刚完成撤离"）
 const lastExtractedInventoryCount = new Map<string, number>();
 
@@ -242,13 +250,30 @@ ws.on('message', (data: Buffer) => {
         sendProfile(ws, accountId);
       } else if (parsed.type === 'C2S_PING') {
         // Day5: 处理 Ping 消息，立即回复 Pong
+        const serverTimestamp = Date.now();
+        const rtt = serverTimestamp - parsed.timestamp;
+
+        // 延迟补偿: 更新延迟记录（使用指数移动平均平滑）
+        if (playerId) {
+          const existing = playerLatencies.get(playerId);
+          if (existing) {
+            // 指数移动平均：90% 旧值 + 10% 新值
+            existing.rtt = existing.rtt * 0.9 + rtt * 0.1;
+            existing.lastPongAt = serverTimestamp;
+            existing.pongCount++;
+          } else {
+            playerLatencies.set(playerId, { rtt, lastPongAt: serverTimestamp, pongCount: 1 });
+          }
+        }
+
+        // 发送 Pong
         if (ws.readyState === WebSocket.OPEN) {
           ws.send(
             JSON.stringify(
               S2C_PONG_SCHEMA.parse({
                 type: 'S2C_PONG',
                 clientTimestamp: parsed.timestamp,
-                serverTimestamp: Date.now(),
+                serverTimestamp: serverTimestamp,
               })
             )
           );
@@ -899,6 +924,7 @@ ws.on('message', (data: Buffer) => {
       playerIdToAccountId.delete(playerId);
       inputQueues.delete(playerId);
       pickupQueues.delete(playerId); // P2-3: 清理 pickup 队列
+      playerLatencies.delete(playerId); // 延迟补偿: 清理延迟记录
     }
   });
 
@@ -1113,10 +1139,22 @@ setInterval(() => {
   for (const playerId of room.players.keys()) {
     room.updateWeaponRuntime(playerId);
   }
-  
+
+  // 延迟补偿: 记录所有玩家的位置历史（在移动更新之后，子弹更新之前）
+  const now = Date.now();
+  for (const [playerId, player] of room.players.entries()) {
+    player.positionHistory.add(room.tick, now, player.x, player.y);
+  }
+
+  // 延迟补偿: 将延迟数据转换为简单映射传递给 updateBullets
+  const latencyMap = new Map<string, number>();
+  for (const [playerId, latency] of playerLatencies.entries()) {
+    latencyMap.set(playerId, latency.rtt);
+  }
+
   // Day2: 更新子弹位置并检测命中（20Hz tick = 50ms = 0.05s）
   const deltaTime = 0.05;
-  room.updateBullets(deltaTime);
+  room.updateBullets(deltaTime, latencyMap);
   
   // 新增: 处理战斗事件（干火/命中/受伤反馈）
   const combatEvents = room.drainCombatEvents();

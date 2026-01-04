@@ -1265,9 +1265,13 @@ export class Room {
 
   // Day2: 更新子弹位置并检测命中
   // Step4: 性能优化 - 碰撞检测用dist^2，bulletsToRemove用Set
-  updateBullets(deltaTime: number): void {
+  updateBullets(deltaTime: number, playerLatencies: Map<string, number> = new Map()): void {
     const now = Date.now();
     const bulletsToRemove = new Set<string>(); // Step4: 用Set代替O(n^2)
+
+    // 延迟补偿配置
+    const SAFETY_MARGIN_MS = 50;
+    const MAX_REWIND_MS = 500;
     
     for (const bullet of this.bullets) {
       // Step4: 子弹TTL检查（使用武器特定的bulletLifeMs）
@@ -1329,9 +1333,23 @@ export class Room {
         if (playerId === bullet.ownerId || player.status !== 'ALIVE') {
           continue;
         }
-        
-          // 使用线段 vs 圆的连续碰撞检测
-        if (segmentIntersectsCircle(oldX, oldY, bullet.x, bullet.y, player.x, player.y, PLAYER_HIT_RADIUS)) {
+
+        // 延迟补偿: 根据射击者延迟回溯目标位置
+        const shooterLatency = playerLatencies.get(bullet.ownerId) ?? 0;
+        const rewindTimeMs = Math.min(
+          Math.max(0, shooterLatency / 2 + SAFETY_MARGIN_MS),
+          MAX_REWIND_MS
+        );
+
+        const targetTimestamp = now - rewindTimeMs;
+        const historicalPos = player.positionHistory.getPositionAt(targetTimestamp);
+
+        // 使用历史位置（如果可用，否则使用当前位置）
+        const targetX = historicalPos?.x ?? player.x;
+        const targetY = historicalPos?.y ?? player.y;
+
+        // 使用线段 vs 圆的连续碰撞检测（使用回溯后的位置）
+        if (segmentIntersectsCircle(oldX, oldY, bullet.x, bullet.y, targetX, targetY, PLAYER_HIT_RADIUS)) {
           // 命中！
           const oldHp = player.hp;
           const wasAlive = player.status === 'ALIVE';
