@@ -1,7 +1,7 @@
 ﻿import { Player } from './player.js';
 import { ProfileManager } from './profile.js';
 import type { PLAYER_STATE, BULLET_STATE, ITEM_STATE, C2S_INPUT, MAP_CONFIG, OBSTACLE_STATE, WorldItem, LootBag, ItemInstance, WeaponRuntime, WeaponDef } from '@jerkie-man/shared';
-import { loadMapConfig, loadItemTypes, circleVsAABB, createRng, rectIntersects, segmentIntersectsCircle, getItemType, getAllItemTypes, getItemTypesByRarity, getWeaponDef, getArmorDef, applySpread, msToTicks } from '@jerkie-man/shared';
+import { loadMapConfig, loadItemTypes, circleVsAABB, createRng, rectIntersects, segmentIntersectsCircle, getItemType, getAllItemTypes, getItemTypesByRarity, getWeaponDef, getArmorDef, applySpread, msToTicks, getFireSchedule, shouldStartBurst, canFireTick, advanceBurstAfterShot, PLAYER_HIT_RADIUS } from '@jerkie-man/shared';
 import { log } from './logger.js';
 
 // Step4: 内部子弹类型（包含spawnAt、damage和bulletLifeMs用于TTL检查和伤害计算）
@@ -36,6 +36,8 @@ export class Room {
   public raidResults: Map<string, { result: 'EXTRACTED' | 'DIED'; accountId: string; loot?: ItemInstance[]; moneyGained?: number; moneyLost?: number }> = new Map();
   // 新增: 战斗事件队列（playerId -> 事件列表）
   public combatEvents: Map<string, Array<{ kind: 'DRY_FIRE' | 'HIT' | 'DAMAGE_TAKEN'; direction?: number }>> = new Map();
+  // 新增: 近战挥击事件（广播给所有客户端）
+  public meleeSwings: Array<{ playerId: string; x: number; y: number; aimRad: number; range: number; arcRad: number }> = [];
 
   constructor(id: string, seed?: number) {
     this.id = id;
@@ -830,21 +832,9 @@ export class Room {
         return;
       }
       
-      const burstIntervalMs = weaponDef.burstIntervalMs ?? weaponDef.fireIntervalMs;
-      
       // 发射连发中的一发
       wr.ammoInMag -= 1;
-      wr.burstRemaining -= 1;
-      
-      if (wr.burstRemaining > 0) {
-        // 还有剩余，设置下一发的时间
-        wr.burstNextTick = this.tick + Math.ceil(burstIntervalMs / 50);
-      } else {
-        // 连发结束，设置下次可以开火的时间（使用完整的fireIntervalMs）
-        wr.nextFireTick = this.tick + Math.ceil(weaponDef.fireIntervalMs / 50);
-        wr.burstRemaining = undefined;
-        wr.burstNextTick = undefined;
-      }
+      advanceBurstAfterShot(wr, weaponDef, this.tick);
       
       // 发射子弹
       const bulletId = this.spawnBullet(playerId, player, aimRad, weaponDef, undefined); // 连发不使用shotId
@@ -985,6 +975,9 @@ export class Room {
 
     player.lastInputSeq = input.seq;
     player.lastInputTick = input.tick;
+    const shootNow = !!input.shoot;
+    const wasShooting = player.lastShoot;
+    player.lastShoot = shootNow;
 
     // 更新玩家位置（20Hz tick = 50ms = 0.05s）
     // P0-1 修复: 传入 obstacles 参数，使碰撞检测生效
@@ -1031,7 +1024,7 @@ export class Room {
           const weaponDef = getWeaponDef(wr.weaponTypeId);
           // 如果弹匣未满，开始换弹
           if (wr.ammoInMag < weaponDef.magSize) {
-            wr.reloadingUntilTick = this.tick + Math.ceil(weaponDef.reloadMs / 50); // 50ms per tick
+            wr.reloadingUntilTick = this.tick + msToTicks(weaponDef.reloadMs);
             log('RELOAD_START', {
               room: this.id,
               player: playerId,
@@ -1055,7 +1048,7 @@ export class Room {
     }
     
     // 新增: 处理开火（使用武器参数）
-    if (input.shoot && player.status === 'ALIVE') {
+    if (shootNow && player.status === 'ALIVE') {
       // 检查是否有武器
       if (!player.weaponRuntime) {
         // 没有武器，发送干火事件
@@ -1078,18 +1071,8 @@ export class Room {
         return;
       }
       // 检查是否可以开火（考虑连发状态）
-      if (wr.burstRemaining === undefined || wr.burstRemaining === 0) {
-        // 不在连发中，检查常规冷却
-        if (this.tick < wr.nextFireTick) {
-          // 射速冷却未完成，不能开火
-          return;
-        }
-      } else {
-        // 在连发中，检查连发间隔
-        if (this.tick < (wr.burstNextTick ?? 0)) {
-          // 连发间隔未到，不能开火
-          return;
-        }
+      if (!canFireTick(wr, this.tick)) {
+        return;
       }
       
       try {
@@ -1098,9 +1081,26 @@ export class Room {
         // 检查是否是 FISTS（近战武器）
         if (wr.weaponTypeId === 'w_fists') {
           // 近战攻击：检测范围内是否有敌人
-          const MELEE_RANGE = 35; // 近战范围（像素）
+          const baseRange = weaponDef.meleeRange ?? 35; // 近战范围（像素）
+          const baseArcRad = ((weaponDef.meleeArcDeg ?? 60) * Math.PI) / 180; // 扇形角度（弧度）
+          const hitRadius = PLAYER_HIT_RADIUS; // 目标半径（用于边缘命中修正）
+          const meleeRange = baseRange;
+          const meleeArcRad = baseArcRad;
+          const visualRange = baseRange + hitRadius;
+          const visualExtraAngle = Math.asin(Math.min(1, hitRadius / Math.max(visualRange, 0.001)));
+          const visualArcRad = baseArcRad + visualExtraAngle * 2;
           let hitTarget: Player | null = null;
-          let minDist = MELEE_RANGE + 1;
+          let minDist = meleeRange + 1;
+
+          // 广播近战挥击（用于客户端显示其他玩家挥击）
+          this.meleeSwings.push({
+            playerId,
+            x: player.x,
+            y: player.y,
+            aimRad: input.aim,
+            range: visualRange,
+            arcRad: visualArcRad,
+          });
           
           for (const [targetId, target] of this.players.entries()) {
             if (targetId === playerId || target.status !== 'ALIVE') continue;
@@ -1109,13 +1109,13 @@ export class Room {
             const dy = target.y - player.y;
             const dist = Math.sqrt(dx * dx + dy * dy);
             
-            if (dist < minDist) {
+            if (dist <= meleeRange + hitRadius && dist < minDist) {
               // 检查是否在瞄准方向（简化：检查角度差）
               const aimDir = Math.atan2(dy, dx);
               const aimDiff = Math.abs(aimDir - input.aim);
               const normalizedDiff = Math.min(aimDiff, Math.PI * 2 - aimDiff);
-              
-              if (normalizedDiff < Math.PI / 3) { // 60度范围内
+              const extraAngle = dist > 0.001 ? Math.asin(Math.min(1, hitRadius / dist)) : 0;
+              if (normalizedDiff < meleeArcRad / 2 + extraAngle) {
                 hitTarget = target;
                 minDist = dist;
               }
@@ -1129,6 +1129,8 @@ export class Room {
             const isDead = hitTarget.hp <= 0;
             
             if (isDead) {
+              hitTarget.killedBy = player.name || playerId;
+              hitTarget.killedByWeaponName = weaponDef.name;
               this.handlePlayerDeath(hitTarget.id);
             }
             
@@ -1161,9 +1163,9 @@ export class Room {
             // 推送命中事件
             this.pushEvent(`${playerId} melee hit ${hitTarget.id} (-${weaponDef.damage})`);
           }
-          
+
           // 更新冷却
-          wr.nextFireTick = this.tick + Math.ceil(weaponDef.fireIntervalMs / 50);
+          wr.nextFireTick = this.tick + msToTicks(weaponDef.fireIntervalMs);
           return;
         }
         
@@ -1177,7 +1179,7 @@ export class Room {
           // 触发自动换弹（兜底）
           // 修复: 只有在未换弹时才能触发自动换弹，避免换弹完成后再次触发
           if (weaponDef.reloadMs > 0 && wr.reloadingUntilTick === 0) {
-            wr.reloadingUntilTick = this.tick + Math.ceil(weaponDef.reloadMs / 50);
+            wr.reloadingUntilTick = this.tick + msToTicks(weaponDef.reloadMs);
             // ammoInMag保持0，换弹完成后再回满
           }
           // 发送干火事件
@@ -1189,38 +1191,24 @@ export class Room {
         }
         
         // 检查是否在连发中
-        const burstCount = weaponDef.burstCount ?? 1;
-        const burstIntervalMs = weaponDef.burstIntervalMs ?? weaponDef.fireIntervalMs;
+        const schedule = getFireSchedule(weaponDef);
+        const canStartBurst = shouldStartBurst(weaponDef, shootNow, wasShooting);
         
-        // 如果正在连发中，检查是否可以发射下一发
         if (wr.burstRemaining !== undefined && wr.burstRemaining > 0) {
-          if (this.tick < (wr.burstNextTick ?? 0)) {
-            // 连发间隔未到，等待
-            return;
-          }
-          
           // 发射连发中的一发
           wr.ammoInMag -= 1;
-          wr.burstRemaining -= 1;
-          
-          if (wr.burstRemaining > 0) {
-            // 还有剩余，设置下一发的时间
-            wr.burstNextTick = this.tick + Math.ceil(burstIntervalMs / 50);
-          } else {
-            // 连发结束，设置下次可以开火的时间（使用完整的fireIntervalMs）
-            wr.nextFireTick = this.tick + Math.ceil(weaponDef.fireIntervalMs / 50);
-            wr.burstRemaining = undefined;
-            wr.burstNextTick = undefined;
+          advanceBurstAfterShot(wr, weaponDef, this.tick);
+        } else if (schedule.burstCount > 1) {
+          if (!canStartBurst) {
+            return;
           }
-        } else if (burstCount > 1) {
           // 开始新的连发，立即发射第一发
-          wr.burstRemaining = burstCount - 1; // 减1因为马上要发射第一发
-          wr.burstNextTick = this.tick + Math.ceil(burstIntervalMs / 50); // 设置第二发的时间
           wr.ammoInMag -= 1;
+          advanceBurstAfterShot(wr, weaponDef, this.tick);
         } else {
           // 单发模式
-          wr.nextFireTick = this.tick + Math.ceil(weaponDef.fireIntervalMs / 50);
           wr.ammoInMag -= 1;
+          advanceBurstAfterShot(wr, weaponDef, this.tick);
         }
         
         // 发射子弹（提取为公共方法，供连发使用）
@@ -1847,6 +1835,13 @@ export class Room {
     const events = new Map(this.combatEvents);
     this.combatEvents.clear();
     return events;
+  }
+
+  // 新增: 获取并清空近战挥击事件（广播用）
+  drainMeleeSwings(): Array<{ playerId: string; x: number; y: number; aimRad: number; range: number; arcRad: number }> {
+    const swings = [...this.meleeSwings];
+    this.meleeSwings = [];
+    return swings;
   }
 
   // 新增: 自动交互（服务端选最近可交互目标）

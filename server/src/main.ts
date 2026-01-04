@@ -12,6 +12,7 @@ import {
   S2C_PROFILE_SCHEMA, // P1-1: Profile 消息
   S2C_RAID_RESULT_SCHEMA, // 新增: 战局结果消息
   S2C_COMBAT_EVENT_SCHEMA, // 新增: 战斗事件消息
+  S2C_MELEE_SWING_SCHEMA, // 新增: 近战挥击事件
   getWeaponDef, // 新增: 用于重置武器运行时状态
   type C2S_MESSAGE,
 } from '@jerkie-man/shared';
@@ -1176,6 +1177,28 @@ setInterval(() => {
     }
   }
 
+  // 广播近战挥击事件（用于显示其他玩家挥击）
+  const meleeSwings = room.drainMeleeSwings();
+  if (meleeSwings.length > 0) {
+    for (const swing of meleeSwings) {
+      const message = S2C_MELEE_SWING_SCHEMA.parse({
+        type: 'S2C_MELEE_SWING',
+        playerId: swing.playerId,
+        x: swing.x,
+        y: swing.y,
+        aimRad: swing.aimRad,
+        range: swing.range,
+        arcRad: swing.arcRad,
+      });
+
+      for (const ws of connections.keys()) {
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify(message));
+        }
+      }
+    }
+  }
+
   // 每10个tick打印一次汇总（约0.5秒）
   if (room.tick % 10 === 0) {
     log('TICK', {
@@ -1245,4 +1268,3 @@ log('Server listening', {
   host: HOST,
   port: PORT.toString(),
 });
-

@@ -1,12 +1,12 @@
 {
   "c1e21557-a3fe-45f9-b5f5-04d022b1714a": {
     "displayName": "Rufus",
-    "money": 36173211,
+    "money": 36174439,
     "stash": [
       {
         "iid": "i1767516372333_tyl9lpgyq",
         "typeId": "electronics",
-        "qty": 1
+        "qty": 2
       },
       {
         "iid": "i1767516389915_aoykjn9xr",
@@ -46,7 +46,7 @@
       {
         "iid": "i1767517342225_2lkmfqh58",
         "typeId": "cloth",
-        "qty": 24
+        "qty": 25
       },
       {
         "iid": "i1767516310929_2y5kowfc4",
@@ -324,11 +324,6 @@
         "qty": 1
       },
       {
-        "iid": "i1767523923501_1bd0s9l29",
-        "typeId": "w_burst",
-        "qty": 1
-      },
-      {
         "iid": "i1767524037828_ywc4wlhkr",
         "typeId": "keycard_beta",
         "qty": 1
@@ -342,12 +337,17 @@
         "iid": "i1767524037828_5urrv6qmi",
         "typeId": "keycard_beta",
         "qty": 1
+      },
+      {
+        "iid": "i1767534299091_q5ag90ni8",
+        "typeId": "w_dmr",
+        "qty": 1
       }
     ],
     "prep": [],
     "bagCap": 4,
     "equipment": {
-      "weaponIid": "i1767522379419_87098wrbo",
+      "weaponIid": null,
       "bagIid": null,
       "armorIid": null
     }
@@ -360,7 +360,7 @@
     "bagCap": 8
   },
   "e0a688fe-e924-423b-a7f7-e0e8e05fbbfd": {
-    "displayName": "12",
+    "displayName": "1234",
     "money": 11297,
     "stash": [
       {

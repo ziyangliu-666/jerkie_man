@@ -2,6 +2,15 @@
 import fs from "node:fs";
 import path from "node:path";
 import { execSync } from "node:child_process";
+import { createRequire } from "node:module";
+
+const require = createRequire(import.meta.url);
+let ts = null;
+try {
+    ts = require("typescript");
+} catch {
+    // 没装 typescript 就降级：dense 模式只做压空行/JSON 最小化
+}
 
 function readJson(filePath) {
     try {
@@ -33,25 +42,25 @@ function matchPattern(pattern, filePath) {
     // 例如：client/src/**/*.ts 应该匹配：
     //   - client/src/input.ts（** 匹配空，* 匹配 input）
     //   - client/src/subdir/file.ts（** 匹配 subdir/，* 匹配 file）
-    
+
     let regexStr = pattern.replace(/\./g, "\\.");
-    
+
     // 特殊处理 **/* 组合（必须在处理单独的 ** 和 * 之前）：
     // **/* 应该匹配：0 个或多个路径段 + 文件名
     // 例如：client/src/**/*.ts 应该匹配 client/src/input.ts（** 匹配空，* 匹配 input）
     // 转换：**/* -> (?:[^/]+/)*[^/]+（匹配 0 个或多个路径段 + 文件名）
     // 使用占位符避免后续替换干扰
     regexStr = regexStr.replace(/\*\*\/\*/g, "___DS_SLASH_STAR___");
-    
+
     // 处理单独的 **（不在 **/* 组合中，匹配任意内容包括 /）
     regexStr = regexStr.replace(/\*\*/g, ".*");
-    
+
     // 处理单独的 *（不在 **/* 组合中，匹配单个路径段）
     regexStr = regexStr.replace(/\*/g, "[^/]*");
-    
+
     // 最后替换 **/* 组合的占位符（匹配 0 个或多个路径段 + 文件名）
     regexStr = regexStr.replace(/___DS_SLASH_STAR___/g, "(?:[^/]+/)*[^/]+");
-    
+
     const regex = new RegExp(`^${regexStr}$`);
     return regex.test(filePath);
 }
@@ -203,6 +212,69 @@ function tryReadText(filePath, maxBytes) {
     }
 }
 
+function collapseBlankLines(text, maxBlank = 1) {
+    const lines = text.replace(/\r\n/g, "\n").split("\n");
+    const out = [];
+    let blank = 0;
+    for (const line of lines) {
+        const trimmedEnd = line.replace(/[ \t]+$/g, "");
+        if (trimmedEnd === "") {
+            blank++;
+            if (blank <= maxBlank) out.push("");
+        } else {
+            blank = 0;
+            out.push(trimmedEnd);
+        }
+    }
+    return out.join("\n");
+}
+
+function minifyJson(text) {
+    try {
+        return JSON.stringify(JSON.parse(text));
+    } catch {
+        return text;
+    }
+}
+
+function stripCommentsByTS(code, relPath) {
+    if (!ts) return code;
+
+    const ext = path.extname(relPath).toLowerCase();
+    const kind =
+        ext === ".tsx" ? ts.ScriptKind.TSX :
+            ext === ".ts" ? ts.ScriptKind.TS :
+                ext === ".jsx" ? ts.ScriptKind.JSX :
+                    ts.ScriptKind.JS;
+
+    const sf = ts.createSourceFile(relPath, code, ts.ScriptTarget.Latest, /*setParentNodes*/ true, kind);
+    const printer = ts.createPrinter({ removeComments: true, newLine: ts.NewLineKind.LineFeed });
+    return printer.printFile(sf);
+}
+
+function densifyText(text, relPath) {
+    const ext = path.extname(relPath).toLowerCase();
+
+    let out = text;
+
+    // 1) JSON 一行化
+    if (ext === ".json") {
+        out = minifyJson(out);
+    }
+
+    // 2) JS/TS 去注释（保留类型信息）
+    if (ext === ".js" || ext === ".jsx" || ext === ".ts" || ext === ".tsx") {
+        out = stripCommentsByTS(out, relPath);
+    }
+
+    // 3) 压空行/尾空格
+    out = collapseBlankLines(out, 1);
+
+    // 确保结尾换行（更稳）
+    if (!out.endsWith("\n")) out += "\n";
+    return out;
+}
+
 function parseArgs(argv) {
     const args = {
         mode: "plan",
@@ -214,6 +286,7 @@ function parseArgs(argv) {
         include: [],
         exclude: [],
         filesOnly: [], // 新增：仅导出指定的文件列表
+        dense: false,
     };
 
     for (let i = 2; i < argv.length; i++) {
@@ -237,6 +310,8 @@ function parseArgs(argv) {
         } else if (a === "--files" && argv[i + 1]) {
             // 新增：支持 --files file1 file2 file3 或多次使用 --files file1 --files file2
             args.filesOnly.push(normalizeRel(argv[++i]));
+        } else if (a === "--dense") {
+            args.dense = true;
         }
     }
     return args;
@@ -323,6 +398,9 @@ function main() {
     lines.push(`# allowlist: ${normalizeRel(args.allowlist)}`);
     lines.push(`# max file size: ${maxBytes} bytes`);
     lines.push(`# max files: ${args.maxFiles}`);
+    if (args.dense) {
+        lines.push(`# dense: enabled (comments removed, blank lines collapsed, JSON minified)`);
+    }
     lines.push("");
 
     let relPaths = [];
@@ -380,37 +458,67 @@ function main() {
 
     for (const rel of relPaths) {
         const abs = path.resolve(args.root, rel);
-        const got = tryReadText(abs, maxBytes);
+        let got = tryReadText(abs, maxBytes);
 
-        lines.push("=".repeat(90));
-        lines.push(`FILE: ${rel}`);
-
-        if (!got.ok) {
-            const isOptional = optionalFiles.has(rel);
-            if (isOptional) {
-                lines.push(`STATUS: ${got.reason} (optional)`);
-                missingOptional++;
-            } else {
-                lines.push(`STATUS: ${got.reason} (required)`);
-                missingRequired++;
-            }
-            lines.push("");
-            skipped++;
-            continue;
+        // 应用 dense 处理
+        if (got.ok && args.dense) {
+            got = { ...got, text: densifyText(got.text, rel) };
         }
 
-        lines.push(`STATUS: OK${got.truncated ? " (TRUNCATED)" : ""}`);
-        if (got.truncated) truncated++;
-        lines.push("-".repeat(90));
-        lines.push(got.text.replace(/\r\n/g, "\n"));
-        if (!got.text.endsWith("\n")) lines.push("");
-        lines.push("");
-        dumped++;
+        if (args.dense) {
+            // dense 模式：紧凑格式
+            if (!got.ok) {
+                const isOptional = optionalFiles.has(rel);
+                lines.push(`--- FILE: ${rel} [${got.reason}${isOptional ? ", optional" : ""}] ---`);
+                if (isOptional) {
+                    missingOptional++;
+                } else {
+                    missingRequired++;
+                }
+                skipped++;
+            } else {
+                lines.push(`--- FILE: ${rel}${got.truncated ? " [TRUNCATED]" : ""} ---`);
+                if (got.truncated) truncated++;
+                lines.push(got.text.replace(/\r\n/g, "\n"));
+                if (!got.text.endsWith("\n")) lines.push("");
+                dumped++;
+            }
+        } else {
+            // 普通模式：原有格式
+            lines.push("=".repeat(90));
+            lines.push(`FILE: ${rel}`);
+
+            if (!got.ok) {
+                const isOptional = optionalFiles.has(rel);
+                if (isOptional) {
+                    lines.push(`STATUS: ${got.reason} (optional)`);
+                    missingOptional++;
+                } else {
+                    lines.push(`STATUS: ${got.reason} (required)`);
+                    missingRequired++;
+                }
+                lines.push("");
+                skipped++;
+                continue;
+            }
+
+            lines.push(`STATUS: OK${got.truncated ? " (TRUNCATED)" : ""}`);
+            if (got.truncated) truncated++;
+            lines.push("-".repeat(90));
+            lines.push(got.text.replace(/\r\n/g, "\n"));
+            if (!got.text.endsWith("\n")) lines.push("");
+            lines.push("");
+            dumped++;
+        }
     }
 
     // Summary
-    lines.push("=".repeat(90));
-    lines.push("# SUMMARY");
+    if (args.dense) {
+        lines.push("--- SUMMARY ---");
+    } else {
+        lines.push("=".repeat(90));
+        lines.push("# SUMMARY");
+    }
     lines.push(`# dumped: ${dumped} files`);
     lines.push(`# skipped: ${skipped} files`);
     lines.push(`# missing (optional): ${missingOptional} files`);

@@ -1,5 +1,5 @@
 # key-code dump
-# time: 2026-01-04T12:37:44.232Z
+# time: 2026-01-04T13:53:57.623Z
 # root: C:/Users/1/Code/mini_game/jerkie_man
 # mode: plan
 # allowlist: tools/dump_allowlist.json
@@ -2082,6 +2082,10 @@ import {
   getBagDef,
   getArmorDef,
   rarityToZh,
+  msToTicks,
+  getEquippedWeaponDef,
+  DEFAULT_FIRE_INTERVAL_MS,
+  DEFAULT_BULLET_SPEED,
 } from '@jerkie-man/shared';
 
 // 本地发射 ID 计数器（用于客户端预测子弹对齐）
@@ -2090,35 +2094,41 @@ let localShotIdCounter = 0;
 let lastLocalFireMs = 0;
 
 /**
- * 获取当前装备的武器类型（从 playerProfile）
- */
-function getEquippedWeaponType(): any | null {
-  if (!playerProfile?.equipment?.weaponIid) return null;
-  const wid = playerProfile.equipment.weaponIid;
-  const pool = [...(playerProfile.prep ?? []), ...(playerProfile.stash ?? [])];
-  const inst = pool.find(it => it.iid === wid);
-  if (!inst) return null;
-  try {
-    return getWeaponDef(inst.typeId);
-  } catch {
-    return null;
-  }
-}
-
-/**
  * 获取本地开火冷却时间（毫秒）
+ * 使用shared层的单一数据源，不再有默认值回退
  */
 function getLocalFireCooldownMs(): number {
-  const weaponDef = getEquippedWeaponType();
-  return weaponDef?.fireIntervalMs ?? 150; // 默认 150ms
+  if (!playerProfile) {
+    console.warn('[getLocalFireCooldownMs] playerProfile is null, using default');
+    return DEFAULT_FIRE_INTERVAL_MS;
+  }
+
+  const weaponDef = getEquippedWeaponDef(playerProfile);
+  if (!weaponDef) {
+    console.warn('[getLocalFireCooldownMs] No weapon equipped, using default');
+    return DEFAULT_FIRE_INTERVAL_MS;
+  }
+
+  return weaponDef.fireIntervalMs;
 }
 
 /**
  * 获取本地子弹速度（px/s）
+ * 使用shared层的单一数据源，不再有默认值回退
  */
 function getLocalBulletSpeed(): number {
-  const weaponDef = getEquippedWeaponType();
-  return weaponDef?.bulletSpeed ?? 800; // 默认 800 px/s
+  if (!playerProfile) {
+    console.warn('[getLocalBulletSpeed] playerProfile is null, using default');
+    return DEFAULT_BULLET_SPEED;
+  }
+
+  const weaponDef = getEquippedWeaponDef(playerProfile);
+  if (!weaponDef) {
+    console.warn('[getLocalBulletSpeed] No weapon equipped, using default');
+    return DEFAULT_BULLET_SPEED;
+  }
+
+  return weaponDef.bulletSpeed;
 }
 
 // 三层结构：worldCanvas（世界层）+ uiCanvas（屏幕HUD层）+ DOM overlay（面板层）
@@ -3669,7 +3679,6 @@ const network = new Network(getWebSocketUrl(), 'local', {
     if (event.kind === 'DRY_FIRE') {
       // 干火反馈：屏幕中央显示"没子弹"提示
       uiOverlay.showText('没子弹');
-      hud.addEvent('干火！');
     } else if (event.kind === 'HIT') {
       // 命中反馈
       uiOverlay.triggerHitMarker();
@@ -3842,8 +3851,9 @@ function renderLoop(): void {
               const weaponDef = getWeaponDef(localPlayer.weaponRuntime.weaponTypeId);
               const currentTick = network.getConnectionState().lastServerTick;
               const reloading = localPlayer.weaponRuntime.reloadingUntilTick > 0 && currentTick < localPlayer.weaponRuntime.reloadingUntilTick;
-              const reloadProgress = reloading 
-                ? Math.min(1, (currentTick - (localPlayer.weaponRuntime.reloadingUntilTick - Math.ceil(weaponDef.reloadMs / 50))) / Math.ceil(weaponDef.reloadMs / 50))
+              const reloadTicks = msToTicks(weaponDef.reloadMs);
+              const reloadProgress = reloading
+                ? Math.min(1, (currentTick - (localPlayer.weaponRuntime.reloadingUntilTick - reloadTicks)) / reloadTicks)
                 : 0;
               
               uiOverlay.updateState({
@@ -4960,7 +4970,7 @@ FILE: client/src/renderer.ts
 STATUS: OK
 ------------------------------------------------------------------------------------------
 import type { PLAYER_STATE, BULLET_STATE, ITEM_STATE, OBSTACLE_STATE, WorldItem, LootBag } from '@jerkie-man/shared';
-import { getItemType, getWeaponDef } from '@jerkie-man/shared';
+import { getItemType, getWeaponDef, msToTicks } from '@jerkie-man/shared';
 
 export class Renderer {
   private canvas: HTMLCanvasElement;
@@ -5129,7 +5139,7 @@ export class Renderer {
         // 需要知道武器定义来计算总时长
         try {
           const weaponDef = getWeaponDef(wr.weaponTypeId);
-          const reloadTicks = Math.ceil(weaponDef.reloadMs / 50); // 50ms per tick
+          const reloadTicks = msToTicks(weaponDef.reloadMs);
           const startTick = wr.reloadingUntilTick - reloadTicks;
           const progress = Math.min(1, (currentServerTick - startTick) / reloadTicks);
           
@@ -6319,6 +6329,14 @@ const pickupQueues = new Map<string, PickupReq[]>();
 
 // P1-1 修复: lastProfileSentTick 移至模块级，避免每 tick 重新创建导致重复发送
 const lastProfileSentTick = new Map<string, number>();
+
+// 延迟补偿: 玩家延迟追踪（记录每个玩家的 RTT）
+type PlayerLatency = {
+  rtt: number;           // 往返延迟（Round-Trip Time，毫秒）
+  lastPongAt: number;    // 上次收到 Pong 的时间戳
+  pongCount: number;     // 收到的 Pong 数量（用于平滑）
+};
+const playerLatencies = new Map<string, PlayerLatency>(); // playerId -> PlayerLatency
 // 新增: 记录玩家撤离时的背包物品数（用于判断"刚完成撤离"）
 const lastExtractedInventoryCount = new Map<string, number>();
 
@@ -6503,13 +6521,30 @@ ws.on('message', (data: Buffer) => {
         sendProfile(ws, accountId);
       } else if (parsed.type === 'C2S_PING') {
         // Day5: 处理 Ping 消息，立即回复 Pong
+        const serverTimestamp = Date.now();
+        const rtt = serverTimestamp - parsed.timestamp;
+
+        // 延迟补偿: 更新延迟记录（使用指数移动平均平滑）
+        if (playerId) {
+          const existing = playerLatencies.get(playerId);
+          if (existing) {
+            // 指数移动平均：90% 旧值 + 10% 新值
+            existing.rtt = existing.rtt * 0.9 + rtt * 0.1;
+            existing.lastPongAt = serverTimestamp;
+            existing.pongCount++;
+          } else {
+            playerLatencies.set(playerId, { rtt, lastPongAt: serverTimestamp, pongCount: 1 });
+          }
+        }
+
+        // 发送 Pong
         if (ws.readyState === WebSocket.OPEN) {
           ws.send(
             JSON.stringify(
               S2C_PONG_SCHEMA.parse({
                 type: 'S2C_PONG',
                 clientTimestamp: parsed.timestamp,
-                serverTimestamp: Date.now(),
+                serverTimestamp: serverTimestamp,
               })
             )
           );
@@ -7160,6 +7195,7 @@ ws.on('message', (data: Buffer) => {
       playerIdToAccountId.delete(playerId);
       inputQueues.delete(playerId);
       pickupQueues.delete(playerId); // P2-3: 清理 pickup 队列
+      playerLatencies.delete(playerId); // 延迟补偿: 清理延迟记录
     }
   });
 
@@ -7374,10 +7410,22 @@ setInterval(() => {
   for (const playerId of room.players.keys()) {
     room.updateWeaponRuntime(playerId);
   }
-  
+
+  // 延迟补偿: 记录所有玩家的位置历史（在移动更新之后，子弹更新之前）
+  const now = Date.now();
+  for (const [playerId, player] of room.players.entries()) {
+    player.positionHistory.add(room.tick, now, player.x, player.y);
+  }
+
+  // 延迟补偿: 将延迟数据转换为简单映射传递给 updateBullets
+  const latencyMap = new Map<string, number>();
+  for (const [playerId, latency] of playerLatencies.entries()) {
+    latencyMap.set(playerId, latency.rtt);
+  }
+
   // Day2: 更新子弹位置并检测命中（20Hz tick = 50ms = 0.05s）
   const deltaTime = 0.05;
-  room.updateBullets(deltaTime);
+  room.updateBullets(deltaTime, latencyMap);
   
   // 新增: 处理战斗事件（干火/命中/受伤反馈）
   const combatEvents = room.drainCombatEvents();
@@ -7476,7 +7524,7 @@ FILE: server/src/player.ts
 STATUS: OK
 ------------------------------------------------------------------------------------------
 import type { PLAYER_STATE, OBSTACLE_STATE, PlayerInventory, ItemInstance, WeaponRuntime } from '@jerkie-man/shared';
-import { simulatePlayerMove, getItemType } from '@jerkie-man/shared';
+import { simulatePlayerMove, getItemType, PositionHistory } from '@jerkie-man/shared';
 
 export class Player {
   public id: string;
@@ -7494,6 +7542,7 @@ export class Player {
   public armorReduction: number = 0; // 新增: 护甲减伤（0-1，例如0.25表示减少25%伤害）
   public killedBy: string | undefined; // 新增: 击杀者玩家ID
   public killedByWeaponName: string | undefined; // 新增: 击杀使用的武器名称
+  public positionHistory: PositionHistory; // 延迟补偿: 位置历史记录
 
   // 修复: 移动速度已移至 shared/sim.ts，这里不再需要（保留注释用于文档）
   // SPEED = 200 (在 shared/sim.ts 中定义)
@@ -7516,6 +7565,7 @@ export class Player {
     };
     this.name = name; // 新增: 设置玩家昵称
     this.weaponRuntime = weaponRuntime; // 新增: 设置武器运行时状态
+    this.positionHistory = new PositionHistory(50); // 延迟补偿: 保留50帧（2.5秒@20Hz）
   }
 
   // 处理输入，更新位置
@@ -8432,8 +8482,8 @@ STATUS: OK
 ------------------------------------------------------------------------------------------
 ﻿import { Player } from './player.js';
 import { ProfileManager } from './profile.js';
-import type { PLAYER_STATE, BULLET_STATE, ITEM_STATE, C2S_INPUT, MAP_CONFIG, OBSTACLE_STATE, WorldItem, LootBag, ItemInstance, WeaponRuntime } from '@jerkie-man/shared';
-import { loadMapConfig, loadItemTypes, circleVsAABB, createRng, rectIntersects, segmentIntersectsCircle, getItemType, getAllItemTypes, getItemTypesByRarity, getWeaponDef, getArmorDef, applySpread } from '@jerkie-man/shared';
+import type { PLAYER_STATE, BULLET_STATE, ITEM_STATE, C2S_INPUT, MAP_CONFIG, OBSTACLE_STATE, WorldItem, LootBag, ItemInstance, WeaponRuntime, WeaponDef } from '@jerkie-man/shared';
+import { loadMapConfig, loadItemTypes, circleVsAABB, createRng, rectIntersects, segmentIntersectsCircle, getItemType, getAllItemTypes, getItemTypesByRarity, getWeaponDef, getArmorDef, applySpread, msToTicks } from '@jerkie-man/shared';
 import { log } from './logger.js';
 
 // Step4: 内部子弹类型（包含spawnAt、damage和bulletLifeMs用于TTL检查和伤害计算）
@@ -9270,10 +9320,10 @@ export class Room {
       
       if (wr.burstRemaining > 0) {
         // 还有剩余，设置下一发的时间
-        wr.burstNextTick = this.tick + Math.ceil(burstIntervalMs / 50);
+        wr.burstNextTick = this.tick + msToTicks(burstIntervalMs);
       } else {
         // 连发结束，设置下次可以开火的时间（使用完整的fireIntervalMs）
-        wr.nextFireTick = this.tick + Math.ceil(weaponDef.fireIntervalMs / 50);
+        wr.nextFireTick = this.tick + msToTicks(weaponDef.fireIntervalMs);
         wr.burstRemaining = undefined;
         wr.burstNextTick = undefined;
       }
@@ -9299,8 +9349,8 @@ export class Room {
     }
   }
   
-  // 新增: 发射子弹的公共方法
-  private spawnBullet(playerId: string, player: Player, aimRad: number, weaponDef: any, shotId: number | undefined): string {
+  // 新增: 发射子弹的公共方法（修复：weaponDef使用强类型而非any）
+  private spawnBullet(playerId: string, player: Player, aimRad: number, weaponDef: WeaponDef, shotId: number | undefined): string {
     const pelletCount = weaponDef.pelletCount ?? 1; // 默认1颗子弹
     
     // 调试日志：打印weaponDef内容
@@ -9463,7 +9513,7 @@ export class Room {
           const weaponDef = getWeaponDef(wr.weaponTypeId);
           // 如果弹匣未满，开始换弹
           if (wr.ammoInMag < weaponDef.magSize) {
-            wr.reloadingUntilTick = this.tick + Math.ceil(weaponDef.reloadMs / 50); // 50ms per tick
+            wr.reloadingUntilTick = this.tick + msToTicks(weaponDef.reloadMs);
             log('RELOAD_START', {
               room: this.id,
               player: playerId,
@@ -9593,9 +9643,9 @@ export class Room {
             // 推送命中事件
             this.pushEvent(`${playerId} melee hit ${hitTarget.id} (-${weaponDef.damage})`);
           }
-          
+
           // 更新冷却
-          wr.nextFireTick = this.tick + Math.ceil(weaponDef.fireIntervalMs / 50);
+          wr.nextFireTick = this.tick + msToTicks(weaponDef.fireIntervalMs);
           return;
         }
         
@@ -9609,7 +9659,7 @@ export class Room {
           // 触发自动换弹（兜底）
           // 修复: 只有在未换弹时才能触发自动换弹，避免换弹完成后再次触发
           if (weaponDef.reloadMs > 0 && wr.reloadingUntilTick === 0) {
-            wr.reloadingUntilTick = this.tick + Math.ceil(weaponDef.reloadMs / 50);
+            wr.reloadingUntilTick = this.tick + msToTicks(weaponDef.reloadMs);
             // ammoInMag保持0，换弹完成后再回满
           }
           // 发送干火事件
@@ -9634,24 +9684,24 @@ export class Room {
           // 发射连发中的一发
           wr.ammoInMag -= 1;
           wr.burstRemaining -= 1;
-          
+
           if (wr.burstRemaining > 0) {
             // 还有剩余，设置下一发的时间
-            wr.burstNextTick = this.tick + Math.ceil(burstIntervalMs / 50);
+            wr.burstNextTick = this.tick + msToTicks(burstIntervalMs);
           } else {
             // 连发结束，设置下次可以开火的时间（使用完整的fireIntervalMs）
-            wr.nextFireTick = this.tick + Math.ceil(weaponDef.fireIntervalMs / 50);
+            wr.nextFireTick = this.tick + msToTicks(weaponDef.fireIntervalMs);
             wr.burstRemaining = undefined;
             wr.burstNextTick = undefined;
           }
         } else if (burstCount > 1) {
           // 开始新的连发，立即发射第一发
           wr.burstRemaining = burstCount - 1; // 减1因为马上要发射第一发
-          wr.burstNextTick = this.tick + Math.ceil(burstIntervalMs / 50); // 设置第二发的时间
+          wr.burstNextTick = this.tick + msToTicks(burstIntervalMs); // 设置第二发的时间
           wr.ammoInMag -= 1;
         } else {
           // 单发模式
-          wr.nextFireTick = this.tick + Math.ceil(weaponDef.fireIntervalMs / 50);
+          wr.nextFireTick = this.tick + msToTicks(weaponDef.fireIntervalMs);
           wr.ammoInMag -= 1;
         }
         
@@ -9697,9 +9747,13 @@ export class Room {
 
   // Day2: 更新子弹位置并检测命中
   // Step4: 性能优化 - 碰撞检测用dist^2，bulletsToRemove用Set
-  updateBullets(deltaTime: number): void {
+  updateBullets(deltaTime: number, playerLatencies: Map<string, number> = new Map()): void {
     const now = Date.now();
     const bulletsToRemove = new Set<string>(); // Step4: 用Set代替O(n^2)
+
+    // 延迟补偿配置
+    const SAFETY_MARGIN_MS = 50;
+    const MAX_REWIND_MS = 500;
     
     for (const bullet of this.bullets) {
       // Step4: 子弹TTL检查（使用武器特定的bulletLifeMs）
@@ -9761,9 +9815,23 @@ export class Room {
         if (playerId === bullet.ownerId || player.status !== 'ALIVE') {
           continue;
         }
-        
-          // 使用线段 vs 圆的连续碰撞检测
-        if (segmentIntersectsCircle(oldX, oldY, bullet.x, bullet.y, player.x, player.y, PLAYER_HIT_RADIUS)) {
+
+        // 延迟补偿: 根据射击者延迟回溯目标位置
+        const shooterLatency = playerLatencies.get(bullet.ownerId) ?? 0;
+        const rewindTimeMs = Math.min(
+          Math.max(0, shooterLatency / 2 + SAFETY_MARGIN_MS),
+          MAX_REWIND_MS
+        );
+
+        const targetTimestamp = now - rewindTimeMs;
+        const historicalPos = player.positionHistory.getPositionAt(targetTimestamp);
+
+        // 使用历史位置（如果可用，否则使用当前位置）
+        const targetX = historicalPos?.x ?? player.x;
+        const targetY = historicalPos?.y ?? player.y;
+
+        // 使用线段 vs 圆的连续碰撞检测（使用回溯后的位置）
+        if (segmentIntersectsCircle(oldX, oldY, bullet.x, bullet.y, targetX, targetY, PLAYER_HIT_RADIUS)) {
           // 命中！
           const oldHp = player.hp;
           const wasAlive = player.status === 'ALIVE';
@@ -10758,6 +10826,51 @@ runSmokeTest()
 
 
 ==========================================================================================
+FILE: shared/src/constants.ts
+STATUS: OK
+------------------------------------------------------------------------------------------
+/**
+ * 全局常量 - 单一数据源
+ * 用于替换硬编码的魔法常量
+ */
+
+// Tick系统常量
+export const TICK_MS = 50; // 服务端tick间隔：50ms = 20Hz
+export const SNAPSHOT_MS = 100; // 快照广播间隔：100ms = 10Hz
+
+// Tick换算工具函数
+export function msToTicks(ms: number): number {
+  return Math.ceil(ms / TICK_MS);
+}
+
+export function ticksToMs(ticks: number): number {
+  return ticks * TICK_MS;
+}
+
+// 默认值常量
+export const DEFAULT_BAG_CAP = 4; // 默认背包容量
+export const DEFAULT_FIRE_INTERVAL_MS = 150; // 默认射速（用于fists）
+export const DEFAULT_BULLET_SPEED = 800; // 默认子弹速度
+
+// 游戏平衡常量
+export const PLAYER_HIT_RADIUS = 16; // 玩家碰撞半径（用于命中判定）
+export const PLAYER_RADIUS = 10; // 玩家移动碰撞半径
+export const PLAYER_SPEED = 200; // 玩家移动速度（像素/秒）
+
+// 延迟补偿常量
+export const LAG_COMP_SAFETY_MARGIN_MS = 50; // 延迟补偿安全裕量
+export const LAG_COMP_MAX_REWIND_MS = 500; // 最大回溯时间
+export const POSITION_HISTORY_SIZE = 50; // 位置历史缓冲区大小（约2.5秒@20Hz）
+
+// 提取区常量
+export const EXTRACT_DURATION_MS = 2000; // 撤离持续时间
+export const EXTRACT_ZONE_RADIUS = 100; // 撤离区半径
+
+// 拾取交互常量
+export const INTERACT_DISTANCE = 50; // 交互距离
+
+
+==========================================================================================
 FILE: shared/src/content.ts
 STATUS: OK
 ------------------------------------------------------------------------------------------
@@ -10836,10 +10949,14 @@ STATUS: OK
  * 包含武器、背包、防具的详细属性
  */
 
+// 武器种类（为手雷/火箭筒预留）
+export type WeaponKind = 'gun' | 'throwable' | 'launcher';
+
 // 武器定义
 export interface WeaponDef {
   typeId: string;
   name: string;
+  weaponKind?: WeaponKind; // 武器种类（默认为gun）
   magSize: number; // 弹匣容量
   reloadMs: number; // 换弹时间（毫秒）
   fireIntervalMs: number; // 开火间隔（毫秒）
@@ -10850,6 +10967,15 @@ export interface WeaponDef {
   burstCount?: number; // 连发数量（例如3表示三连发，未定义或1表示单发）
   burstIntervalMs?: number; // 连发间隔（毫秒，默认等于fireIntervalMs）
   pelletCount?: number; // 弹丸数量（霰弹枪使用，例如8表示一次发射8颗子弹）
+}
+
+// 投射物定义（为手雷/火箭弹预留，当前仅作为类型定义）
+export interface ProjectileDef {
+  speed: number; // 飞行速度
+  ttl: number; // 生命周期（毫秒）
+  explosionRadius?: number; // 爆炸半径（像素）
+  explosionDamage?: number; // 爆炸伤害
+  fuseMs?: number; // 引信时间（手雷专用，毫秒）
 }
 
 // 背包定义
@@ -11098,6 +11224,12 @@ export * from './equipment.js';
 
 // 国际化支持
 export * from './i18n.js';
+
+// 常量（单一数据源）
+export * from './constants.js';
+
+// Profile工具函数（单一数据源）
+export * from './profileUtils.js';
 
 // 显式导出内容加载器函数
 export { loadMapConfig, loadItemTypes } from './content.js';
@@ -11503,6 +11635,224 @@ export function segmentIntersectsCircle(
   return distSq <= r * r;
 }
 
+
+
+==========================================================================================
+FILE: shared/src/profileUtils.ts
+STATUS: OK
+------------------------------------------------------------------------------------------
+/**
+ * Profile工具函数 - 单一数据源（Single Source of Truth）
+ *
+ * 所有profile相关的查询和验证逻辑统一在此处实现
+ * Client和Server必须使用这些函数，不得自己实现查找逻辑
+ */
+
+import type { PlayerProfile, ItemInstance, PlayerEquipment } from './types.js';
+import { getWeaponDef, getBagDef, getArmorDef, type WeaponDef } from './equipment.js';
+import { DEFAULT_BAG_CAP } from './constants.js';
+
+/**
+ * 在profile中查找物品（单一数据源）
+ * @param profile 玩家档案
+ * @param iid 物品实例ID
+ * @returns 物品所在容器和物品实例，找不到返回null
+ */
+export function findItemByIid(
+  profile: PlayerProfile,
+  iid: string
+): { container: 'stash' | 'prep'; item: ItemInstance } | null {
+  // 先在stash中查找
+  const stashItem = profile.stash.find(item => item.iid === iid);
+  if (stashItem) {
+    return { container: 'stash', item: stashItem };
+  }
+
+  // 再在prep中查找
+  const prepItem = profile.prep.find(item => item.iid === iid);
+  if (prepItem) {
+    return { container: 'prep', item: prepItem };
+  }
+
+  return null;
+}
+
+/**
+ * 获取装备的武器定义（单一数据源）
+ * @param profile 玩家档案
+ * @returns 武器定义，未装备或找不到返回null
+ */
+export function getEquippedWeaponDef(profile: PlayerProfile): WeaponDef | null {
+  if (!profile.equipment.weaponIid) {
+    return null;
+  }
+
+  const found = findItemByIid(profile, profile.equipment.weaponIid);
+  if (!found) {
+    return null; // 装备的iid找不到（数据异常）
+  }
+
+  try {
+    return getWeaponDef(found.item.typeId);
+  } catch {
+    return null; // typeId无效
+  }
+}
+
+/**
+ * 获取装备的背包容量（单一数据源）
+ * @param profile 玩家档案
+ * @returns 背包容量，未装备或找不到返回默认值
+ */
+export function getEquippedBagCap(profile: PlayerProfile): number {
+  if (!profile.equipment.bagIid) {
+    return DEFAULT_BAG_CAP;
+  }
+
+  const found = findItemByIid(profile, profile.equipment.bagIid);
+  if (!found) {
+    return DEFAULT_BAG_CAP; // 装备的iid找不到（数据异常）
+  }
+
+  try {
+    const bagDef = getBagDef(found.item.typeId);
+    return bagDef.bagCap;
+  } catch {
+    return DEFAULT_BAG_CAP; // typeId无效
+  }
+}
+
+/**
+ * 获取装备的护甲减伤（单一数据源）
+ * @param profile 玩家档案
+ * @returns 减伤值（0-1），未装备或找不到返回0
+ */
+export function getEquippedArmorReduction(profile: PlayerProfile): number {
+  if (!profile.equipment.armorIid) {
+    return 0;
+  }
+
+  const found = findItemByIid(profile, profile.equipment.armorIid);
+  if (!found) {
+    return 0; // 装备的iid找不到（数据异常）
+  }
+
+  try {
+    const armorDef = getArmorDef(found.item.typeId);
+    return armorDef.damageReduction;
+  } catch {
+    return 0; // typeId无效
+  }
+}
+
+/**
+ * 检查物品是否已装备
+ * @param equipment 装备槽
+ * @param iid 物品实例ID
+ * @returns 是否已装备
+ */
+export function isItemEquipped(equipment: PlayerEquipment, iid: string): boolean {
+  return (
+    equipment.weaponIid === iid ||
+    equipment.bagIid === iid ||
+    equipment.armorIid === iid
+  );
+}
+
+/**
+ * 验证profile的不变量（invariants）
+ * @param profile 玩家档案
+ * @returns 错误列表，如果为空则表示所有不变量都满足
+ */
+export function validateInvariants(profile: PlayerProfile): string[] {
+  const errors: string[] = [];
+
+  // 不变量1：equipment.weaponIid如果存在，必须能在stash或prep中找到
+  if (profile.equipment.weaponIid) {
+    const found = findItemByIid(profile, profile.equipment.weaponIid);
+    if (!found) {
+      errors.push(
+        `equipment.weaponIid="${profile.equipment.weaponIid}" 指向不存在的物品`
+      );
+    }
+  }
+
+  // 不变量2：equipment.bagIid如果存在，必须能在stash或prep中找到
+  if (profile.equipment.bagIid) {
+    const found = findItemByIid(profile, profile.equipment.bagIid);
+    if (!found) {
+      errors.push(
+        `equipment.bagIid="${profile.equipment.bagIid}" 指向不存在的物品`
+      );
+    }
+  }
+
+  // 不变量3：equipment.armorIid如果存在，必须能在stash或prep中找到
+  if (profile.equipment.armorIid) {
+    const found = findItemByIid(profile, profile.equipment.armorIid);
+    if (!found) {
+      errors.push(
+        `equipment.armorIid="${profile.equipment.armorIid}" 指向不存在的物品`
+      );
+    }
+  }
+
+  // 不变量4：bagCap应该等于当前装备的背包容量（如果profile.bagCap字段存在）
+  const actualBagCap = getEquippedBagCap(profile);
+  if (profile.bagCap !== undefined && profile.bagCap !== actualBagCap) {
+    errors.push(
+      `bagCap=${profile.bagCap} 与实际装备容量 ${actualBagCap} 不一致`
+    );
+  }
+
+  // 不变量5：prep物品数量不能超过背包容量
+  if (profile.prep.length > actualBagCap) {
+    errors.push(
+      `prep 物品数量 ${profile.prep.length} 超过容量 ${actualBagCap}`
+    );
+  }
+
+  return errors;
+}
+
+/**
+ * 获取物品显示名称（为国际化预留）
+ * @param typeId 物品类型ID
+ * @param lang 语言（默认英文）
+ * @returns 显示名称
+ */
+export function getItemDisplayName(typeId: string, lang: 'en' | 'zh' = 'en'): string {
+  // 优先从装备定义中查找
+  try {
+    const weaponDef = getWeaponDef(typeId);
+    return weaponDef.name; // 当前已经是中文
+  } catch {
+    // 不是武器
+  }
+
+  try {
+    const bagDef = getBagDef(typeId);
+    return bagDef.name;
+  } catch {
+    // 不是背包
+  }
+
+  try {
+    const armorDef = getArmorDef(typeId);
+    return armorDef.name;
+  } catch {
+    // 不是护甲
+  }
+
+  // 未来：从ITEM_CATALOG查找
+  // const itemType = getItemType(typeId);
+  // if (lang === 'zh') {
+  //   return ITEM_NAME_ZH[typeId] ?? itemType.name;
+  // }
+  // return itemType.name;
+
+  return typeId; // 兜底：返回typeId本身
+}
 
 
 ==========================================================================================
@@ -12060,10 +12410,109 @@ export type PlayerProfile = {
   equipment: PlayerEquipment; // 装备槽（weapon/bag/armor）
 };
 
+/**
+ * 延迟补偿系统（Lag Compensation）
+ * 用于记录玩家位置历史，实现服务端倒带（Server Rewind）机制
+ */
+
+/**
+ * 单个玩家位置快照
+ */
+export type PositionSnapshot = {
+  tick: number;        // 服务端 tick 编号
+  timestamp: number;   // 绝对时间戳（Date.now()）
+  x: number;
+  y: number;
+};
+
+/**
+ * 玩家位置历史缓冲区（环形缓冲区）
+ * 用于延迟补偿，记录玩家最近的位置历史
+ */
+export class PositionHistory {
+  private buffer: PositionSnapshot[];
+  private head: number;              // 写入头指针
+  private size: number;              // 当前已存储的快照数量
+  private readonly capacity: number; // 缓冲区容量
+
+  constructor(capacity: number = 50) {
+    this.capacity = capacity;
+    this.buffer = new Array(capacity);
+    this.head = 0;
+    this.size = 0;
+  }
+
+  /**
+   * 添加新的位置快照
+   */
+  add(tick: number, timestamp: number, x: number, y: number): void {
+    this.buffer[this.head] = { tick, timestamp, x, y };
+    this.head = (this.head + 1) % this.capacity;
+    if (this.size < this.capacity) {
+      this.size++;
+    }
+  }
+
+  /**
+   * 根据时间戳获取历史位置（线性插值）
+   * @param targetTimestamp 目标时间戳（射击者的"过去时间"）
+   * @returns 插值后的位置，如果历史不足则返回 null
+   */
+  getPositionAt(targetTimestamp: number): { x: number; y: number } | null {
+    if (this.size === 0) return null;
+
+    // 找到 t0 <= targetTimestamp < t1 的两个快照
+    let t0: PositionSnapshot | null = null;
+    let t1: PositionSnapshot | null = null;
+
+    for (let i = 0; i < this.size; i++) {
+      const idx = (this.head - 1 - i + this.capacity) % this.capacity;
+      const snapshot = this.buffer[idx];
+
+      if (snapshot.timestamp <= targetTimestamp) {
+        t0 = snapshot;
+        // 找下一个快照作为 t1
+        if (i > 0) {
+          const nextIdx = (this.head - i + this.capacity) % this.capacity;
+          t1 = this.buffer[nextIdx];
+        }
+        break;
+      }
+    }
+
+    // 情况1：没有足够旧的历史（targetTimestamp 比最老的记录还早）
+    if (!t0) {
+      const oldestIdx = (this.head - this.size + this.capacity) % this.capacity;
+      return { x: this.buffer[oldestIdx].x, y: this.buffer[oldestIdx].y };
+    }
+
+    // 情况2：只有 t0，没有 t1（targetTimestamp 在最新快照之后或刚好是最新）
+    if (!t1) {
+      return { x: t0.x, y: t0.y };
+    }
+
+    // 情况3：有 t0 和 t1，进行线性插值
+    const alpha = (targetTimestamp - t0.timestamp) / (t1.timestamp - t0.timestamp);
+    const clampedAlpha = Math.max(0, Math.min(1, alpha));
+    return {
+      x: t0.x + (t1.x - t0.x) * clampedAlpha,
+      y: t0.y + (t1.y - t0.y) * clampedAlpha,
+    };
+  }
+
+  /**
+   * 清空历史记录（玩家断线时调用）
+   */
+  clear(): void {
+    this.head = 0;
+    this.size = 0;
+  }
+}
+
 
 ==========================================================================================
 # SUMMARY
-# dumped: 27 files
+# dumped: 29 files
 # skipped: 0 files
 # missing (optional): 0 files
 # missing (required): 0 files

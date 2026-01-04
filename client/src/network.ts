@@ -19,6 +19,7 @@ import {
   type S2C_WORLD_INIT, // 新增: 世界初始化消息类型
   type S2C_RAID_RESULT, // 新增: 战局结果消息类型
   type S2C_COMBAT_EVENT, // 新增: 战斗事件消息类型
+  type S2C_MELEE_SWING, // 新增: 近战挥击事件类型
   type MAP_CONFIG, // P0-1 修复: 使用 shared 的 MAP_CONFIG 类型，避免类型漂移
   type OBSTACLE_STATE, // 修复: 静态世界初始化
   type ITEM_STATE, // 修复: 静态世界初始化
@@ -62,6 +63,7 @@ export interface NetworkCallbacks {
   onProfile?: (profile: { accountId: string; displayName: string | null; phase?: 'NAME' | 'HIDEOUT' | 'RAID' | 'RESULT'; money: number; stash: any[]; prep?: any[]; bagCap: number; equipment: { weaponIid: string | null; bagIid: string | null; armorIid: string | null } }) => void; // P1-1: Profile 回调
   onRaidResult?: (result: S2C_RAID_RESULT) => void; // 新增: 战局结果回调
   onCombatEvent?: (event: { kind: 'DRY_FIRE' | 'HIT' | 'DAMAGE_TAKEN'; direction?: number }) => void; // 新增: 战斗事件回调
+  onMeleeSwing?: (event: S2C_MELEE_SWING) => void; // 新增: 近战挥击事件回调
 }
 
 export class Network {
@@ -209,6 +211,11 @@ export class Network {
             // 新增: 处理战斗事件消息
             if (this.callbacks.onCombatEvent) {
               this.callbacks.onCombatEvent(message);
+            }
+          } else if (message.type === 'S2C_MELEE_SWING') {
+            // 新增: 处理近战挥击事件
+            if (this.callbacks.onMeleeSwing) {
+              this.callbacks.onMeleeSwing(message);
             }
           } else if (message.type === 'S2C_ERROR') {
             console.error('Server error:', message.message);

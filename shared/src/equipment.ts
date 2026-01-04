@@ -4,7 +4,7 @@
  */
 
 // 武器种类（为手雷/火箭筒预留）
-export type WeaponKind = 'gun' | 'throwable' | 'launcher';
+export type WeaponKind = 'gun' | 'throwable' | 'launcher' | 'melee';
 
 // 武器定义
 export interface WeaponDef {
@@ -21,6 +21,8 @@ export interface WeaponDef {
   burstCount?: number; // 连发数量（例如3表示三连发，未定义或1表示单发）
   burstIntervalMs?: number; // 连发间隔（毫秒，默认等于fireIntervalMs）
   pelletCount?: number; // 弹丸数量（霰弹枪使用，例如8表示一次发射8颗子弹）
+  meleeRange?: number; // 近战攻击范围（像素）
+  meleeArcDeg?: number; // 近战攻击扇形角度（度）
 }
 
 // 投射物定义（为手雷/火箭弹预留，当前仅作为类型定义）
@@ -51,6 +53,7 @@ export const WEAPONS: Record<string, WeaponDef> = {
   w_fists: {
     typeId: 'w_fists',
     name: '拳头',
+    weaponKind: 'melee',
     magSize: 0, // 拳头没有弹药
     reloadMs: 0, // 不需要换弹
     fireIntervalMs: 500, // 近战攻击间隔
@@ -58,6 +61,8 @@ export const WEAPONS: Record<string, WeaponDef> = {
     bulletSpeed: 0, // 不使用子弹
     damage: 15, // 近战伤害
     bulletLifeMs: 0, // 不使用子弹
+    meleeRange: 50,
+    meleeArcDeg: 140,
   },
   w_pistol: {
     typeId: 'w_pistol',

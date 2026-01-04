@@ -14,6 +14,7 @@ export class Player {
   public inventory: PlayerInventory; // 新增: 背包系统
   public name: string | undefined; // 新增: 玩家昵称（用于显示）
   public weaponRuntime: WeaponRuntime | undefined; // 新增: 武器运行时状态（局内状态）
+  public lastShoot: boolean = false; // track previous shoot state for burst gating
   public armorReduction: number = 0; // 新增: 护甲减伤（0-1，例如0.25表示减少25%伤害）
   public killedBy: string | undefined; // 新增: 击杀者玩家ID
   public killedByWeaponName: string | undefined; // 新增: 击杀使用的武器名称

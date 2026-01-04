@@ -26,43 +26,72 @@ import {
   getBagDef,
   getArmorDef,
   rarityToZh,
+  msToTicks,
+  getEquippedWeaponDef,
+  getFireSchedule,
+  shouldStartBurst,
+  DEFAULT_FIRE_INTERVAL_MS,
+  DEFAULT_BULLET_SPEED,
 } from '@jerkie-man/shared';
 
 // 本地发射 ID 计数器（用于客户端预测子弹对齐）
 let localShotIdCounter = 0;
 // 上次开火冷却时间（与服务端保持一致）
 let lastLocalFireMs = 0;
+let lastLocalShoot = false;
+let localBurstStreamUntil = 0;
+let lastLocalMeleeMs = 0;
 
-/**
- * 获取当前装备的武器类型（从 playerProfile）
- */
-function getEquippedWeaponType(): any | null {
-  if (!playerProfile?.equipment?.weaponIid) return null;
-  const wid = playerProfile.equipment.weaponIid;
-  const pool = [...(playerProfile.prep ?? []), ...(playerProfile.stash ?? [])];
-  const inst = pool.find(it => it.iid === wid);
-  if (!inst) return null;
-  try {
-    return getWeaponDef(inst.typeId);
-  } catch {
-    return null;
-  }
-}
+type MeleeSwing = {
+  x: number;
+  y: number;
+  aimRad: number;
+  range: number;
+  arcRad: number;
+  spawnTimeMs: number;
+};
+
+const DEFAULT_MELEE_RANGE = 35;
+const DEFAULT_MELEE_ARC_DEG = 60;
+const MELEE_SWING_TTL_MS = 160;
+let meleeSwings: MeleeSwing[] = [];
 
 /**
  * 获取本地开火冷却时间（毫秒）
+ * 使用shared层的单一数据源，不再有默认值回退
  */
 function getLocalFireCooldownMs(): number {
-  const weaponDef = getEquippedWeaponType();
-  return weaponDef?.fireIntervalMs ?? 150; // 默认 150ms
+  if (!playerProfile) {
+    console.warn('[getLocalFireCooldownMs] playerProfile is null, using default');
+    return DEFAULT_FIRE_INTERVAL_MS;
+  }
+
+  const weaponDef = getEquippedWeaponDef(playerProfile);
+  if (!weaponDef) {
+    console.warn('[getLocalFireCooldownMs] No weapon equipped, using default');
+    return DEFAULT_FIRE_INTERVAL_MS;
+  }
+
+  return weaponDef.fireIntervalMs;
 }
 
 /**
  * 获取本地子弹速度（px/s）
+ * 使用shared层的单一数据源，不再有默认值回退
  */
 function getLocalBulletSpeed(): number {
-  const weaponDef = getEquippedWeaponType();
-  return weaponDef?.bulletSpeed ?? 800; // 默认 800 px/s
+  if (!playerProfile) {
+    console.warn('[getLocalBulletSpeed] playerProfile is null, using default');
+    return DEFAULT_BULLET_SPEED;
+  }
+
+  const weaponDef = getEquippedWeaponDef(playerProfile);
+  if (!weaponDef) {
+    console.warn('[getLocalBulletSpeed] No weapon equipped, using default');
+    return DEFAULT_BULLET_SPEED;
+  }
+
+  return weaponDef.bulletSpeed;
 }
 
 // 三层结构：worldCanvas（世界层）+ uiCanvas（屏幕HUD层）+ DOM overlay（面板层）
@@ -1612,8 +1641,7 @@ const network = new Network(getWebSocketUrl(), 'local', {
     // 新增: 处理战斗事件
     if (event.kind === 'DRY_FIRE') {
       // 干火反馈：屏幕中央显示"没子弹"提示
-      uiOverlay.showText('没子弹');
-      hud.addEvent('干火！');
+      uiOverlay.showText('NO AMMO');
     } else if (event.kind === 'HIT') {
       // 命中反馈
       uiOverlay.triggerHitMarker();
@@ -1621,6 +1649,19 @@ const network = new Network(getWebSocketUrl(), 'local', {
       // 受伤反馈
       uiOverlay.triggerDamage(event.direction);
     }
+  },
+  onMeleeSwing: (event) => {
+    if (event.playerId === localPlayerId) {
+      return; // 本地挥击已预测，避免重复
+    }
+    meleeSwings.push({
+      x: event.x,
+      y: event.y,
+      aimRad: event.aimRad,
+      range: event.range,
+      arcRad: event.arcRad,
+      spawnTimeMs: performance.now(),
+    });
   },
 }, isDebug);
 
@@ -1738,6 +1779,18 @@ function renderLoop(): void {
         // 使用 BulletTrackManager 的 dead-reckoning + 本地预测渲染
         // 本地预测子弹会通过 shotId 自动对齐到服务端子弹（无接棒割裂）
         const bulletsToRender = bulletTracks.getBulletsForRender();
+        const nowPerf2 = performance.now();
+        const meleeSwingsToRender = meleeSwings
+          .map((swing) => ({
+            x: swing.x,
+            y: swing.y,
+            aimRad: swing.aimRad,
+            range: swing.range,
+            arcRad: swing.arcRad,
+            age: (nowPerf2 - swing.spawnTimeMs) / MELEE_SWING_TTL_MS,
+          }))
+          .filter((swing) => swing.age >= 0 && swing.age <= 1);
+        meleeSwings = meleeSwings.filter((swing) => nowPerf2 - swing.spawnTimeMs <= MELEE_SWING_TTL_MS);
         
         renderer.render(
           playersToRender,
@@ -1749,6 +1802,7 @@ function renderLoop(): void {
           cachedObstacles,
           state.worldItems, // 新增: 世界物品
           state.lootBags, // 新增: 掉落包
+          meleeSwingsToRender,
           bulletTracks.getHitEffects(), // 命中特效
           network.getConnectionState().lastServerTick // 新增: 当前服务器 tick（用于计算换弹进度）
         );
@@ -1786,8 +1840,9 @@ function renderLoop(): void {
               const weaponDef = getWeaponDef(localPlayer.weaponRuntime.weaponTypeId);
               const currentTick = network.getConnectionState().lastServerTick;
               const reloading = localPlayer.weaponRuntime.reloadingUntilTick > 0 && currentTick < localPlayer.weaponRuntime.reloadingUntilTick;
-              const reloadProgress = reloading 
-                ? Math.min(1, (currentTick - (localPlayer.weaponRuntime.reloadingUntilTick - Math.ceil(weaponDef.reloadMs / 50))) / Math.ceil(weaponDef.reloadMs / 50))
+              const reloadTicks = msToTicks(weaponDef.reloadMs);
+              const reloadProgress = reloading
+                ? Math.min(1, (currentTick - (localPlayer.weaponRuntime.reloadingUntilTick - reloadTicks)) / reloadTicks)
                 : 0;
               
               uiOverlay.updateState({
@@ -1847,7 +1902,28 @@ function renderLoop(): void {
         }
         return inputManager.getAimAngle(worldCanvas);
       })();
-      const tickShoot = canControl ? inputManager.getShoot() : false;
+      const rawShoot = canControl ? inputManager.getShoot() : false;
+      const weaponDef = (() => {
+        if (localPlayer?.weaponRuntime?.weaponTypeId) {
+          try {
+            return getWeaponDef(localPlayer.weaponRuntime.weaponTypeId);
+          } catch {
+            // fallback to profile
+          }
+        }
+        return playerProfile ? getEquippedWeaponDef(playerProfile) : undefined;
+      })();
+      const schedule = weaponDef ? getFireSchedule(weaponDef) : null;
+      const isBurstWeapon = schedule ? schedule.burstCount > 1 : false;
+      const justPressed = weaponDef
+        ? shouldStartBurst(weaponDef, rawShoot, lastLocalShoot)
+        : rawShoot;
+      const tickShoot = isBurstWeapon ? justPressed : rawShoot;
+      if (isBurstWeapon && justPressed && schedule) {
+        localBurstStreamUntil =
+          performance.now() + (schedule.burstCount - 1) * schedule.burstIntervalMs;
+      }
+      lastLocalShoot = rawShoot;
       const tickExtractHeld = canControl ? inputManager.getExtractHeld() : false;
       
       // 本地预测子弹已在发送 input 时由 BulletTrackManager 生成（通过 shotId 对齐）
@@ -1897,7 +1973,8 @@ function renderLoop(): void {
         // 修复: 持续输入流式发送逻辑
         // 检查是否有持续态输入（移动/射击/撤离）
         const keysAny = tickKeys.up || tickKeys.down || tickKeys.left || tickKeys.right;
-        const mustStream = keysAny || tickShoot || tickExtractHeld;
+        const burstStreaming = isBurstWeapon && performance.now() < localBurstStreamUntil;
+        const mustStream = keysAny || rawShoot || burstStreaming || tickExtractHeld;
         
         // 检查变化（用于 idle 时的省包逻辑）
         const keysChanged = !lastSentKeys || 
@@ -1921,44 +1998,60 @@ function renderLoop(): void {
           // 修复: 防止快速连点绕过冷却限制 - 使用严格的时间检查
           // 注意: 即使在同一循环中执行多个 tick，每次检查都会使用最新的 nowPerf2
           // 但为了更严格，我们在通过检查后立即更新 lastLocalFireMs
-          if (tickShoot && nowPerf2 - lastLocalFireMs >= fireCooldownMs) {
-            // 检查武器状态（从 snapshot 中的本地玩家状态）
-            const canShoot = localPlayer && localPlayer.weaponRuntime && 
-              localPlayer.weaponRuntime.ammoInMag > 0 && 
-              !(localPlayer.weaponRuntime.reloadingUntilTick > 0 && network.getConnectionState().lastServerTick < localPlayer.weaponRuntime.reloadingUntilTick);
-            
-            if (canShoot) {
-              // 修复: 在生成本地预测子弹之前就更新 lastLocalFireMs，防止同一循环中多次通过检查
-              // 这确保即使客户端在一次循环中执行多个 tick，每个 tick 最多只生成本地预测子弹一次
-              lastLocalFireMs = nowPerf2;
-              
-              localShotIdCounter++;
-              shotIdToSend = localShotIdCounter;
-              
-              // 生成本地预测子弹（立即显示，无延迟，使用动态子弹速度）
-              const localP = renderLocalPlayer ?? predictedLocalPlayer ?? localPlayer;
-              if (localP && localP.weaponRuntime) {
-                console.log(`[main.ts] 准备生成本地预测子弹: weaponTypeId=${localP.weaponRuntime.weaponTypeId}, shotId=${shotIdToSend}`);
-                bulletTracks.spawnLocalPrediction(
-                  shotIdToSend,
-                  localP.x,
-                  localP.y,
-                  tickAim,
-                  getLocalBulletSpeed(),
-                  localP.weaponRuntime.weaponTypeId
-                );
-              } else {
-                console.warn(`[main.ts] 无法生成本地预测子弹: localP=${!!localP}, weaponRuntime=${!!localP?.weaponRuntime}`);
+          if (tickShoot) {
+            if (weaponDef?.weaponKind === 'melee') {
+              if (nowPerf2 - lastLocalMeleeMs >= fireCooldownMs) {
+                const localP = renderLocalPlayer ?? predictedLocalPlayer ?? localPlayer;
+                if (localP) {
+                  const baseRange = weaponDef.meleeRange ?? DEFAULT_MELEE_RANGE;
+                  const baseArcRad = ((weaponDef.meleeArcDeg ?? DEFAULT_MELEE_ARC_DEG) * Math.PI) / 180;
+                  meleeSwings.push({
+                    x: localP.x,
+                    y: localP.y,
+                    aimRad: tickAim,
+                    range: baseRange,
+                    arcRad: baseArcRad,
+                    spawnTimeMs: nowPerf2,
+                  });
+                  lastLocalMeleeMs = nowPerf2;
+                }
               }
-            } else {
-              // 干火：触发本地反馈（不等待服务端）
-              uiOverlay.showText('没子弹'); // 屏幕中央显示"没子弹"提示
+            } else if (nowPerf2 - lastLocalFireMs >= fireCooldownMs) {
+              // ????????snapshot?????????
+              const canShoot = localPlayer && localPlayer.weaponRuntime &&
+                localPlayer.weaponRuntime.ammoInMag > 0 &&
+                !(localPlayer.weaponRuntime.reloadingUntilTick > 0 && network.getConnectionState().lastServerTick < localPlayer.weaponRuntime.reloadingUntilTick);
+          
+              if (canShoot) {
+                // ??: ?????????????? lastLocalFireMs??????????????
+                // ?????????????????? tick??? tick ?????????????
+                lastLocalFireMs = nowPerf2;
+          
+                localShotIdCounter++;
+                shotIdToSend = localShotIdCounter;
+          
+                // ???????????????????????????
+                const localP = renderLocalPlayer ?? predictedLocalPlayer ?? localPlayer;
+                if (localP && localP.weaponRuntime) {
+                  console.log(`[main.ts] ??????????: weaponTypeId=${localP.weaponRuntime.weaponTypeId}, shotId=${shotIdToSend}`);
+                  bulletTracks.spawnLocalPrediction(
+                    shotIdToSend,
+                    localP.x,
+                    localP.y,
+                    tickAim,
+                    getLocalBulletSpeed(),
+                    localP.weaponRuntime.weaponTypeId
+                  );
+                } else {
+                  console.warn(`[main.ts] ??????????: localP=${!!localP}, weaponRuntime=${!!localP?.weaponRuntime}`);
+                }
+              } else {
+                // ?????????????????
+                uiOverlay.showText('NO AMMO'); // dry fire feedback
+              }
             }
           }
-          
-          // P0-1 修复: interact 参数设为 false，不再触发服务端旧拾取逻辑
-          // 修复: 参数顺序：seq, keys, aim, shoot, reload, interact, extract, extractHeld, shotId
-          const sent = network.sendInput(nextSeq, tickKeys, tickAim, tickShoot, tickReload, false, false, tickExtractHeld, shotIdToSend);
+const sent = network.sendInput(nextSeq, tickKeys, tickAim, tickShoot, tickReload, false, false, tickExtractHeld, shotIdToSend);
           
           if (sent) {
             inputSeq = nextSeq;

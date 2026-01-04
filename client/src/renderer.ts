@@ -1,5 +1,5 @@
 import type { PLAYER_STATE, BULLET_STATE, ITEM_STATE, OBSTACLE_STATE, WorldItem, LootBag } from '@jerkie-man/shared';
-import { getItemType, getWeaponDef } from '@jerkie-man/shared';
+import { getItemType, getWeaponDef, msToTicks } from '@jerkie-man/shared';
 
 export class Renderer {
   private canvas: HTMLCanvasElement;
@@ -168,7 +168,7 @@ export class Renderer {
         // 需要知道武器定义来计算总时长
         try {
           const weaponDef = getWeaponDef(wr.weaponTypeId);
-          const reloadTicks = Math.ceil(weaponDef.reloadMs / 50); // 50ms per tick
+          const reloadTicks = msToTicks(weaponDef.reloadMs);
           const startTick = wr.reloadingUntilTick - reloadTicks;
           const progress = Math.min(1, (currentServerTick - startTick) / reloadTicks);
           
@@ -395,6 +395,31 @@ export class Renderer {
     this.ctx.fill();
   }
 
+  // 近战挥击特效（扇形弧线）
+  drawMeleeSwing(effect: { x: number; y: number; aimRad: number; range: number; arcRad: number; age: number }): void {
+    const screenX = effect.x - this.camX;
+    const screenY = effect.y - this.camY;
+    const alpha = Math.max(0, 1 - effect.age);
+    const start = effect.aimRad - effect.arcRad / 2;
+    const end = effect.aimRad + effect.arcRad / 2;
+
+    this.ctx.save();
+    this.ctx.fillStyle = `rgba(255, 255, 255, ${alpha * 0.15})`;
+    this.ctx.beginPath();
+    this.ctx.moveTo(screenX, screenY);
+    this.ctx.arc(screenX, screenY, effect.range, start, end);
+    this.ctx.closePath();
+    this.ctx.fill();
+
+    this.ctx.strokeStyle = `rgba(255, 255, 255, ${alpha * 0.6})`;
+    this.ctx.lineWidth = 3;
+    this.ctx.lineCap = 'round';
+    this.ctx.beginPath();
+    this.ctx.arc(screenX, screenY, effect.range, start, end);
+    this.ctx.stroke();
+    this.ctx.restore();
+  }
+
   // Day3: 绘制物品（保留兼容）
   drawItem(item: ITEM_STATE): void {
     // 修复: round 到整数像素，避免子像素抗锯齿导致的重影
@@ -530,6 +555,7 @@ export class Renderer {
     obstacles: OBSTACLE_STATE[] = [], // Day4-2: 障碍物列表
     worldItems: WorldItem[] = [], // 新增: 世界物品列表
     lootBags: LootBag[] = [], // 新增: 掉落包列表
+    meleeSwings: Array<{ x: number; y: number; aimRad: number; range: number; arcRad: number; age: number }> = [],
     hitEffects: Array<{ x: number; y: number; age: number; type: 'obstacle' | 'player' }> = [], // 命中特效
     currentServerTick?: number // 新增: 当前服务器 tick（用于计算换弹进度）
   ): void {
@@ -599,6 +625,11 @@ export class Renderer {
           }
         }
       }
+    }
+
+    // 近战挥击特效
+    for (const swing of meleeSwings) {
+      this.drawMeleeSwing(swing);
     }
 
     // Day2: 绘制所有子弹
@@ -678,4 +709,3 @@ export class Renderer {
     this.lastRectUpdateAt = Date.now();
   }
 }
-

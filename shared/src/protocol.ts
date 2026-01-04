@@ -283,6 +283,17 @@ export const S2C_COMBAT_EVENT_SCHEMA = z.object({
   direction: z.number().optional(), // 可选：方向（弧度，用于受伤方向指示）
 });
 
+// ??: ????????????????
+export const S2C_MELEE_SWING_SCHEMA = z.object({
+  type: z.literal('S2C_MELEE_SWING'),
+  playerId: z.string(),
+  x: z.number(),
+  y: z.number(),
+  aimRad: z.number(),
+  range: z.number(),
+  arcRad: z.number(),
+});
+
 export const S2C_MESSAGE_SCHEMA = z.discriminatedUnion('type', [
   S2C_SNAPSHOT_SCHEMA,
   S2C_ERROR_SCHEMA,
@@ -293,6 +304,7 @@ export const S2C_MESSAGE_SCHEMA = z.discriminatedUnion('type', [
   S2C_PROFILE_SCHEMA, // P1-1: Profile 消息
   S2C_RAID_RESULT_SCHEMA, // 新增: 战局结果消息
   S2C_COMBAT_EVENT_SCHEMA, // 新增: 战斗事件消息
+  S2C_MELEE_SWING_SCHEMA, // ??: ??????
 ]);
 
 // TypeScript 类型推导
@@ -314,6 +326,7 @@ export type S2C_PONG = z.infer<typeof S2C_PONG_SCHEMA>; // Day5: Pong 类型
 export type S2C_PROFILE = z.infer<typeof S2C_PROFILE_SCHEMA>;
 export type S2C_RAID_RESULT = z.infer<typeof S2C_RAID_RESULT_SCHEMA>; // P1-1: Profile 类型
 export type S2C_COMBAT_EVENT = z.infer<typeof S2C_COMBAT_EVENT_SCHEMA>; // 新增: 战斗事件类型
+export type S2C_MELEE_SWING = z.infer<typeof S2C_MELEE_SWING_SCHEMA>; // ??: ????????
 export type S2C_MESSAGE = z.infer<typeof S2C_MESSAGE_SCHEMA>;
 
 // 新增: 物品系统类型导出
