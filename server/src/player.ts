@@ -1,4 +1,4 @@
-import type { PLAYER_STATE, OBSTACLE_STATE, PlayerInventory, ItemInstance } from '@jerkie-man/shared';
+import type { PLAYER_STATE, OBSTACLE_STATE, PlayerInventory, ItemInstance, WeaponRuntime } from '@jerkie-man/shared';
 import { simulatePlayerMove, getItemType } from '@jerkie-man/shared';
 
 export class Player {
@@ -12,16 +12,18 @@ export class Player {
   public lootCount: number; // Day3: 战利品计数（已废弃，保留兼容）
   public extractProgress: number = 0; // 游戏化增强: 撤离进度（毫秒，0-2000）
   public inventory: PlayerInventory; // 新增: 背包系统
+  public name: string | undefined; // 新增: 玩家昵称（用于显示）
+  public weaponRuntime: WeaponRuntime | undefined; // 新增: 武器运行时状态（局内状态）
+  public armorReduction: number = 0; // 新增: 护甲减伤（0-1，例如0.25表示减少25%伤害）
+  public killedBy: string | undefined; // 新增: 击杀者玩家ID
+  public killedByWeaponName: string | undefined; // 新增: 击杀使用的武器名称
 
   // 修复: 移动速度已移至 shared/sim.ts，这里不再需要（保留注释用于文档）
   // SPEED = 200 (在 shared/sim.ts 中定义)
   
-  // Day2: 开火冷却（毫秒）
-  private lastFireTime = 0;
-  private readonly FIRE_COOLDOWN_MS = 150; // 150ms冷却，约6.67发/秒
   private readonly EXTRACT_DURATION_MS = 2000; // 游戏化增强: 撤离需要持续2秒
 
-  constructor(id: string, x: number = 0, y: number = 0, bagCap: number = 8) {
+  constructor(id: string, x: number = 0, y: number = 0, bagCap: number = 4, name?: string, weaponRuntime?: WeaponRuntime) {
     this.id = id;
     this.x = x;
     this.y = y;
@@ -35,6 +37,8 @@ export class Player {
       bagCap,
       items: [],
     };
+    this.name = name; // 新增: 设置玩家昵称
+    this.weaponRuntime = weaponRuntime; // 新增: 设置武器运行时状态
   }
 
   // 处理输入，更新位置
@@ -68,17 +72,7 @@ export class Player {
     this.y = newPos.y;
   }
 
-  // Day2: 检查是否可以开火（冷却时间）
-  canFire(now: number): boolean {
-    return now - this.lastFireTime >= this.FIRE_COOLDOWN_MS;
-  }
-
-  // Day2: 记录开火时间
-  recordFire(now: number): void {
-    this.lastFireTime = now;
-  }
-
-  // Day2: 受到伤害
+  // Day2: 受到伤害（现在考虑防具减伤）
   takeDamage(amount: number): void {
     if (this.status === 'DEAD') {
       return; // 已死亡不再扣血
@@ -114,21 +108,21 @@ export class Player {
     
     // 2. 如果还有剩余，创建新堆叠（每个不超过 stackMax）
     while (remaining > 0) {
-      if (this.inventory.items.length >= this.inventory.bagCap) {
+    if (this.inventory.items.length >= this.inventory.bagCap) {
         // 背包满了，返回部分成功（如果有添加过）
         return { success: totalAdded > 0, added: totalAdded };
-      }
-      
+  }
+
       // 每个新堆叠最多 stackMax
       const stackQty = Math.min(remaining, itemType.stackMax);
-      this.inventory.items.push({
-        iid: this.generateIid(),
-        typeId,
+        this.inventory.items.push({
+          iid: this.generateIid(),
+          typeId,
         qty: stackQty,
-      });
+        });
       remaining -= stackQty;
       totalAdded += stackQty;
-    }
+      }
     
     return { success: true, added: totalAdded };
   }
@@ -178,6 +172,10 @@ export class Player {
       lootCount: this.lootCount, // Day3: 包含战利品计数（已废弃，保留兼容）
       extractProgress: this.extractProgress, // 游戏化增强: 包含撤离进度
       inventory: this.inventory, // 新增: 包含背包
+      name: this.name, // 新增: 包含玩家昵称
+      weaponRuntime: this.weaponRuntime, // 新增: 包含武器运行时状态
+      killedBy: this.killedBy, // 新增: 击杀者名字
+      killedByWeaponName: this.killedByWeaponName, // 新增: 击杀使用的武器名称
     };
   }
 }

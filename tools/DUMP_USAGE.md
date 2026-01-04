@@ -72,6 +72,7 @@ node tools/dump_key_code.mjs [options]
   --root <dir>           项目根目录（默认：当前目录）
   --include <file>       手动追加包含文件（可多次使用）
   --exclude <file>       手动追加排除文件（可多次使用）
+  --files <file>         仅导出指定的文件（可多次使用，忽略配置中的glob规则）
 ```
 
 ## 示例
@@ -99,6 +100,11 @@ node tools/dump_key_code.mjs --mode plan --exclude server/src/smoke.ts
 ### 增加文件数量上限
 ```bash
 node tools/dump_key_code.mjs --mode full --max-files 50
+```
+
+### 仅导出指定文件（忽略配置规则）
+```bash
+node tools/dump_key_code.mjs --files shared/src/equipment.ts --files server/src/profile.ts --files client/src/main.ts
 ```
 
 ## 配置文件

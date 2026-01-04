@@ -213,6 +213,7 @@ function parseArgs(argv) {
         root: process.cwd(),
         include: [],
         exclude: [],
+        filesOnly: [], // 新增：仅导出指定的文件列表
     };
 
     for (let i = 2; i < argv.length; i++) {
@@ -233,12 +234,20 @@ function parseArgs(argv) {
             args.include.push(normalizeRel(argv[++i]));
         } else if (a === "--exclude" && argv[i + 1]) {
             args.exclude.push(normalizeRel(argv[++i]));
+        } else if (a === "--files" && argv[i + 1]) {
+            // 新增：支持 --files file1 file2 file3 或多次使用 --files file1 --files file2
+            args.filesOnly.push(normalizeRel(argv[++i]));
         }
     }
     return args;
 }
 
 function collectFiles(args, config, root) {
+    // 如果指定了 --files，只导出这些文件，忽略配置中的glob规则
+    if (args.filesOnly && args.filesOnly.length > 0) {
+        return args.filesOnly.map(normalizeRel);
+    }
+
     const allFiles = new Set();
 
     // 规则优先级：explicit include > exclude > glob include

@@ -2,18 +2,47 @@ import {
   C2S_HELLO_SCHEMA,
   C2S_INPUT_SCHEMA,
   C2S_PING_SCHEMA, // Day5: Ping 消息
-  C2S_PICKUP_WORLD_ITEM_SCHEMA, // 新增: 拾取世界物品
-  C2S_PICKUP_LOOT_BAG_SCHEMA, // 新增: 拾取掉落包
+  C2S_PICKUP_WORLD_ITEM_SCHEMA, // 保留兼容（deprecated）
+  C2S_PICKUP_LOOT_BAG_SCHEMA, // 保留兼容（deprecated）
   C2S_SELL_FROM_STASH_SCHEMA, // 新增: 从仓库卖出
+  C2S_INTERACT_SCHEMA, // 新增: 通用交互
+  C2S_ADMIN_SCHEMA, // 管理员命令
+  C2S_SET_NAME_SCHEMA, // 新增: 设置昵称
+  C2S_MOVE_STASH_TO_PREP_SCHEMA, // 新增: 从仓库移动到整备区
+  C2S_MOVE_PREP_TO_STASH_SCHEMA, // 新增: 从整备区移动回仓库
+  C2S_BUY_SCHEMA, // 新增: 商店购买物品
+  C2S_ENTER_RAID_SCHEMA, // 新增: 进入战局
+  C2S_EQUIP_SCHEMA, // 新增: 装备/卸下装备
   S2C_MESSAGE_SCHEMA,
   type S2C_MESSAGE,
   type S2C_SNAPSHOT,
   type S2C_WORLD_INIT, // 新增: 世界初始化消息类型
+  type S2C_RAID_RESULT, // 新增: 战局结果消息类型
+  type S2C_COMBAT_EVENT, // 新增: 战斗事件消息类型
   type MAP_CONFIG, // P0-1 修复: 使用 shared 的 MAP_CONFIG 类型，避免类型漂移
   type OBSTACLE_STATE, // 修复: 静态世界初始化
   type ITEM_STATE, // 修复: 静态世界初始化
 } from '@jerkie-man/shared';
 import { SnapshotBuffer } from './snapshot.js';
+
+// 生成或获取 accountId（用于持久化 Profile）
+function getOrCreateAccountId(): string {
+  const key = 'jerkie_man_account_id';
+  let accountId = localStorage.getItem(key);
+  if (!accountId) {
+    // 生成 UUID v4
+    accountId = 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+      const r = (Math.random() * 16) | 0;
+      const v = c === 'x' ? r : (r & 0x3) | 0x8;
+      return v.toString(16);
+    });
+    localStorage.setItem(key, accountId);
+    console.log('[Account] Created new accountId:', accountId);
+  } else {
+    console.log('[Account] Loaded existing accountId:', accountId);
+  }
+  return accountId;
+}
 
 // P0-1 修复: 使用 shared 的 MAP_CONFIG 类型，避免类型漂移
 // 如果 shared 的 MAP_CONFIG 未来加字段/改字段，这里会自动同步
@@ -27,16 +56,19 @@ export interface NetworkCallbacks {
   onError?: (error: string) => void;
   onConnect?: () => void;
   onDisconnect?: () => void;
-  onWelcome?: (playerId: string, roomInfo?: RoomInfo) => void;
+  onWelcome?: (playerId: string, accountId: string, roomInfo?: RoomInfo) => void;
   onEvent?: (message: string) => void; // 游戏化增强: 服务端事件回调
   onWorldInit?: (world: S2C_WORLD_INIT) => void; // 新增: 世界初始化回调（使用协议类型）
-  onProfile?: (profile: { money: number; stash: any[]; bagCap: number }) => void; // P1-1: Profile 回调
+  onProfile?: (profile: { accountId: string; displayName: string | null; phase?: 'NAME' | 'HIDEOUT' | 'RAID' | 'RESULT'; money: number; stash: any[]; prep?: any[]; bagCap: number; equipment: { weaponIid: string | null; bagIid: string | null; armorIid: string | null } }) => void; // P1-1: Profile 回调
+  onRaidResult?: (result: S2C_RAID_RESULT) => void; // 新增: 战局结果回调
+  onCombatEvent?: (event: { kind: 'DRY_FIRE' | 'HIT' | 'DAMAGE_TAKEN'; direction?: number }) => void; // 新增: 战斗事件回调
 }
 
 export class Network {
   private ws: WebSocket | null = null;
   private url: string;
   private room: string;
+  private accountId: string; // 账号身份
   private reconnectAttempts = 0;
   private readonly maxReconnectAttempts = 10;
   private reconnectDelay = 1000; // 初始1秒
@@ -63,10 +95,16 @@ export class Network {
   constructor(url: string, room: string, callbacks: NetworkCallbacks = {}, isDebug: boolean = false) {
     this.url = url;
     this.room = room;
+    this.accountId = getOrCreateAccountId();
     this.callbacks = callbacks;
     this.snapshotBuffer = new SnapshotBuffer();
     this.isDebug = isDebug;
     this.connect();
+  }
+  
+  // 暴露 accountId 给外部（用于 HUD debug 显示）
+  getAccountId(): string {
+    return this.accountId;
   }
 
   private connect(): void {
@@ -122,7 +160,7 @@ export class Network {
           if (message.type === 'S2C_WELCOME') {
             if (this.callbacks.onWelcome) {
               // Day4-1: 传递 roomInfo（seed + mapConfig）
-              this.callbacks.onWelcome(message.playerId, {
+              this.callbacks.onWelcome(message.playerId, message.accountId, {
                 seed: message.seed,
                 mapConfig: message.mapConfig,
               });
@@ -148,6 +186,30 @@ export class Network {
             const now = Date.now();
             const rtt = now - message.clientTimestamp;
             this.currentPing = rtt;
+          } else if (message.type === 'S2C_PROFILE') {
+            // P1-1: 处理 Profile 消息
+            if (this.callbacks.onProfile) {
+              this.callbacks.onProfile({
+                accountId: message.accountId,
+                displayName: message.displayName,
+                phase: message.phase,
+                money: message.money,
+                stash: message.stash,
+                prep: message.prep,
+                bagCap: message.bagCap,
+                equipment: message.equipment,
+              });
+            }
+          } else if (message.type === 'S2C_RAID_RESULT') {
+            // 新增: 处理战局结果消息
+            if (this.callbacks.onRaidResult) {
+              this.callbacks.onRaidResult(message);
+            }
+          } else if (message.type === 'S2C_COMBAT_EVENT') {
+            // 新增: 处理战斗事件消息
+            if (this.callbacks.onCombatEvent) {
+              this.callbacks.onCombatEvent(message);
+            }
           } else if (message.type === 'S2C_ERROR') {
             console.error('Server error:', message.message);
             if (this.callbacks.onError) {
@@ -245,6 +307,7 @@ export class Network {
     const message = C2S_HELLO_SCHEMA.parse({
       type: 'C2S_HELLO',
       room: this.room,
+      accountId: this.accountId,
     });
 
     this.ws.send(JSON.stringify(message));
@@ -305,15 +368,163 @@ export class Network {
     }
   }
 
+  // 新增: 发送通用交互（服务端选最近目标）
+  sendInteract(): boolean {
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+      return false;
+    }
+    try {
+      const message = C2S_INTERACT_SCHEMA.parse({
+        type: 'C2S_INTERACT',
+      });
+      this.ws.send(JSON.stringify(message));
+      return true;
+    } catch (error) {
+      console.error('Failed to send interact:', error);
+      return false;
+    }
+  }
+
+  // 新增: 发送管理员命令
+  sendAdminCommand(command: 'show_status' | 'reset_world'): boolean {
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+      return false;
+    }
+    try {
+      const message = C2S_ADMIN_SCHEMA.parse({
+        type: 'C2S_ADMIN',
+        command,
+      });
+      this.ws.send(JSON.stringify(message));
+      return true;
+    } catch (error) {
+      console.error('Failed to send admin command:', error);
+      return false;
+    }
+  }
+
+  // 新增: 发送设置昵称
+  sendSetName(name: string): boolean {
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+      return false;
+    }
+    try {
+      const message = C2S_SET_NAME_SCHEMA.parse({
+        type: 'C2S_SET_NAME',
+        name,
+      });
+      this.ws.send(JSON.stringify(message));
+      return true;
+    } catch (error) {
+      console.error('Failed to send set name:', error);
+      return false;
+    }
+  }
+
+  // 新增: 发送从仓库移动到整备区
+  sendMoveStashToPrep(iid: string, qty: number): boolean {
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+      return false;
+    }
+    try {
+      const message = C2S_MOVE_STASH_TO_PREP_SCHEMA.parse({
+        type: 'C2S_MOVE_STASH_TO_PREP',
+        iid,
+        qty,
+      });
+      this.ws.send(JSON.stringify(message));
+      return true;
+    } catch (error) {
+      console.error('Failed to send move stash to prep:', error);
+      return false;
+    }
+  }
+
+  // 新增: 发送从整备区移动回仓库
+  sendMovePrepToStash(iid: string, qty: number): boolean {
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+      return false;
+    }
+    try {
+      const message = C2S_MOVE_PREP_TO_STASH_SCHEMA.parse({
+        type: 'C2S_MOVE_PREP_TO_STASH',
+        iid,
+        qty,
+      });
+      this.ws.send(JSON.stringify(message));
+      return true;
+    } catch (error) {
+      console.error('Failed to send move prep to stash:', error);
+      return false;
+    }
+  }
+
+  // 新增: 发送商店购买物品
+  sendBuy(typeId: string, qty: number): boolean {
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+      return false;
+    }
+    try {
+      const message = C2S_BUY_SCHEMA.parse({
+        type: 'C2S_BUY',
+        typeId,
+        qty,
+      });
+      this.ws.send(JSON.stringify(message));
+      return true;
+    } catch (error) {
+      console.error('Failed to send buy:', error);
+      return false;
+    }
+  }
+
+  // 新增: 发送装备/卸下消息
+  sendEquip(slot: 'weapon' | 'bag' | 'armor', iid: string | null): boolean {
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+      return false;
+    }
+    try {
+      const message = C2S_EQUIP_SCHEMA.parse({
+        type: 'C2S_EQUIP',
+        slot,
+        iid,
+      });
+      this.ws.send(JSON.stringify(message));
+      return true;
+    } catch (error) {
+      console.error('Failed to send equip:', error);
+      return false;
+    }
+  }
+
+  // 新增: 发送进入战局
+  sendEnterRaid(): boolean {
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+      return false;
+    }
+    try {
+      const message = C2S_ENTER_RAID_SCHEMA.parse({
+        type: 'C2S_ENTER_RAID',
+      });
+      this.ws.send(JSON.stringify(message));
+      return true;
+    } catch (error) {
+      console.error('Failed to send enter raid:', error);
+      return false;
+    }
+  }
+
   // P0-1 修复: 返回 boolean 表示是否真的发送成功
   sendInput(
     seq: number,
     keys: { up: boolean; down: boolean; left: boolean; right: boolean },
     aim: number,
     shoot: boolean = false,
+    reload: boolean = false, // 新增: 换弹标志
     interact: boolean = false,
     extract: boolean = false,
-    extractHeld: boolean = false // 游戏化增强: 撤离持续状态
+    extractHeld: boolean = false, // 游戏化增强: 撤离持续状态
+    shotId?: number // 本次发射的唯一ID（用于客户端预测子弹对齐）
   ): boolean {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
       return false; // P0-1: 发送失败，返回 false
@@ -326,9 +537,11 @@ export class Network {
       keys,
       aim,
       shoot, // Day2: 传递开火标志
+      reload, // 新增: 传递换弹标志
       interact, // Day3: 传递拾取脉冲事件
       extract, // Day3: 传递撤离脉冲事件（已废弃，保留兼容）
       extractHeld, // 游戏化增强: 传递撤离持续状态
+      shotId, // 本次发射的唯一ID（用于客户端预测子弹对齐）
     });
 
     this.ws.send(JSON.stringify(message));

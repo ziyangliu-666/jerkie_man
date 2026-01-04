@@ -17,6 +17,12 @@ export * from './content.js';
 export * from './types.js';
 export * from './item_catalog.js';
 
+// 装备系统
+export * from './equipment.js';
+
+// 国际化支持
+export * from './i18n.js';
+
 // 显式导出内容加载器函数
 export { loadMapConfig, loadItemTypes } from './content.js';
 

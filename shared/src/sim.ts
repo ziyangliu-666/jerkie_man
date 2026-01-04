@@ -95,3 +95,7 @@ export function simulatePlayerMove(
   return { x: newX, y: newY };
 }
 
+
+
+
+

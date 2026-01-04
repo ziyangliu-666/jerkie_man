@@ -86,22 +86,31 @@ export class SnapshotBuffer {
       }
     }
 
-    // 如果找不到，使用最新的
+    // 修复插值退化：找不到 t0/t1 时，用最后两帧作为 t0/t1（允许轻微外推）
     if (!t0 || !t1) {
-      const latest = this.buffer[this.buffer.length - 1];
-      return {
-        players: latest.snapshot.players,
-        bullets: latest.snapshot.bullets,
-        items: latest.snapshot.items ?? [], // 修复: 处理可选字段
-        worldItems: latest.snapshot.worldItems ?? [], // 新增: 世界物品
-        lootBags: latest.snapshot.lootBags ?? [], // 新增: 掉落包
-      };
+      if (this.buffer.length >= 2) {
+        // 用最后两帧做外推
+        t0 = this.buffer[this.buffer.length - 2];
+        t1 = this.buffer[this.buffer.length - 1];
+      } else {
+        // 只有一帧，无法插值
+        const latest = this.buffer[this.buffer.length - 1];
+        return {
+          players: latest.snapshot.players,
+          bullets: latest.snapshot.bullets,
+          items: latest.snapshot.items ?? [], // 修复: 处理可选字段
+          worldItems: latest.snapshot.worldItems ?? [], // 新增: 世界物品
+          lootBags: latest.snapshot.lootBags ?? [], // 新增: 掉落包
+        };
+      }
     }
 
     // 计算插值alpha（在服务器时间域中计算）
     const timeRange = t1.snapshot.timestamp - t0.snapshot.timestamp;
     const alpha = timeRange > 0 ? (renderTimeServer - t0.snapshot.timestamp) / timeRange : 0;
-    const clampedAlpha = Math.max(0, Math.min(1, alpha));
+    // 修复：允许轻微外推 [-0.05, 1.25]，避免 renderTime 落在 latest 之后就直接跳
+    const clampedAlphaPlayers = Math.max(0, Math.min(1, alpha)); // 玩家仍然 clamp 到 [0,1]
+    // 注：子弹插值已移除（由 BulletTrackManager 负责）
 
     // 插值玩家位置
     const interpolatedPlayers: PLAYER_STATE[] = [];
@@ -119,11 +128,11 @@ export class SnapshotBuffer {
       const p1 = playerMap1.get(id);
 
       if (p0 && p1) {
-        // 两个快照都有，插值
+        // 两个快照都有，插值（玩家使用 clampedAlphaPlayers）
         interpolatedPlayers.push({
           ...p0,
-          x: lerp(p0.x, p1.x, clampedAlpha),
-          y: lerp(p0.y, p1.y, clampedAlpha),
+          x: lerp(p0.x, p1.x, clampedAlphaPlayers),
+          y: lerp(p0.y, p1.y, clampedAlphaPlayers),
         });
       } else if (p0) {
         // 只有t0有
@@ -134,11 +143,13 @@ export class SnapshotBuffer {
       }
     }
 
-    // Day1子弹和物品不做插值（占位）
+    // 子弹渲染已完全由 BulletTrackManager 负责，此处不再插值
+    // 仅保留字段用于向后兼容（如服务端调试等）
+
     // 修复: obstacles 已移至 WORLD_INIT，不再从 snapshot 获取
     return {
       players: interpolatedPlayers,
-      bullets: t1.snapshot.bullets,
+      bullets: t1.snapshot.bullets, // 不再插值，直接返回最新帧
       items: t1.snapshot.items ?? [], // 修复: 处理可选字段
       worldItems: t1.snapshot.worldItems ?? [], // 新增: 世界物品（不做插值）
       lootBags: t1.snapshot.lootBags ?? [], // 新增: 掉落包（不做插值）
@@ -147,6 +158,23 @@ export class SnapshotBuffer {
 
   getLatest(): S2C_SNAPSHOT | null {
     return this.buffer.length > 0 ? this.buffer[this.buffer.length - 1].snapshot : null;
+  }
+
+  /**
+   * 获取服务器时间偏移（serverNow - clientNow）
+   */
+  getServerOffsetMs(): number {
+    return this.serverOffsetMs;
+  }
+
+  /**
+   * 获取渲染时间（服务器时间域）
+   * @param renderDelayMs 渲染延迟（毫秒）
+   */
+  getRenderTimeServer(renderDelayMs: number): number {
+    const clientNow = Date.now();
+    const serverNow = clientNow + this.serverOffsetMs;
+    return serverNow - renderDelayMs;
   }
 
   clear(): void {

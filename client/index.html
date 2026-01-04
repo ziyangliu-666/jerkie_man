@@ -18,66 +18,955 @@
       overflow: hidden;
     }
 
-    #game-container {
-      position: relative;
-      width: 100vw;
-      height: 100vh;
+    /* ===== 三层结构：World Canvas / UI Canvas / DOM Overlay ===== */
+    #app {
+      position: fixed;
+      inset: 0;
+      overflow: hidden;
+      display: flex;
+      flex-direction: row;
     }
 
-    #canvas {
+    /* Canvas 容器（左侧） */
+    #canvasContainer {
+      position: relative;
+      flex: 1;
+      overflow: hidden;
+    }
+
+    /* Layer 0: World Canvas（世界层：地图、障碍物、玩家、子弹等） */
+    #worldCanvas {
+      position: absolute;
+      inset: 0;
       display: block;
       background: #2a2a2a;
     }
 
-    #hud {
-      position: fixed;
-      top: 0;
-      right: 0;
+    /* Layer 1: UI Canvas（屏幕 HUD 层：准星、受伤红边、方向提示等） */
+    #uiCanvas {
+      position: absolute;
+      inset: 0;
+      pointer-events: none; /* UI canvas 永不接鼠标 */
+    }
+
+    /* Layer 2: DOM Overlay（面板/交互层） */
+    #uiDom {
+      position: absolute;
+      inset: 0;
+      pointer-events: none; /* 默认穿透 */
+    }
+
+    /* ===== DOM HUD 样式 ===== */
+
+    /* HUD 容器（右侧，与canvas并列） */
+    #hudContainer {
+      position: relative;
       width: 300px;
-      height: 100vh;
-      background: rgba(0, 0, 0, 0.8);
+      background: rgba(0, 0, 0, 0.85);
       border-left: 2px solid #444;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      transition: width 0.2s ease;
+    }
+
+    /* 折叠状态（默认折叠，按 F1 切换） */
+    #hudContainer.collapsed {
+      width: 24px;
+    }
+
+    /* Debug 面板（右侧，可折叠） */
+    #debugPanel {
+      flex: 1;
       padding: 10px;
       overflow-y: auto;
       font-size: 12px;
       line-height: 1.4;
+      pointer-events: auto; /* 面板接鼠标（可滚动、可点击） */
     }
 
-    #hud h3 {
+    /* 折叠状态下的折叠指示 */
+    #hudContainer.collapsed #debugPanel {
+      display: none;
+    }
+
+    #hudContainer.collapsed::before {
+      content: '◀';
+      position: absolute;
+      left: 4px;
+      top: 50%;
+      transform: translateY(-50%);
+      font-size: 14px;
+      color: #0ff;
+      pointer-events: none;
+    }
+
+    #debugPanel h3 {
       color: #0ff;
       margin: 10px 0 5px 0;
       font-size: 14px;
     }
 
-    #hud table {
+    #debugPanel table {
       width: 100%;
       border-collapse: collapse;
       margin: 5px 0;
     }
 
-    #hud td {
+    #debugPanel td, #debugPanel th {
       padding: 2px 5px;
       border-bottom: 1px solid #333;
+      text-align: left;
     }
 
-    #hud .event-log {
+    #debugPanel .event-log {
       max-height: 200px;
       overflow-y: auto;
       font-size: 11px;
       color: #aaa;
     }
 
-    #hud .event-log div {
+    #debugPanel .event-log div {
       margin: 2px 0;
+    }
+
+    /* 折叠切换按钮（在HUD容器内） */
+    #debugToggle {
+      position: absolute;
+      top: 10px;
+      right: 10px;
+      width: 24px;
+      height: 24px;
+      background: rgba(0, 0, 0, 0.7);
+      border: 1px solid #444;
+      color: #0ff;
+      font-size: 12px;
+      cursor: pointer;
+      pointer-events: auto;
+      z-index: 10;
+    }
+
+    #hudContainer.collapsed #debugToggle {
+      right: 0;
+      left: 0;
+      margin: 0 auto;
+    }
+
+    /* 屏幕中心提示（Press E / 撤离进度等） */
+    #hudCenter {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      text-align: center;
+      pointer-events: none; /* 穿透 */
+    }
+
+    #hudCenter .interact-hint {
+      color: #4CAF50;
+      font-size: 16px;
+      font-weight: bold;
+      text-shadow: 1px 1px 2px #000;
+    }
+
+    /* 左上角快捷状态（可选） */
+    #hudTopLeft {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      pointer-events: none;
+      font-size: 14px;
+    }
+
+    /* NAME Modal 样式 */
+    #nameModal {
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.8);
+      display: none; /* 默认隐藏，由 JS 控制 */
+      align-items: center;
+      justify-content: center;
+      z-index: 1001; /* 比 Hideout UI 高 */
+      pointer-events: auto;
+    }
+
+    #nameModal .modal-content {
+      background: #2a2a2a;
+      border: 2px solid #444;
+      padding: 30px;
+      border-radius: 8px;
+      min-width: 300px;
+      text-align: center;
+    }
+
+    #nameModal h2 {
+      color: #0ff;
+      margin-bottom: 10px;
+      font-size: 20px;
+    }
+
+    #nameModal p {
+      color: #aaa;
+      margin-bottom: 20px;
+      font-size: 14px;
+    }
+
+    /* 改名弹窗样式（复用 nameModal 样式） */
+    #renameModal {
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.8);
+      display: none; /* 默认隐藏，由 JS 控制 */
+      align-items: center;
+      justify-content: center;
+      z-index: 1001; /* 比 Hideout UI 高 */
+      pointer-events: auto;
+    }
+
+    #renameModal .modal-content {
+      background: #2a2a2a;
+      border: 2px solid #444;
+      padding: 30px;
+      border-radius: 8px;
+      min-width: 300px;
+      text-align: center;
+    }
+
+    #renameModal h2 {
+      color: #0ff;
+      margin-bottom: 10px;
+      font-size: 20px;
+    }
+
+    #renameModal p {
+      color: #aaa;
+      margin-bottom: 20px;
+      font-size: 14px;
+    }
+
+    #renameModal input {
+      width: 100%;
+      padding: 10px;
+      background: #1a1a1a;
+      border: 1px solid #444;
+      color: #fff;
+      font-size: 16px;
+      font-family: 'Courier New', monospace;
+      margin-bottom: 20px;
+      box-sizing: border-box;
+      border-radius: 4px;
+    }
+
+    #renameModal input:focus {
+      outline: none;
+      border-color: #0ff;
+      box-shadow: 0 0 8px rgba(0, 255, 255, 0.3);
+    }
+
+    #renameModal .modal-actions {
+      display: flex;
+      gap: 10px;
+      justify-content: flex-end;
+      margin-top: 10px;
+    }
+
+    #renameModal .modal-actions button {
+      padding: 10px 24px;
+      font-size: 14px;
+      font-family: 'Courier New', monospace;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      font-weight: bold;
+    }
+
+    #renameModal #renameCancel {
+      background: #444;
+      color: #fff;
+    }
+
+    #renameModal #renameCancel:hover {
+      background: #555;
+    }
+
+    #renameModal #renameSubmit {
+      background: linear-gradient(135deg, #0ff 0%, #08f 100%);
+      color: #000;
+      box-shadow: 0 2px 8px rgba(0, 255, 255, 0.3);
+    }
+
+    #renameModal #renameSubmit:hover {
+      background: linear-gradient(135deg, #1ff 0%, #19f 100%);
+      box-shadow: 0 4px 12px rgba(0, 255, 255, 0.5);
+      transform: translateY(-1px);
+    }
+
+    #renameModal #renameSubmit:active {
+      transform: translateY(0);
+      box-shadow: 0 2px 4px rgba(0, 255, 255, 0.3);
+    }
+
+    #nameModal input {
+      width: 100%;
+      padding: 10px;
+      background: #1a1a1a;
+      border: 1px solid #444;
+      color: #fff;
+      font-size: 16px;
+      font-family: 'Courier New', monospace;
+      margin-bottom: 15px;
+      box-sizing: border-box;
+    }
+
+    #nameModal input:focus {
+      outline: none;
+      border-color: #0ff;
+    }
+
+    #nameModal button {
+      padding: 10px 20px;
+      background: #0ff;
+      color: #000;
+      border: none;
+      font-size: 16px;
+      font-family: 'Courier New', monospace;
+      font-weight: bold;
+      cursor: pointer;
+      border-radius: 4px;
+    }
+
+    #nameModal button:hover {
+      background: #0dd;
+    }
+
+    /* HIDEOUT UI 样式 */
+    #hideoutUI {
+      position: fixed;
+      inset: 0;
+      background: #1a1a1a;
+      z-index: 900;
+      pointer-events: auto;
+      display: flex;
+      flex-direction: column;
+      font-family: 'Courier New', monospace;
+    }
+
+    /* 顶部固定栏 */
+    #hideoutTopBar {
+      background: #2a2a2a;
+      border-bottom: 2px solid #444;
+      padding: 10px 20px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .topBar-left {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      color: #fff;
+      font-size: 14px;
+    }
+
+    .separator {
+      color: #666;
+    }
+
+    #hideoutStatus {
+      color: #0ff;
+    }
+
+    /* 主内容区 */
+    #hideoutContent {
+      flex: 1;
+      display: flex;
+      overflow: hidden;
+    }
+
+    /* 左侧 Tab */
+    #hideoutTabs {
+      width: 120px;
+      background: #222;
+      border-right: 2px solid #444;
+      display: flex;
+      flex-direction: column;
+      padding: 10px 0;
+    }
+
+    .tab-btn {
+      padding: 12px 20px;
+      background: transparent;
+      border: none;
+      color: #aaa;
+      text-align: left;
+      cursor: pointer;
+      font-family: 'Courier New', monospace;
+      font-size: 14px;
+      transition: all 0.2s;
+    }
+
+    .tab-btn:hover {
+      background: #333;
+      color: #fff;
+    }
+
+    .tab-btn.active {
+      background: #2a2a2a;
+      color: #0ff;
+      border-left: 3px solid #0ff;
+    }
+
+    /* 右侧内容区 */
+    #hideoutMain {
+      flex: 1;
+      padding: 20px;
+      overflow-y: auto;
+    }
+
+    .hideout-panel {
+      display: none;
+    }
+
+    .hideout-panel.active {
+      display: block;
+    }
+
+    .hideout-panel h3 {
+      color: #0ff;
+      margin-bottom: 10px;
+      font-size: 18px;
+    }
+
+    .panel-desc {
+      color: #aaa;
+      margin-bottom: 20px;
+      font-size: 12px;
+    }
+
+    /* 物品列表 */
+    .item-list {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .item-row {
+      background: #2a2a2a;
+      border: 1px solid #444;
+      padding: 10px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .item-info {
+      flex: 1;
+    }
+
+    .item-name {
+      color: #fff;
+      font-weight: bold;
+      margin-bottom: 4px;
+    }
+
+    .item-meta {
+      color: #aaa;
+      font-size: 12px;
+    }
+
+    .item-actions {
+      display: flex;
+      gap: 8px;
+    }
+
+    .item-btn {
+      padding: 6px 12px;
+      background: #444;
+      border: 1px solid #666;
+      color: #fff;
+      cursor: pointer;
+      font-family: 'Courier New', monospace;
+      font-size: 12px;
+      transition: all 0.2s;
+    }
+
+    .item-btn:hover {
+      background: #555;
+      border-color: #0ff;
+    }
+
+    .item-btn.primary {
+      background: #0ff;
+      color: #000;
+      border-color: #0ff;
+    }
+
+    .item-btn.primary:hover {
+      background: #0dd;
+    }
+
+    /* 右下角主按钮 */
+    #hideoutActions {
+      position: fixed;
+      bottom: 20px;
+      right: 20px;
+    }
+
+    .primary-btn {
+      padding: 15px 30px;
+      background: #0ff;
+      color: #000;
+      border: none;
+      font-family: 'Courier New', monospace;
+      font-size: 16px;
+      font-weight: bold;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .primary-btn:hover:not(:disabled) {
+      background: #0dd;
+    }
+
+    .primary-btn:disabled {
+      background: #666;
+      color: #aaa;
+      cursor: not-allowed;
+    }
+
+    /* RESULT UI 样式 */
+    #resultUI {
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.9);
+      display: none; /* 默认隐藏，由 JS 控制 */
+      align-items: center;
+      justify-content: center;
+      z-index: 1002; /* 比 Hideout UI 和 NAME Modal 都高 */
+      pointer-events: auto;
+    }
+
+    #resultUI .modal-content {
+      background: #2a2a2a;
+      border: 2px solid #444;
+      padding: 30px;
+      border-radius: 8px;
+      text-align: center;
+    }
+
+    #resultTitle {
+      color: #0ff;
+      margin-bottom: 20px;
+      font-size: 24px;
+    }
+
+    #resultStatus {
+      color: #fff;
+      font-weight: bold;
+    }
+
+    #resultStatus.success {
+      color: #4CAF50;
+    }
+
+    #resultStatus.failed {
+      color: #ff4444;
+    }
+
+    #resultDetails {
+      line-height: 1.8;
+    }
+
+    #resultDetails div {
+      margin: 8px 0;
+    }
+
+    /* 装备区样式 */
+    .equipment-area {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 16px;
+      margin-top: 20px;
+    }
+
+    .equipment-slot {
+      background: #2a2a2a;
+      border: 2px solid #444;
+      border-radius: 4px;
+      padding: 16px;
+      min-height: 120px;
+    }
+
+    .slot-label {
+      color: #0ff;
+      font-size: 14px;
+      font-weight: bold;
+      margin-bottom: 12px;
+      text-transform: uppercase;
+    }
+
+    .slot-content {
+      min-height: 60px;
+      pointer-events: none; /* 允许点击事件穿透到父元素 */
+    }
+    
+    .slot-content .slot-item {
+      pointer-events: auto; /* 但按钮等交互元素需要接收事件 */
+    }
+
+    .slot-empty {
+      color: #666;
+      font-size: 12px;
+      padding: 20px;
+      text-align: center;
+      font-style: italic;
+    }
+
+    .slot-item {
+      background: #1a1a1a;
+      border: 1px solid #555;
+      border-radius: 4px;
+      padding: 12px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .slot-item-info {
+      flex: 1;
+    }
+
+    .slot-item-name {
+      color: #fff;
+      font-weight: bold;
+      margin-bottom: 4px;
+      font-size: 14px;
+    }
+
+    .slot-item-meta {
+      color: #aaa;
+      font-size: 12px;
+    }
+
+    .slot-item-actions {
+      display: flex;
+      gap: 8px;
+    }
+
+    /* 可点击的装备槽位 */
+    .clickable-slot {
+      cursor: pointer;
+      transition: all 0.2s;
+      position: relative;
+    }
+
+    .clickable-slot:hover {
+      border-color: #0ff;
+      background: #333;
+    }
+
+    .clickable-slot:active {
+      transform: scale(0.98);
+    }
+
+    .slot-hint {
+      color: #666;
+      font-size: 11px;
+      font-weight: normal;
+      font-style: italic;
+    }
+
+    /* 按钮点击反馈 */
+    .item-btn.loading {
+      opacity: 0.6;
+      cursor: wait;
+      pointer-events: none;
+    }
+
+    .item-btn.success {
+      background: #4CAF50 !important;
+      border-color: #4CAF50 !important;
+    }
+
+    .item-btn.error {
+      background: #f44 !important;
+      border-color: #f44 !important;
+    }
+
+    /* 装备槽位点击反馈 */
+    .equipment-slot.clicking {
+      border-color: #0ff;
+      background: #333;
+      animation: pulse 0.3s;
+    }
+
+    @keyframes pulse {
+      0%, 100% { transform: scale(1); }
+      50% { transform: scale(1.02); }
+    }
+
+    /* 装备选择弹窗 */
+    #equipSelectModal {
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.8);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      z-index: 1003;
+      pointer-events: auto;
+    }
+
+    #equipSelectModal.active {
+      display: flex;
+    }
+
+    #equipSelectModal .modal-content {
+      background: #2a2a2a;
+      border: 2px solid #444;
+      border-radius: 8px;
+      padding: 20px;
+      min-width: 500px;
+      max-width: 700px;
+      max-height: 80vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    #equipSelectModal h3 {
+      color: #0ff;
+      margin-bottom: 15px;
+      font-size: 18px;
+    }
+
+    #equipSelectList {
+      flex: 1;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      margin-bottom: 15px;
+    }
+
+    .equip-select-item {
+      background: #1a1a1a;
+      border: 1px solid #444;
+      border-radius: 4px;
+      padding: 12px;
+      cursor: pointer;
+      transition: all 0.2s;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .equip-select-item:hover {
+      border-color: #0ff;
+      background: #333;
+    }
+
+    .equip-select-item-info {
+      flex: 1;
+    }
+
+    .equip-select-item-name {
+      color: #fff;
+      font-weight: bold;
+      margin-bottom: 4px;
+    }
+
+    .equip-select-item-meta {
+      color: #aaa;
+      font-size: 12px;
+    }
+
+    .equip-select-item-source {
+      color: #666;
+      font-size: 11px;
+      margin-left: 10px;
+    }
+
+    #equipSelectModal .modal-actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: 10px;
+    }
+
+    #equipSelectModal .modal-actions button {
+      padding: 8px 16px;
+      background: #444;
+      border: 1px solid #666;
+      color: #fff;
+      cursor: pointer;
+      font-family: 'Courier New', monospace;
+      font-size: 14px;
+      border-radius: 4px;
+      transition: all 0.2s;
+    }
+
+    #equipSelectModal .modal-actions button:hover {
+      background: #555;
+      border-color: #0ff;
     }
   </style>
 </head>
 <body>
-  <div id="game-container">
-    <canvas id="canvas"></canvas>
-    <div id="hud"></div>
+  <div id="app">
+    <!-- Canvas 容器（左侧） -->
+    <div id="canvasContainer">
+      <!-- Layer 0: World Canvas -->
+      <canvas id="worldCanvas"></canvas>
+      
+      <!-- Layer 1: UI Canvas（高频 HUD：准星、受伤红边） -->
+      <canvas id="uiCanvas"></canvas>
+
+      <!-- Layer 2: DOM Overlay -->
+      <div id="uiDom">
+      <!-- 左上角快捷状态 -->
+      <div id="hudTopLeft"></div>
+      
+      <!-- 屏幕中心提示 -->
+      <div id="hudCenter"></div>
+
+      <!-- NAME Phase: 昵称输入 Modal -->
+      <div id="nameModal" style="display: none;">
+        <div class="modal-content">
+          <h2>创建干员</h2>
+          <p>请输入你的昵称（1-32 字符）</p>
+          <input type="text" id="nameInput" placeholder="输入昵称..." maxlength="32" />
+          <button id="nameSubmit">确认</button>
+        </div>
+      </div>
+
+      <!-- RESULT Phase: 战局结果页面 -->
+      <div id="resultUI" style="display: none;">
+        <div class="modal-content" style="min-width: 400px;">
+          <h2 id="resultTitle">战局结果</h2>
+          <div id="resultContent" style="text-align: left; margin-top: 20px;">
+            <div id="resultStatus" style="font-size: 18px; margin-bottom: 20px;"></div>
+            <div id="resultDetails" style="color: #aaa; font-size: 14px;"></div>
+          </div>
+          <button id="resultContinueBtn" class="primary-btn" style="margin-top: 20px; width: 100%;">返回整备</button>
+        </div>
+      </div>
+
+      <!-- 装备选择弹窗 -->
+      <div id="equipSelectModal">
+        <div class="modal-content">
+          <h3 id="equipSelectTitle">选择要装备的物品</h3>
+          <div id="equipSelectList"></div>
+          <div class="modal-actions">
+            <button id="equipSelectCancel">取消</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- 改名输入弹窗 -->
+      <div id="renameModal" style="display: none;">
+        <div class="modal-content">
+          <h2>修改昵称</h2>
+          <p>请输入新昵称（1-32 字符）</p>
+          <input type="text" id="renameInput" placeholder="输入昵称..." maxlength="32" />
+          <div class="modal-actions">
+            <button id="renameCancel">取消</button>
+            <button id="renameSubmit" class="primary-btn">确认</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- HIDEOUT Phase: 整备/仓库/商店 UI -->
+      <div id="hideoutUI" style="display: none;">
+        <!-- 顶部固定栏 -->
+        <div id="hideoutTopBar">
+          <div class="topBar-left">
+            <span id="hideoutName">-</span>
+            <span class="separator">|</span>
+            <span>金钱: <span id="hideoutMoney">0</span></span>
+            <span class="separator">|</span>
+            <span id="hideoutStatus">连接中...</span>
+          </div>
+        </div>
+
+        <!-- 主内容区 -->
+        <div id="hideoutContent">
+          <!-- 左侧 Tab -->
+          <div id="hideoutTabs">
+            <button class="tab-btn active" data-tab="equipment">装备</button>
+            <button class="tab-btn" data-tab="stash">仓库</button>
+            <button class="tab-btn" data-tab="shop">商店</button>
+          </div>
+
+          <!-- 右侧内容区 -->
+          <div id="hideoutMain">
+            <!-- 装备区域 -->
+            <div id="hideoutEquipment" class="hideout-panel active">
+              <h3>装备</h3>
+              <div class="panel-desc">点击装备槽位自动从仓库选择并装备，或从下方整备区装备</div>
+              <div class="equipment-area">
+                <div class="equipment-slot clickable-slot" data-slot="weapon">
+                  <div class="slot-label">武器 <span class="slot-hint">(点击自动装备)</span></div>
+                  <div id="equipmentWeapon" class="slot-content">
+                    <div class="slot-empty">未装备</div>
+                  </div>
+                </div>
+                <div class="equipment-slot clickable-slot" data-slot="bag">
+                  <div class="slot-label">背包 <span class="slot-hint">(点击自动装备)</span></div>
+                  <div id="equipmentBag" class="slot-content">
+                    <div class="slot-empty">未装备</div>
+                  </div>
+                </div>
+                <div class="equipment-slot clickable-slot" data-slot="armor">
+                  <div class="slot-label">防具 <span class="slot-hint">(点击自动装备)</span></div>
+                  <div id="equipmentArmor" class="slot-content">
+                    <div class="slot-empty">未装备</div>
+                  </div>
+                </div>
+              </div>
+              <!-- 整备区（整合到装备tab） -->
+              <div style="margin-top: 30px;">
+                <h3 style="color: #0ff; margin-bottom: 10px; font-size: 18px;">整备区</h3>
+                <p class="panel-desc">准备带入局内的物品（容量: <span id="prepCapacity">0/8</span>）</p>
+                <div id="prepList" class="item-list"></div>
+              </div>
+            </div>
+
+            <!-- 仓库 -->
+            <div id="hideoutStash" class="hideout-panel">
+              <h3>仓库</h3>
+              <p class="panel-desc">你的物品存储</p>
+              <div id="stashList" class="item-list"></div>
+            </div>
+
+            <!-- 商店 -->
+            <div id="hideoutShop" class="hideout-panel">
+              <h3>商店</h3>
+              <p class="panel-desc">购买物品（买到仓库）</p>
+              <div id="shopList" class="item-list"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 右下角主按钮 -->
+        <div id="hideoutActions">
+          <button id="enterRaidBtn" class="primary-btn" disabled>进入战局</button>
+        </div>
+      </div>
+
+      </div>
+    </div>
+
+    <!-- HUD 容器（右侧，与canvas并列） -->
+    <div id="hudContainer">
+      <!-- Debug 面板折叠按钮 -->
+      <button id="debugToggle" title="Toggle Debug Panel (F1)">◀</button>
+      
+      <!-- Debug 面板（右侧） -->
+      <div id="debugPanel"></div>
+    </div>
   </div>
   <script type="module" src="/src/main.ts"></script>
 </body>
 </html>
-

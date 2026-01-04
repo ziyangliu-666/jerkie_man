@@ -1,0 +1,684 @@
+{
+  "c1e21557-a3fe-45f9-b5f5-04d022b1714a": {
+    "displayName": "Rufus",
+    "money": 36173211,
+    "stash": [
+      {
+        "iid": "i1767516372333_tyl9lpgyq",
+        "typeId": "electronics",
+        "qty": 1
+      },
+      {
+        "iid": "i1767516389915_aoykjn9xr",
+        "typeId": "bag_sling",
+        "qty": 1
+      },
+      {
+        "iid": "i1767516395217_hfu1i4uuv",
+        "typeId": "bag_sling",
+        "qty": 1
+      },
+      {
+        "iid": "i1767516424936_zxazghl9x",
+        "typeId": "scrap_metal",
+        "qty": 18
+      },
+      {
+        "iid": "i1767516404639_g4xpgvu41",
+        "typeId": "keycard_beta",
+        "qty": 1
+      },
+      {
+        "iid": "i1767513060864_oz9o0pmmh",
+        "typeId": "bag_expedition",
+        "qty": 1
+      },
+      {
+        "iid": "i1767513248292_cn7sy5i4p",
+        "typeId": "bag_daypack",
+        "qty": 3
+      },
+      {
+        "iid": "i1767514317600_mamaud2jt",
+        "typeId": "bag_sling",
+        "qty": 5
+      },
+      {
+        "iid": "i1767517342225_2lkmfqh58",
+        "typeId": "cloth",
+        "qty": 24
+      },
+      {
+        "iid": "i1767516310929_2y5kowfc4",
+        "typeId": "w_shotgun",
+        "qty": 1
+      },
+      {
+        "iid": "i1767516344718_qhnjyamd3",
+        "typeId": "armor_kevlar",
+        "qty": 1
+      },
+      {
+        "iid": "i1767516344718_5rqkyhzyv",
+        "typeId": "armor_kevlar",
+        "qty": 1
+      },
+      {
+        "iid": "i1767517244942_7mjfelms2",
+        "typeId": "armor_light",
+        "qty": 1
+      },
+      {
+        "iid": "i1767517244942_s6vervq6e",
+        "typeId": "armor_light",
+        "qty": 1
+      },
+      {
+        "iid": "i1767517244942_s8qzurvlw",
+        "typeId": "armor_light",
+        "qty": 1
+      },
+      {
+        "iid": "i1767517244942_cr0kmkim9",
+        "typeId": "w_dmr",
+        "qty": 1
+      },
+      {
+        "iid": "i1767517244942_nnnkxmbhu",
+        "typeId": "bag_expedition",
+        "qty": 1
+      },
+      {
+        "iid": "i1767517350656_pbqwvh9g5",
+        "typeId": "w_pistol",
+        "qty": 1
+      },
+      {
+        "iid": "i1767517350656_2ez3olf81",
+        "typeId": "w_pistol",
+        "qty": 1
+      },
+      {
+        "iid": "i1767517350656_xjfp7au0h",
+        "typeId": "w_pistol",
+        "qty": 1
+      },
+      {
+        "iid": "i1767517353588_b8mcl05bc",
+        "typeId": "intel_document",
+        "qty": 1
+      },
+      {
+        "iid": "i1767517355016_unj6rclio",
+        "typeId": "w_shotgun",
+        "qty": 1
+      },
+      {
+        "iid": "i1767517374943_wq11m6ip1",
+        "typeId": "medical_supplies",
+        "qty": 5
+      },
+      {
+        "iid": "i1767517361193_sl1gpzlms",
+        "typeId": "bag_tactical",
+        "qty": 1
+      },
+      {
+        "iid": "i1767517361193_ajop6yyrh",
+        "typeId": "bag_tactical",
+        "qty": 1
+      },
+      {
+        "iid": "i1767517362442_cg2in0cip",
+        "typeId": "bag_expedition",
+        "qty": 1
+      },
+      {
+        "iid": "i1767517362442_7haa1wptw",
+        "typeId": "bag_expedition",
+        "qty": 1
+      },
+      {
+        "iid": "i1767517362442_z07vm47b5",
+        "typeId": "bag_expedition",
+        "qty": 1
+      },
+      {
+        "iid": "i1767517368061_slkqd5kfi",
+        "typeId": "bag_sling",
+        "qty": 1
+      },
+      {
+        "iid": "i1767517368061_exb8h2q5n",
+        "typeId": "bag_sling",
+        "qty": 1
+      },
+      {
+        "iid": "i1767517589356_ev2c7go41",
+        "typeId": "w_pistol",
+        "qty": 1
+      },
+      {
+        "iid": "i1767517589356_h92zs1q5k",
+        "typeId": "w_pistol",
+        "qty": 1
+      },
+      {
+        "iid": "i1767517589356_htx701ysd",
+        "typeId": "w_pistol",
+        "qty": 1
+      },
+      {
+        "iid": "i1767517642712_gw6ucvotq",
+        "typeId": "w_smg",
+        "qty": 1
+      },
+      {
+        "iid": "i1767516344718_k567fbnkz",
+        "typeId": "armor_kevlar",
+        "qty": 1
+      },
+      {
+        "iid": "i1767516347219_e6cvoma19",
+        "typeId": "w_pistol",
+        "qty": 1
+      },
+      {
+        "iid": "i1767517759024_n69djga7m",
+        "typeId": "keycard_alpha",
+        "qty": 1
+      },
+      {
+        "iid": "i1767517769596_uum6zizdx",
+        "typeId": "w_pistol",
+        "qty": 1
+      },
+      {
+        "iid": "i1767517769596_2g0bti13p",
+        "typeId": "w_pistol",
+        "qty": 1
+      },
+      {
+        "iid": "i1767517769596_ahlygou11",
+        "typeId": "w_pistol",
+        "qty": 1
+      },
+      {
+        "iid": "i1767518388108_4zgxgpfbg",
+        "typeId": "medical_supplies",
+        "qty": 3
+      },
+      {
+        "iid": "i1767518377104_wtvrx2kop",
+        "typeId": "armor_plate",
+        "qty": 1
+      },
+      {
+        "iid": "i1767518378857_er71op5co",
+        "typeId": "bag_sling",
+        "qty": 1
+      },
+      {
+        "iid": "i1767521831756_a9eofae74",
+        "typeId": "ammo",
+        "qty": 11
+      },
+      {
+        "iid": "i1767522138850_1i9lsx3ea",
+        "typeId": "w_dmr",
+        "qty": 1
+      },
+      {
+        "iid": "i1767522138850_3xx3y4wgi",
+        "typeId": "armor_kevlar",
+        "qty": 1
+      },
+      {
+        "iid": "i1767522138850_kr4k77mdh",
+        "typeId": "bag_sling",
+        "qty": 1
+      },
+      {
+        "iid": "i1767522379419_87098wrbo",
+        "typeId": "w_dmr",
+        "qty": 1
+      },
+      {
+        "iid": "i1767522379419_0vvmi92n3",
+        "typeId": "bag_sling",
+        "qty": 1
+      },
+      {
+        "iid": "i1767522495188_tblkes6ck",
+        "typeId": "medkit",
+        "qty": 2
+      },
+      {
+        "iid": "i1767522749688_goxq8tcaj",
+        "typeId": "armor_kevlar",
+        "qty": 1
+      },
+      {
+        "iid": "i1767522749688_xlkbswi0q",
+        "typeId": "bag_sling",
+        "qty": 1
+      },
+      {
+        "iid": "i1767523249475_9towliob3",
+        "typeId": "w_shotgun",
+        "qty": 1
+      },
+      {
+        "iid": "i1767523249475_b9x5u8uvn",
+        "typeId": "bag_sling",
+        "qty": 1
+      },
+      {
+        "iid": "i1767523292482_xht1qfeew",
+        "typeId": "bag_sling",
+        "qty": 1
+      },
+      {
+        "iid": "i1767523295498_rylytz581",
+        "typeId": "w_dmr",
+        "qty": 1
+      },
+      {
+        "iid": "i1767523365286_za751hrch",
+        "typeId": "bag_tactical",
+        "qty": 1
+      },
+      {
+        "iid": "i1767523366753_hv32uy7bo",
+        "typeId": "w_dmr",
+        "qty": 1
+      },
+      {
+        "iid": "i1767523371069_79w3enfwe",
+        "typeId": "w_pistol",
+        "qty": 1
+      },
+      {
+        "iid": "i1767523371069_fgmtl6nwo",
+        "typeId": "w_pistol",
+        "qty": 1
+      },
+      {
+        "iid": "i1767523371069_b4lk6hsnt",
+        "typeId": "w_pistol",
+        "qty": 1
+      },
+      {
+        "iid": "i1767523566817_u5tob7q4i",
+        "typeId": "w_pistol",
+        "qty": 1
+      },
+      {
+        "iid": "i1767523566817_zy5l9hg2k",
+        "typeId": "w_pistol",
+        "qty": 1
+      },
+      {
+        "iid": "i1767523566817_2gz4kk5mn",
+        "typeId": "w_pistol",
+        "qty": 1
+      },
+      {
+        "iid": "i1767523923501_1bd0s9l29",
+        "typeId": "w_burst",
+        "qty": 1
+      },
+      {
+        "iid": "i1767524037828_ywc4wlhkr",
+        "typeId": "keycard_beta",
+        "qty": 1
+      },
+      {
+        "iid": "i1767524037828_6xebdh1ww",
+        "typeId": "keycard_beta",
+        "qty": 1
+      },
+      {
+        "iid": "i1767524037828_5urrv6qmi",
+        "typeId": "keycard_beta",
+        "qty": 1
+      }
+    ],
+    "prep": [],
+    "bagCap": 4,
+    "equipment": {
+      "weaponIid": "i1767522379419_87098wrbo",
+      "bagIid": null,
+      "armorIid": null
+    }
+  },
+  "892ee53e-ce36-4bdb-8ffc-dc942bbca6b7": {
+    "displayName": null,
+    "money": 0,
+    "stash": [],
+    "prep": [],
+    "bagCap": 8
+  },
+  "e0a688fe-e924-423b-a7f7-e0e8e05fbbfd": {
+    "displayName": "12",
+    "money": 11297,
+    "stash": [
+      {
+        "iid": "i1767513119490_vxu6fvp60",
+        "typeId": "armor_plate",
+        "qty": 3
+      },
+      {
+        "iid": "i1767513120724_7k49ikwyx",
+        "typeId": "keycard_alpha",
+        "qty": 1
+      },
+      {
+        "iid": "i1767513121778_yemvuvmlb",
+        "typeId": "bag_daypack",
+        "qty": 2
+      },
+      {
+        "iid": "i1767516572569_fb65em7sc",
+        "typeId": "w_pistol",
+        "qty": 1
+      },
+      {
+        "iid": "i1767516601417_7kao42oil",
+        "typeId": "w_smg",
+        "qty": 1
+      },
+      {
+        "iid": "i1767516601417_m8jvcfc50",
+        "typeId": "w_smg",
+        "qty": 1
+      },
+      {
+        "iid": "i1767516604058_mhh79ziti",
+        "typeId": "bag_tactical",
+        "qty": 1
+      },
+      {
+        "iid": "i1767516604944_he2a1328o",
+        "typeId": "w_pistol",
+        "qty": 1
+      },
+      {
+        "iid": "i1767516605886_sf5v80gir",
+        "typeId": "intel_document",
+        "qty": 1
+      },
+      {
+        "iid": "i1767519136703_7yv3oycl2",
+        "typeId": "w_burst",
+        "qty": 1
+      },
+      {
+        "iid": "i1767520554736_lt3m1vdbn",
+        "typeId": "armor_plate",
+        "qty": 1
+      },
+      {
+        "iid": "i1767520554736_85pkn9mri",
+        "typeId": "armor_plate",
+        "qty": 1
+      },
+      {
+        "iid": "i1767520554736_q7eg0my9d",
+        "typeId": "armor_plate",
+        "qty": 1
+      },
+      {
+        "iid": "i1767520571427_pqn0rayo3",
+        "typeId": "w_dmr",
+        "qty": 1
+      }
+    ],
+    "prep": [],
+    "bagCap": 4,
+    "equipment": {
+      "weaponIid": null,
+      "bagIid": null,
+      "armorIid": "i1767513119490_vxu6fvp60"
+    },
+    "lastDeathTime": 1767512870941
+  },
+  "0b257011-1681-4588-b346-23a466c6aa2c": {
+    "displayName": "Rufus",
+    "money": 500,
+    "stash": [],
+    "prep": [],
+    "bagCap": 8,
+    "equipment": {
+      "weaponIid": null,
+      "bagIid": null,
+      "armorIid": null
+    }
+  },
+  "56b507c3-7674-4637-a82c-b6fa56d530b0": {
+    "displayName": "Rufus",
+    "money": 300,
+    "stash": [
+      {
+        "iid": "i1767511164525_uh6vdcw48",
+        "typeId": "w_pistol",
+        "qty": 1
+      }
+    ],
+    "prep": [],
+    "bagCap": 8,
+    "equipment": {
+      "weaponIid": "i1767511164525_uh6vdcw48",
+      "bagIid": null,
+      "armorIid": null
+    }
+  },
+  "8f8ebe53-a34b-4271-b095-5ee6afd27d93": {
+    "displayName": "111",
+    "money": 200,
+    "stash": [],
+    "prep": [
+      {
+        "iid": "i1767510186268_hwn1rufdr",
+        "typeId": "bag_sling",
+        "qty": 1
+      },
+      {
+        "iid": "i1767510186963_day8yo6yl",
+        "typeId": "w_pistol",
+        "qty": 1
+      }
+    ],
+    "bagCap": 8,
+    "equipment": {
+      "weaponIid": null,
+      "bagIid": null,
+      "armorIid": null
+    }
+  },
+  "921a9b97-7de7-49e0-a703-481046b83328": {
+    "displayName": "Rufus",
+    "money": 380,
+    "stash": [
+      {
+        "iid": "i1767524571753_pfkvs3axu",
+        "typeId": "medkit",
+        "qty": 5
+      },
+      {
+        "iid": "i1767524688079_gsu0m97oy",
+        "typeId": "electronics",
+        "qty": 2
+      },
+      {
+        "iid": "i1767524609936_1s8tcpssf",
+        "typeId": "armor_plate",
+        "qty": 1
+      },
+      {
+        "iid": "i1767524609936_wmjj13qkk",
+        "typeId": "armor_plate",
+        "qty": 1
+      },
+      {
+        "iid": "i1767524768051_po6m325un",
+        "typeId": "bag_sling",
+        "qty": 1
+      },
+      {
+        "iid": "i1767525223874_in6bhasp8",
+        "typeId": "armor_plate",
+        "qty": 1
+      },
+      {
+        "iid": "i1767525223874_qoee9ueb9",
+        "typeId": "armor_plate",
+        "qty": 1
+      },
+      {
+        "iid": "i1767525243136_0dmqv5ody",
+        "typeId": "ammo",
+        "qty": 6
+      },
+      {
+        "iid": "i1767525406093_nalznxt1g",
+        "typeId": "scrap_metal",
+        "qty": 2
+      },
+      {
+        "iid": "i1767525406093_yey97pk43",
+        "typeId": "weapon_parts",
+        "qty": 3
+      },
+      {
+        "iid": "i1767525400156_fs4144bla",
+        "typeId": "intel_document",
+        "qty": 1
+      },
+      {
+        "iid": "i1767526038855_aifiuw781",
+        "typeId": "bag_sling",
+        "qty": 1
+      },
+      {
+        "iid": "i1767526038855_jxle6otnj",
+        "typeId": "bag_sling",
+        "qty": 1
+      }
+    ],
+    "prep": [],
+    "bagCap": 4,
+    "equipment": {
+      "weaponIid": null,
+      "bagIid": null,
+      "armorIid": null
+    }
+  },
+  "6e45a220-833e-414f-8d06-e68e538d6483": {
+    "displayName": null,
+    "money": 10000,
+    "stash": [],
+    "prep": [],
+    "bagCap": 4,
+    "equipment": {
+      "weaponIid": null,
+      "bagIid": null,
+      "armorIid": null
+    }
+  },
+  "1033bbf7-ba92-40f6-9ac3-0f447da62297": {
+    "displayName": "123",
+    "money": 10000,
+    "stash": [],
+    "prep": [],
+    "bagCap": 4,
+    "equipment": {
+      "weaponIid": null,
+      "bagIid": null,
+      "armorIid": null
+    }
+  },
+  "194cdcdc-db66-4ab7-b4f0-f80b4ca0699d": {
+    "displayName": "Bnito",
+    "money": 1927,
+    "stash": [
+      {
+        "iid": "i1767524513884_quzbcid33",
+        "typeId": "ammo",
+        "qty": 2
+      },
+      {
+        "iid": "i1767524515304_pn0via10r",
+        "typeId": "medkit",
+        "qty": 1
+      },
+      {
+        "iid": "i1767524570647_yod17zo35",
+        "typeId": "cloth",
+        "qty": 9
+      },
+      {
+        "iid": "i1767526166559_xomczi7jv",
+        "typeId": "bag_sling",
+        "qty": 1
+      },
+      {
+        "iid": "i1767526166559_q4jkahnlr",
+        "typeId": "bag_sling",
+        "qty": 1
+      },
+      {
+        "iid": "i1767526186144_etsei521m",
+        "typeId": "bag_tactical",
+        "qty": 1
+      },
+      {
+        "iid": "i1767526261372_9zbjf5qpu",
+        "typeId": "w_pistol",
+        "qty": 1
+      },
+      {
+        "iid": "i1767526261372_tyv3qx9da",
+        "typeId": "w_pistol",
+        "qty": 1
+      },
+      {
+        "iid": "i1767526338079_v9q332taa",
+        "typeId": "w_smg",
+        "qty": 1
+      },
+      {
+        "iid": "i1767526339805_pgm6yb2o0",
+        "typeId": "armor_plate",
+        "qty": 1
+      },
+      {
+        "iid": "i1767526746638_poal4k8ux",
+        "typeId": "w_smg",
+        "qty": 1
+      },
+      {
+        "iid": "i1767526746638_6wgyi0345",
+        "typeId": "armor_plate",
+        "qty": 1
+      },
+      {
+        "iid": "i1767526838609_7esy8qz57",
+        "typeId": "bag_sling",
+        "qty": 1
+      },
+      {
+        "iid": "i1767526838609_r9oj5duvs",
+        "typeId": "bag_sling",
+        "qty": 1
+      }
+    ],
+    "prep": [],
+    "bagCap": 4,
+    "equipment": {
+      "weaponIid": "i1767526338079_v9q332taa",
+      "bagIid": null,
+      "armorIid": "i1767526339805_pgm6yb2o0"
+    }
+  }
+}

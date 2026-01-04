@@ -5,12 +5,14 @@
       "server/src/main.ts",
       "shared/src/protocol.ts",
       "shared/src/content.ts",
-      "package.json"
+      "package.json",
+      "client/index.html"
     ],
     "includeGlobs": [
       "client/src/**/*.ts",
       "server/src/**/*.ts",
-      "shared/src/**/*.ts"
+      "shared/src/**/*.ts",
+      "client/**/*.html"
     ],
     "excludeFiles": [],
     "excludeGlobs": [
@@ -27,7 +29,8 @@
     "includeGlobs": [
       "client/src/**/*.ts",
       "server/src/**/*.ts",
-      "shared/src/**/*.ts"
+      "shared/src/**/*.ts",
+      "client/**/*.html"
     ],
     "excludeFiles": [],
     "excludeGlobs": [
@@ -48,6 +51,7 @@
       "client/src/**/*.ts",
       "server/src/**/*.ts",
       "**/*.md",
+      "**/*.html",
       "package.json"
     ],
     "excludeFiles": [],

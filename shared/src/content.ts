@@ -1,4 +1,6 @@
 import { z } from 'zod';
+import { ITEM_CATALOG } from './item_catalog.js';
+import type { ItemType } from './types.js';
 
 // 地图配置 schema
 export const MAP_CONFIG_SCHEMA = z.object({
@@ -28,7 +30,7 @@ export const DEFAULT_MAP_CONFIG: MAP_CONFIG = {
   },
 };
 
-// 物品类型配置（Day1占位）
+// 物品类型配置（Day1占位，已废弃，保留用于兼容）
 export const ITEM_TYPE_SCHEMA = z.object({
   id: z.string(),
   name: z.string(),
@@ -37,7 +39,7 @@ export const ITEM_TYPE_SCHEMA = z.object({
 
 export type ITEM_TYPE = z.infer<typeof ITEM_TYPE_SCHEMA>;
 
-// 默认物品类型（Day1占位，后续从JSON加载）
+// 默认物品类型（已废弃，现在统一使用 ITEM_CATALOG）
 export const DEFAULT_ITEM_TYPES: ITEM_TYPE[] = [
   { id: 'medkit', name: '医疗包', rarity: 'common' },
   { id: 'ammo', name: '弹药', rarity: 'common' },
@@ -52,7 +54,11 @@ export function loadMapConfig(seed?: number): MAP_CONFIG {
   };
 }
 
-export function loadItemTypes(): ITEM_TYPE[] {
-  return DEFAULT_ITEM_TYPES;
+/**
+ * 加载所有物品类型（统一从 ITEM_CATALOG 读取）
+ * 确保掉落系统能获取到所有物品（包括背包/护甲/武器/材料/消耗品）
+ */
+export function loadItemTypes(): ItemType[] {
+  return Object.values(ITEM_CATALOG);
 }
 

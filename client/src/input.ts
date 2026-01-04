@@ -3,6 +3,7 @@ export class InputManager {
   private mouseX = 0;
   private mouseY = 0;
   private shoot = false; // Day2: 开火状态
+  private reloadFlag = false; // 新增: 换弹脉冲事件标志（R键）
   private interactFlag = false; // Day3: 拾取脉冲事件标志（E键）
   private extractFlag = false; // Day3: 撤离脉冲事件标志（F键）
 
@@ -17,7 +18,10 @@ export class InputManager {
       // Day3: 脉冲事件（edge-trigger）
       // P1 修复: 处理 keydown repeat，避免长按导致疯狂发包
       // 如果 e.repeat 为 true，说明是系统自动重复，忽略（只处理第一次按下）
-      if (key === 'e' && !e.repeat) {
+      if (key === 'r' && !e.repeat) {
+        this.reloadFlag = true;
+        e.preventDefault();
+      } else if (key === 'e' && !e.repeat) {
         this.interactFlag = true;
         e.preventDefault();
       } else if (key === 'f' && !e.repeat) {
@@ -26,7 +30,7 @@ export class InputManager {
       }
       
       // 防止默认行为（如页面滚动）
-      if (['w', 'a', 's', 'd', ' ', 'e', 'f'].includes(key)) {
+      if (['w', 'a', 's', 'd', ' ', 'r', 'e', 'f'].includes(key)) {
         e.preventDefault();
       }
     });
@@ -35,9 +39,27 @@ export class InputManager {
       this.keys.set(e.key.toLowerCase(), false);
     });
 
+    // 修复: 统一坐标更新函数
+    const updatePointer = (clientX: number, clientY: number) => {
+      this.mouseX = clientX;
+      this.mouseY = clientY;
+    };
+
+    // 兼容：普通鼠标移动
     window.addEventListener('mousemove', (e) => {
-      this.mouseX = e.clientX;
-      this.mouseY = e.clientY;
+      updatePointer(e.clientX, e.clientY);
+    });
+
+    // 关键：pointer 链路（在 pointer capture 时依然可靠）
+    window.addEventListener('pointermove', (e) => {
+      if (!e.isPrimary) return;
+      updatePointer(e.clientX, e.clientY);
+    });
+
+    // 关键：捕获期间 pointermove 会稳定打到 canvas
+    canvas.addEventListener('pointermove', (e) => {
+      if (!e.isPrimary) return;
+      updatePointer(e.clientX, e.clientY);
     });
 
     // P0-3 修复: 使用 pointerdown/pointerup/pointercancel 替换 mousedown/mouseup
@@ -96,6 +118,7 @@ export class InputManager {
       this.keys.clear();
       this.shoot = false;
       this.capturedPointerId = null;
+      this.reloadFlag = false; // 新增: 清除换弹脉冲事件标志
       this.interactFlag = false; // Day3: 清除脉冲事件标志
       this.extractFlag = false;
     });
@@ -136,6 +159,13 @@ export class InputManager {
   // Day2: 获取开火状态
   getShoot(): boolean {
     return this.shoot;
+  }
+
+  // 新增: 消费换弹脉冲事件（edge-trigger：返回当前值并清零）
+  consumeReload(): boolean {
+    const value = this.reloadFlag;
+    this.reloadFlag = false;
+    return value;
   }
 
   // Day3: 消费拾取脉冲事件（edge-trigger：返回当前值并清零）

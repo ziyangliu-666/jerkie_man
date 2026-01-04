@@ -41,9 +41,26 @@ export type PlayerInventory = {
   items: ItemInstance[];
 };
 
+export type PlayerEquipment = {
+  weaponIid: string | null;
+  bagIid: string | null;
+  armorIid: string | null;
+};
+
+export type WeaponRuntime = {
+  weaponTypeId: string;   // 装备的武器 typeId（不是 iid，方便客户端查 def）
+  ammoInMag: number;
+  reloadingUntilTick: number; // 0 表示未换弹；否则 tick <= reloadingUntilTick 期间禁止开火
+  nextFireTick: number;        // tick < nextFireTick 禁止开火
+  burstRemaining?: number;     // 连发剩余次数（0表示不在连发中）
+  burstNextTick?: number;      // 连发下一发的时间（tick）
+};
+
 export type PlayerProfile = {
+  displayName: string | null; // 玩家昵称（null 表示未设置）
   money: number;
   stash: ItemInstance[];   // out-of-raid storage
-  bagCap: number;          // 背包容量（从 profile 读取，用于初始化 Player）
-  // optional: loadout later
+  prep: ItemInstance[];    // 整备区（准备带入局内的物品）
+  bagCap: number;          // 背包容量（从 profile 读取，用于初始化 Player，现在是动态计算的）
+  equipment: PlayerEquipment; // 装备槽（weapon/bag/armor）
 };
