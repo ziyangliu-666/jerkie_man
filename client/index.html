@@ -373,6 +373,75 @@
       transition: width 0.08s linear;
     }
 
+    /* 底部快捷栏 HUD */
+    #hotbarHud {
+      position: absolute;
+      bottom: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      display: none; /* 默认隐藏，在RAID中通过JS显示为flex */
+      gap: 8px;
+      padding: 12px;
+      border-radius: 10px;
+      border: 1px solid #323232;
+      background: rgba(12, 12, 12, 0.85);
+      box-shadow: 0 6px 16px rgba(0, 0, 0, 0.45);
+      pointer-events: none;
+    }
+
+    #hotbarHud .hotbar-slot {
+      width: 60px;
+      height: 60px;
+      border: 2px solid #444;
+      border-radius: 8px;
+      background: rgba(0, 0, 0, 0.3);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      position: relative;
+      transition: border-color 0.2s ease;
+    }
+
+    #hotbarHud .hotbar-slot.has-item {
+      border-color: #666;
+    }
+
+    #hotbarHud .hotbar-slot.medkit {
+      border-color: #4CAF50;
+    }
+
+    #hotbarHud .hotbar-slot.grenade {
+      border-color: #FF5722;
+    }
+
+    #hotbarHud .hotbar-slot-key {
+      position: absolute;
+      top: 2px;
+      left: 4px;
+      font-size: 10px;
+      color: #aaa;
+      font-weight: bold;
+    }
+
+    #hotbarHud .hotbar-slot-icon {
+      font-size: 12px;
+      color: #ddd;
+      text-align: center;
+      line-height: 1.2;
+      margin-bottom: 2px;
+    }
+
+    #hotbarHud .hotbar-slot-count {
+      font-size: 10px;
+      color: #fff;
+      font-weight: bold;
+    }
+
+    #hotbarHud .hotbar-slot.empty .hotbar-slot-icon {
+      color: #555;
+    }
+
     /* 左下角生命值 HUD */
     #healthHud {
       position: absolute;
@@ -1101,6 +1170,35 @@
           <div class="raid-slot-label">防具</div>
           <div class="raid-slot-name" id="raidArmorName">-</div>
           <div class="raid-slot-meta" id="raidArmorMeta">-</div>
+        </div>
+      </div>
+
+      <!-- 底部快捷栏 HUD -->
+      <div id="hotbarHud">
+        <div class="hotbar-slot" id="hotbarSlot1">
+          <div class="hotbar-slot-key">1</div>
+          <div class="hotbar-slot-icon">-</div>
+          <div class="hotbar-slot-count"></div>
+        </div>
+        <div class="hotbar-slot" id="hotbarSlot2">
+          <div class="hotbar-slot-key">2</div>
+          <div class="hotbar-slot-icon">-</div>
+          <div class="hotbar-slot-count"></div>
+        </div>
+        <div class="hotbar-slot" id="hotbarSlot3">
+          <div class="hotbar-slot-key">3</div>
+          <div class="hotbar-slot-icon">-</div>
+          <div class="hotbar-slot-count"></div>
+        </div>
+        <div class="hotbar-slot" id="hotbarSlot4">
+          <div class="hotbar-slot-key">4</div>
+          <div class="hotbar-slot-icon">-</div>
+          <div class="hotbar-slot-count"></div>
+        </div>
+        <div class="hotbar-slot" id="hotbarSlot5">
+          <div class="hotbar-slot-key">5</div>
+          <div class="hotbar-slot-icon">-</div>
+          <div class="hotbar-slot-count"></div>
         </div>
       </div>
 

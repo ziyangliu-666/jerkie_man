@@ -25,6 +25,22 @@ export const C2S_INPUT_SCHEMA = z.object({
   extract: z.boolean().optional(), // Day3: 撤离脉冲事件（F键，已废弃，保留兼容）
   extractHeld: z.boolean().optional(), // 游戏化增强: 撤离持续状态（按住F）
   shotId: z.number().int().optional(), // 本次发射的唯一ID（用于客户端预测子弹对齐）
+  shootOriginX: z.number().optional(), // 客户端渲染时的射击原点X
+  shootOriginY: z.number().optional(), // 客户端渲染时的射击原点Y
+});
+
+export const C2S_LOCAL_BULLET_HIT_SCHEMA = z.object({
+  type: z.literal('C2S_LOCAL_BULLET_HIT'),
+  bulletId: z.string(),
+  clientShotId: z.number().int().optional(),
+  targetId: z.string(),
+  targetX: z.number(),
+  targetY: z.number(),
+  hitX: z.number(),
+  hitY: z.number(),
+  spawnX: z.number(),
+  spawnY: z.number(),
+  timestamp: z.number(),
 });
 
 // Day5: Ping/Pong 消息（用于测量网络延迟）
@@ -109,6 +125,20 @@ export const C2S_INTERACT_SCHEMA = z.object({
   type: z.literal('C2S_INTERACT'),
 });
 
+// 新增: 使用物品消息（快捷栏1-5键）
+export const C2S_USE_ITEM_SCHEMA = z.object({
+  type: z.literal('C2S_USE_ITEM'),
+  slot: z.number().int().min(1).max(5), // 快捷栏槽位1-5
+});
+
+// 新增: 投掷物品消息（手雷等）
+export const C2S_THROW_SCHEMA = z.object({
+  type: z.literal('C2S_THROW'),
+  targetX: z.number(),
+  targetY: z.number(),
+  itemType: z.string(), // 投掷物类型（如 'frag_grenade'）
+});
+
 // 管理员命令消息（仅开发环境使用）
 export const C2S_ADMIN_SCHEMA = z.object({
   type: z.literal('C2S_ADMIN'),
@@ -123,6 +153,8 @@ export const C2S_MESSAGE_SCHEMA = z.discriminatedUnion('type', [
   C2S_PICKUP_LOOT_BAG_SCHEMA, // 保留兼容（deprecated）
   C2S_SELL_FROM_STASH_SCHEMA, // 新增: 从仓库卖出
   C2S_INTERACT_SCHEMA, // 新增: 通用交互（服务端选最近目标）
+  C2S_USE_ITEM_SCHEMA, // 新增: 使用物品（快捷栏1-5键）
+  C2S_THROW_SCHEMA, // 新增: 投掷物品
   C2S_ADMIN_SCHEMA, // 管理员命令
   C2S_SET_NAME_SCHEMA, // 新增: 设置昵称
   C2S_MOVE_STASH_TO_PREP_SCHEMA, // 新增: 从仓库移动到整备区
@@ -132,6 +164,7 @@ export const C2S_MESSAGE_SCHEMA = z.discriminatedUnion('type', [
   C2S_EQUIP_SCHEMA, // 新增: 装备/卸下装备
   C2S_DROP_ITEM_SCHEMA, // 新增: 局内丢弃物品
   C2S_RAID_EQUIP_SCHEMA, // 新增: 局内装备切换
+  C2S_LOCAL_BULLET_HIT_SCHEMA,
 ]);
 
 // S2C (Server to Client) 消息
@@ -195,6 +228,8 @@ export const BULLET_STATE_SCHEMA = z.object({
   vy: z.number(),
   ownerId: z.string(),
   clientShotId: z.number().int().optional(), // 客户端发射ID（用于预测子弹对齐）
+  weaponTypeId: z.string().optional(), // 武器类型ID（用于区分手雷、子弹等视觉样式）
+  bulletLifeMs: z.number().optional(), // 子弹生命周期（毫秒，用于客户端TTL判断）
 });
 
 export const ITEM_STATE_SCHEMA = z.object({
@@ -346,6 +381,7 @@ export type C2S_HELLO = z.infer<typeof C2S_HELLO_SCHEMA>;
 export type C2S_INPUT = z.infer<typeof C2S_INPUT_SCHEMA>;
 export type C2S_PING = z.infer<typeof C2S_PING_SCHEMA>; // Day5: Ping 类型
 export type C2S_MESSAGE = z.infer<typeof C2S_MESSAGE_SCHEMA>;
+export type C2S_LOCAL_BULLET_HIT = z.infer<typeof C2S_LOCAL_BULLET_HIT_SCHEMA>;
 
 export type PLAYER_STATE = z.infer<typeof PLAYER_STATE_SCHEMA>;
 export type BULLET_STATE = z.infer<typeof BULLET_STATE_SCHEMA>;
@@ -387,3 +423,4 @@ export type C2S_ENTER_RAID = z.infer<typeof C2S_ENTER_RAID_SCHEMA>;
 export type C2S_EQUIP = z.infer<typeof C2S_EQUIP_SCHEMA>;
 export type C2S_DROP_ITEM = z.infer<typeof C2S_DROP_ITEM_SCHEMA>;
 export type C2S_RAID_EQUIP = z.infer<typeof C2S_RAID_EQUIP_SCHEMA>;
+export type C2S_THROW = z.infer<typeof C2S_THROW_SCHEMA>;

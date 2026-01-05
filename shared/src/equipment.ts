@@ -145,7 +145,7 @@ export const WEAPONS: Record<string, WeaponDef> = {
     spreadDeg: 2,
     bulletSpeed: 520,
     damage: 12,
-    bulletLifeMs: 1400,
+    bulletLifeMs: 3000, // 3秒后爆炸
     explosionRadius: 120,
     explosionDamage: 70,
   },

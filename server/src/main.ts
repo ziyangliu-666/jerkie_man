@@ -58,6 +58,14 @@ type PickupReq =
   | { type: 'auto'; ws: WebSocket };
 const pickupQueues = new Map<string, PickupReq[]>();
 
+// 新增: 使用物品队列（快捷栏1-5键）
+type UseItemReq = { slot: number; ws: WebSocket };
+const useItemQueues = new Map<string, UseItemReq[]>();
+
+// 新增: 投掷物品队列
+type ThrowReq = { targetX: number; targetY: number; itemType: string; ws: WebSocket };
+const throwQueues = new Map<string, ThrowReq[]>();
+
 // P1-1 修复: lastProfileSentTick 移至模块级，避免每 tick 重新创建导致重复发送
 const lastProfileSentTick = new Map<string, number>();
 
@@ -110,6 +118,7 @@ const admin = {
     playerIdToAccountId.clear();
     inputQueues.clear();
     pickupQueues.clear();
+    useItemQueues.clear(); // 新增: 清理使用物品队列
     lastProfileSentTick.clear();
     lastExtractedInventoryCount.clear();
     
@@ -213,6 +222,8 @@ ws.on('message', (data: Buffer) => {
             room.addPlayer(playerId, accountId);
             inputQueues.set(playerId, []);
             pickupQueues.set(playerId, []); // P2-3: 初始化 pickup 队列
+            useItemQueues.set(playerId, []); // 新增: 初始化使用物品队列
+            throwQueues.set(playerId, []); // 新增: 初始化投掷队列
 
         log('CONNECT', {
           room: room.id,
@@ -300,6 +311,92 @@ ws.on('message', (data: Buffer) => {
           queue.push({ type: 'auto', ws });
           log('INTERACT_ENQUEUE', { player: playerId, tick: room.tick });
         }
+      } else if (parsed.type === 'C2S_USE_ITEM') {
+        // 新增: 使用物品消息（快捷栏1-5键）
+        if (!playerId) {
+          ws.send(
+            JSON.stringify(
+              S2C_ERROR_SCHEMA.parse({
+                type: 'S2C_ERROR',
+                code: 'NOT_AUTHENTICATED',
+                message: 'Must send C2S_HELLO first',
+              })
+            )
+          );
+          return;
+        }
+        // 入队列，不立即处理
+        const queue = useItemQueues.get(playerId);
+        if (queue) {
+          queue.push({ slot: parsed.slot, ws });
+          log('USE_ITEM_ENQUEUE', { player: playerId, slot: parsed.slot, tick: room.tick });
+        }
+      } else if (parsed.type === 'C2S_THROW') {
+        // 新增: 投掷物品消息
+        if (!playerId) {
+          ws.send(
+            JSON.stringify(
+              S2C_ERROR_SCHEMA.parse({
+                type: 'S2C_ERROR',
+                code: 'NOT_AUTHENTICATED',
+                message: 'Must send C2S_HELLO first',
+              })
+            )
+          );
+          return;
+        }
+        // 入队列，不立即处理
+        const queue = throwQueues.get(playerId);
+        if (queue) {
+          queue.push({ targetX: parsed.targetX, targetY: parsed.targetY, itemType: parsed.itemType, ws });
+          log('THROW_ENQUEUE', { player: playerId, targetX: parsed.targetX, targetY: parsed.targetY, itemType: parsed.itemType, tick: room.tick });
+        }
+      } else if (parsed.type === 'C2S_LOCAL_BULLET_HIT') {
+        if (!playerId) {
+          ws.send(
+            JSON.stringify(
+              S2C_ERROR_SCHEMA.parse({
+                type: 'S2C_ERROR',
+                code: 'NOT_AUTHENTICATED',
+                message: 'Must send C2S_HELLO first',
+              })
+            )
+          );
+          return;
+        }
+        const bullet =
+          room.findBulletById(parsed.bulletId) ??
+          room.findBulletByClientShotId(parsed.clientShotId, playerId);
+        const serverSpawn = bullet && bullet.spawnX !== undefined ? `${bullet.spawnX.toFixed(1)},${bullet.spawnY.toFixed(1)}` : 'missing';
+        log('LOCAL_BULLET_HIT_RECEIVED', {
+          room: room.id,
+          player: playerId,
+          target: parsed.targetId,
+          bullet: parsed.bulletId,
+          clientShotId: parsed.clientShotId,
+          spawn: `${parsed.spawnX.toFixed(1)},${parsed.spawnY.toFixed(1)}`,
+        });
+        console.log(`[LOCAL_BULLET_HIT] player=${playerId} target=${parsed.targetId} bullet=${parsed.bulletId} spawn=${parsed.spawnX.toFixed(1)},${parsed.spawnY.toFixed(1)} hit=${parsed.hitX.toFixed(1)},${parsed.hitY.toFixed(1)}`);
+        if (!bullet) {
+          log('LOCAL_BULLET_HIT_MISSING_BULLET', {
+            room: room.id,
+            player: playerId,
+            bullet: parsed.bulletId,
+            clientShotId: parsed.clientShotId,
+          });
+        }
+        log('LOCAL_BULLET_HIT_REPORT', {
+          room: room.id,
+          player: playerId,
+          target: parsed.targetId,
+          bullet: parsed.bulletId,
+          clientShotId: parsed.clientShotId,
+          localSpawn: `${parsed.spawnX.toFixed(1)},${parsed.spawnY.toFixed(1)}`,
+          serverSpawn,
+          hit: `${parsed.hitX.toFixed(1)},${parsed.hitY.toFixed(1)}`,
+          targetPos: `${parsed.targetX.toFixed(1)},${parsed.targetY.toFixed(1)}`,
+          timestamp: parsed.timestamp,
+        });
       } else if (parsed.type === 'C2S_PICKUP_WORLD_ITEM') {
         // 保留兼容（deprecated，建议用 C2S_INTERACT）
         if (!playerId) {
@@ -818,38 +915,32 @@ ws.on('message', (data: Buffer) => {
         }
 
         // 将 prep 物品移到 inventory（允许空 prep）
+        // 修复：使用 player.addItem() 正确处理堆叠和容量，避免物品丢失
         const prepItems = profile.prep.filter(item => !equippedIids.has(item.iid));
+        const itemsNotAdded: typeof prepItems = [];
+
         for (const prepItem of prepItems) {
-          // 检查背包容量
-          const currentCount = player.inventory.items.reduce((sum, item) => sum + item.qty, 0);
-          if (currentCount + prepItem.qty > player.inventory.bagCap) {
-            // 容量不足，只添加能装下的部分
-            const canAdd = player.inventory.bagCap - currentCount;
-            if (canAdd > 0) {
-              player.inventory.items.push({
-                iid: prepItem.iid,
-                typeId: prepItem.typeId,
-                qty: canAdd,
-              });
-            }
-            break;
-          } else {
-            // 尝试堆叠
-            const existing = player.inventory.items.find(item => item.typeId === prepItem.typeId);
-            if (existing) {
-              existing.qty += prepItem.qty;
-            } else {
-              player.inventory.items.push({
-                iid: prepItem.iid,
-                typeId: prepItem.typeId,
-                qty: prepItem.qty,
-              });
-            }
+          const result = player.addItem(prepItem.typeId, prepItem.qty);
+
+          if (result.added < prepItem.qty) {
+            // 部分或全部未添加，保留在 prep 中（避免物品丢失）
+            const remaining = prepItem.qty - result.added;
+            itemsNotAdded.push({
+              iid: prepItem.iid,
+              typeId: prepItem.typeId,
+              qty: remaining,
+            });
+            log('PREP_ITEM_NOT_FIT', {
+              typeId: prepItem.typeId,
+              requested: prepItem.qty,
+              added: result.added,
+              remaining,
+            });
           }
         }
-        
-        // 清空 prep
-        room.profileManager.updateProfile(accountId, { prep: [] });
+
+        // 只清空成功添加的物品，保留未添加的物品在 prep 中
+        room.profileManager.updateProfile(accountId, { prep: itemsNotAdded });
         
         // 发送更新的 Profile（phase=RAID）
         // 修复: 使用 sendProfile 函数，确保包含所有必需字段（包括 equipment）
@@ -1001,6 +1092,8 @@ ws.on('message', (data: Buffer) => {
       playerIdToAccountId.delete(playerId);
       inputQueues.delete(playerId);
       pickupQueues.delete(playerId); // P2-3: 清理 pickup 队列
+      useItemQueues.delete(playerId); // 新增: 清理使用物品队列
+      throwQueues.delete(playerId); // 新增: 清理投掷队列
       playerLatencies.delete(playerId); // 延迟补偿: 清理延迟记录
     }
   });
@@ -1137,6 +1230,62 @@ setInterval(() => {
       } else {
         log('PICKUP_OK', { player: playerId, type: 'bag', bid: lastReq.bid, tick: room.tick });
       }
+    }
+    
+    // 清空队列
+    queue.length = 0;
+  }
+  
+  // 新增: 处理使用物品队列（快捷栏1-5键）
+  for (const [playerId, queue] of useItemQueues.entries()) {
+    if (queue.length === 0) continue;
+    
+    // 只处理最后一个请求（避免重复使用）
+    const lastReq = queue[queue.length - 1];
+    
+    const result = room.handleUseItem(playerId, lastReq.slot);
+    if (!result.success) {
+      if (lastReq.ws.readyState === WebSocket.OPEN && result.message) {
+        lastReq.ws.send(
+          JSON.stringify(
+            S2C_ERROR_SCHEMA.parse({
+              type: 'S2C_ERROR',
+              code: 'USE_ITEM_FAILED',
+              message: result.message,
+            })
+          )
+        );
+      }
+    } else {
+      log('USE_ITEM_OK', { player: playerId, slot: lastReq.slot, itemType: result.itemType, tick: room.tick });
+    }
+    
+    // 清空队列
+    queue.length = 0;
+  }
+  
+  // 新增: 处理投掷队列
+  for (const [playerId, queue] of throwQueues.entries()) {
+    if (queue.length === 0) continue;
+    
+    // 只处理最后一个请求（避免重复投掷）
+    const lastReq = queue[queue.length - 1];
+    
+    const result = room.handleThrow(playerId, lastReq.targetX, lastReq.targetY, lastReq.itemType);
+    if (!result.success) {
+      if (lastReq.ws.readyState === WebSocket.OPEN && result.message) {
+        lastReq.ws.send(
+          JSON.stringify(
+            S2C_ERROR_SCHEMA.parse({
+              type: 'S2C_ERROR',
+              code: 'THROW_FAILED',
+              message: result.message,
+            })
+          )
+        );
+      }
+    } else {
+      log('THROW_OK', { player: playerId, targetX: lastReq.targetX, targetY: lastReq.targetY, itemType: lastReq.itemType, tick: room.tick });
     }
     
     // 清空队列

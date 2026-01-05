@@ -33,6 +33,14 @@ interface LocalBullet {
   isLocalPrediction: boolean; // 是否为本地预测（尚未收到服务端确认）
   localShotId?: number; // 本地发射 ID（用于对齐）
   bulletLifeMs: number; // 子弹生命周期（毫秒）
+  weaponTypeId?: string; // 武器类型ID（用于区分手雷、子弹等视觉样式）
+  isGrenade?: boolean; // 是否是手雷（用于特殊物理模拟）
+  targetX?: number; // 手雷目标位置X
+  targetY?: number; // 手雷目标位置Y
+  keepClientTrajectory?: boolean; // 在未经过确认前一直保持客户端计算的运动
+  spawnX?: number;
+  spawnY?: number;
+  localHitReported?: boolean;
 }
 
 // 命中特效
@@ -41,6 +49,20 @@ interface HitEffect {
   y: number;
   spawnTimeMs: number;
   type: 'obstacle' | 'player';
+}
+
+interface LocalHitInfo {
+  bulletId: string;
+  ownerId: string;
+  targetId: string;
+  targetX: number;
+  targetY: number;
+  hitX: number;
+  hitY: number;
+  spawnX: number;
+  spawnY: number;
+  clientShotId?: number;
+  timestamp: number;
 }
 
 // 碰撞检测：圆 vs AABB
@@ -67,6 +89,7 @@ export class BulletTrackManager {
   private renderList: BULLET_STATE[] = [];
   private localPredictions = new Map<number, string>(); // shotId -> bulletId
   private tempIdCounter = 0;
+  private localHitCallbacks: Array<(info: LocalHitInfo) => void> = [];
   
   // 本地已销毁的子弹 ID（防止服务端子弹"回放"）
   private locallyDestroyedIds = new Set<string>();
@@ -92,6 +115,68 @@ export class BulletTrackManager {
 
   setObstacles(obstacles: OBSTACLE_STATE[]): void {
     this.obstacles = obstacles;
+  }
+
+  onLocalHit(callback: (info: LocalHitInfo) => void): void {
+    this.localHitCallbacks.push(callback);
+  }
+
+  private matchPendingLocalPrediction(ownerId: string, targetSpawnTime: number): LocalBullet | null {
+    let bestMatch: LocalBullet | null = null;
+    let bestDelta = Infinity;
+    for (const bullet of this.bullets.values()) {
+      if (!bullet.isLocalPrediction || bullet.ownerId !== ownerId) continue;
+      const delta = Math.abs(bullet.spawnTimeMs - targetSpawnTime);
+      if (delta < bestDelta && delta < 50) {
+        bestDelta = delta;
+        bestMatch = bullet;
+      }
+    }
+    return bestMatch;
+  }
+
+  /**
+   * 本地投掷手雷时立即生成预测手雷
+   */
+  spawnLocalGrenade(
+    playerX: number,
+    playerY: number,
+    targetX: number,
+    targetY: number,
+    weaponTypeId: string
+  ): void {
+    const nowMs = Date.now();
+    const tempId = `local_grenade_${this.tempIdCounter++}`;
+
+    // 计算飞行速度（1秒到达目标）
+    const flightTime = 1.0;
+    const dx = targetX - playerX;
+    const dy = targetY - playerY;
+    const vx = dx / flightTime;
+    const vy = dy / flightTime;
+
+    const grenade: LocalBullet = {
+      id: tempId,
+      ownerId: this.localPlayerId ?? 'local',
+      x: playerX,
+      y: playerY,
+      vx,
+      vy,
+      spawnTimeMs: nowMs,
+      isLocalPrediction: true,
+      bulletLifeMs: 3000, // 3秒引信
+      weaponTypeId,
+      isGrenade: true,
+      targetX,
+      targetY,
+      keepClientTrajectory: true,
+      spawnX: playerX,
+      spawnY: playerY,
+      localHitReported: false,
+    };
+
+    this.bullets.set(tempId, grenade);
+    console.log('[BulletTracks] 本地手雷已创建:', { id: tempId, targetX, targetY });
   }
 
   /**
@@ -154,6 +239,11 @@ export class BulletTrackManager {
           isLocalPrediction: true,
           localShotId: i === 0 ? shotId : undefined, // 只有第一颗子弹使用shotId
           bulletLifeMs,
+          weaponTypeId, // 保存武器类型ID
+          keepClientTrajectory: true,
+          spawnX: x,
+          spawnY: y,
+          localHitReported: false,
         };
         
         this.bullets.set(tempId, bullet);
@@ -189,6 +279,11 @@ export class BulletTrackManager {
         isLocalPrediction: true,
         localShotId: shotId,
         bulletLifeMs,
+        weaponTypeId, // 保存武器类型ID
+        keepClientTrajectory: true,
+        spawnX: x,
+        spawnY: y,
+        localHitReported: false,
       };
       
       this.bullets.set(tempId, bullet);
@@ -202,6 +297,18 @@ export class BulletTrackManager {
   onSnapshot(snapshot: S2C_SNAPSHOT, players: PLAYER_STATE[]): void {
     const nowMs = Date.now();
     this.players = players;
+
+    // 日志：记录手雷子弹
+    const grenadeBullets = snapshot.bullets.filter(b => b.weaponTypeId === 'frag_grenade' || b.weaponTypeId === 'w_grenade_launcher');
+    if (grenadeBullets.length > 0) {
+      console.log('[BulletTracks] 收到手雷子弹:', grenadeBullets.length, grenadeBullets.map(b => ({
+        id: b.id,
+        weaponTypeId: b.weaponTypeId,
+        ownerId: b.ownerId,
+        x: b.x.toFixed(1),
+        y: b.y.toFixed(1)
+      })));
+    }
     
     // 清理过期的"本地销毁"记录（500ms 后允许服务端重新添加同 ID 子弹）
     for (const [id, destroyTime] of this.destroyedCleanupTime) {
@@ -230,40 +337,21 @@ export class BulletTrackManager {
         if (tempId) {
           const localBullet = this.bullets.get(tempId);
           if (localBullet) {
-            // 找到匹配的第一颗子弹！收集所有属于同一发射的本地预测子弹并删除
-            const spawnTime = localBullet.spawnTimeMs;
-            const localPellets: LocalBullet[] = [];
-            
-            for (const [id, bullet] of this.bullets) {
-              if (bullet.isLocalPrediction && 
-                  bullet.ownerId === this.localPlayerId &&
-                  Math.abs(bullet.spawnTimeMs - spawnTime) < 10) { // 同一时间生成（10ms容差）
-                localPellets.push(bullet);
-              }
-            }
-            
-            // 删除所有匹配的本地预测子弹
-            for (const pellet of localPellets) {
-              this.bullets.delete(pellet.id);
-              if (pellet.localShotId !== undefined) {
-                this.localPredictions.delete(pellet.localShotId);
-              }
-            }
-            
-            // 标记这个发射已处理
+            this.bullets.delete(tempId);
+            this.localPredictions.delete(b.clientShotId);
             matchedShots.add(b.clientShotId);
-            
-            // 创建确认后的第一颗子弹（保留本地位置，不跳变）
             this.bullets.set(b.id, {
               id: b.id,
               ownerId: b.ownerId,
-              x: localBullet.x, // 保留本地位置
+              x: localBullet.x,
               y: localBullet.y,
-              vx: b.vx,
-              vy: b.vy,
+              vx: localBullet.vx,
+              vy: localBullet.vy,
               spawnTimeMs: localBullet.spawnTimeMs,
               isLocalPrediction: false,
-              bulletLifeMs: localBullet.bulletLifeMs, // 保留本地预测的TTL
+              bulletLifeMs: b.bulletLifeMs ?? localBullet.bulletLifeMs,
+              weaponTypeId: b.weaponTypeId ?? localBullet.weaponTypeId,
+              keepClientTrajectory: true,
             });
             continue;
           }
@@ -273,11 +361,57 @@ export class BulletTrackManager {
     
     // 第二遍：处理所有服务端子弹（包括多弹丸的其他子弹）
     for (const b of snapshot.bullets) {
-      // 如果这个子弹已被本地销毁或已处理，跳过
-      if (this.locallyDestroyedIds.has(b.id) || this.bullets.has(b.id)) {
+      // 如果这个子弹已被本地销毁，跳过
+      if (this.locallyDestroyedIds.has(b.id)) {
+        continue;
+      }
+
+      // 如果子弹已存在（第一遍匹配的或之前的快照创建的）
+      if (this.bullets.has(b.id)) {
+        const existingBullet = this.bullets.get(b.id)!;
+
+        // 手雷特殊处理：本地预测的手雷不同步位置（本地模拟更流畅）
+        if (existingBullet.isGrenade && existingBullet.isLocalPrediction) {
+          // 本地预测手雷：只确认存在，不更新位置（避免卡顿）
+          console.log('[BulletTracks] 本地手雷服务端确认，保持本地模拟:', b.id);
+          continue;
+        }
+
+        if (existingBullet.keepClientTrajectory) {
+          // 该子弹已经由客户端模拟轨迹，不从服务端跳变
+          continue;
+        }
+
+        // 其他玩家的手雷或普通子弹：同步位置
+
+        // 普通子弹：同步位置和速度
+        const prevX = existingBullet.x;
+        const prevY = existingBullet.y;
+        const correctionDelta = Math.hypot(prevX - b.x, prevY - b.y);
+        if (correctionDelta > 4) {
+          console.log(`[BulletTracks] correction(${b.id}) owner=${b.ownerId} delta=${correctionDelta.toFixed(1)} prev=(${prevX.toFixed(1)},${prevY.toFixed(1)}) -> server=(${b.x.toFixed(1)},${b.y.toFixed(1)})`);
+        }
+        existingBullet.x = b.x;
+        existingBullet.y = b.y;
+        existingBullet.vx = b.vx;
+        existingBullet.vy = b.vy;
         continue;
       }
       
+      // 检查是否是手雷且是本地玩家投掷的
+      const isGrenade = b.weaponTypeId === 'frag_grenade' || b.weaponTypeId === 'w_grenade_launcher';
+      if (isGrenade && b.ownerId === this.localPlayerId) {
+        // 这是本地玩家投掷的手雷，检查是否已有本地预测版本
+        const hasLocalGrenade = Array.from(this.bullets.values()).some(
+          bullet => bullet.isGrenade && bullet.isLocalPrediction && bullet.ownerId === this.localPlayerId
+        );
+        if (hasLocalGrenade) {
+          // 已有本地预测版本，忽略服务端的（避免重复）
+          console.log('[BulletTracks] 忽略服务端手雷（已有本地预测）:', b.id);
+          continue;
+        }
+      }
+
       // 检查是否是新的服务端子弹
       // 从玩家武器获取bulletLifeMs
       let bulletLifeMs = DEFAULT_BULLET_TTL_MS;
@@ -306,7 +440,38 @@ export class BulletTrackManager {
           spawnTimeMs = nowMs - travelTimeMs;
         }
       }
-      
+
+      // 优先使用服务端传来的 bulletLifeMs，如果没有则使用从武器定义获取的值
+      const finalBulletLifeMs = b.bulletLifeMs ?? bulletLifeMs;
+
+      const localMatch = this.matchPendingLocalPrediction(b.ownerId, spawnTimeMs);
+      if (localMatch) {
+        const matchDelta = Math.hypot(localMatch.x - b.x, localMatch.y - b.y);
+        console.log(`[BulletTracks] matching server ${b.id} to local ${localMatch.id} delta=${matchDelta.toFixed(1)} owner=${b.ownerId}`);
+        this.bullets.delete(localMatch.id);
+        if (localMatch.localShotId !== undefined) {
+          this.localPredictions.delete(localMatch.localShotId);
+        }
+        this.bullets.set(b.id, {
+          id: b.id,
+          ownerId: b.ownerId,
+          x: localMatch.x,
+          y: localMatch.y,
+          vx: localMatch.vx,
+          vy: localMatch.vy,
+          spawnTimeMs: localMatch.spawnTimeMs,
+          isLocalPrediction: false,
+          bulletLifeMs: finalBulletLifeMs,
+          weaponTypeId: b.weaponTypeId ?? localMatch.weaponTypeId,
+          keepClientTrajectory: true,
+          spawnX: localMatch.spawnX,
+          spawnY: localMatch.spawnY,
+          localHitReported: localMatch.localHitReported ?? false,
+        });
+        continue;
+      }
+
+      // 创建新子弹（前面已经检查过是否存在，这里肯定是新子弹）
       this.bullets.set(b.id, {
         id: b.id,
         ownerId: b.ownerId,
@@ -316,8 +481,24 @@ export class BulletTrackManager {
         vy: b.vy,
         spawnTimeMs: spawnTimeMs,
         isLocalPrediction: false,
-        bulletLifeMs,
+        bulletLifeMs: finalBulletLifeMs,
+        weaponTypeId: b.weaponTypeId, // 保存武器类型ID
+        keepClientTrajectory: b.ownerId === this.localPlayerId,
+        spawnX: b.x,
+        spawnY: b.y,
+        localHitReported: false,
       });
+
+      // 日志：记录添加的手雷子弹
+      if (b.weaponTypeId === 'frag_grenade' || b.weaponTypeId === 'w_grenade_launcher') {
+        console.log('[BulletTracks] 添加手雷到bullets:', {
+          id: b.id,
+          weaponTypeId: b.weaponTypeId,
+          spawnTimeMs,
+          bulletLifeMs,
+          age: nowMs - spawnTimeMs
+        });
+      }
     }
 
     // 清理服务端已销毁的子弹（非本地预测的，且不在本地销毁列表中）
@@ -335,14 +516,52 @@ export class BulletTrackManager {
     const nowMs = Date.now();
     const toRemove: Array<{ id: string; reason: 'ttl' | 'boundary' | 'obstacle' | 'player' }> = [];
 
+    // 日志：update 开始时检查手雷
+    const grenadesBeforeUpdate = Array.from(this.bullets.values()).filter(b =>
+      b.weaponTypeId === 'frag_grenade' || b.weaponTypeId === 'w_grenade_launcher'
+    );
+    if (grenadesBeforeUpdate.length > 0) {
+      console.log('[BulletTracks] update开始，当前手雷数量:', grenadesBeforeUpdate.length, grenadesBeforeUpdate.map(b => ({
+        id: b.id,
+        age: nowMs - b.spawnTimeMs,
+        bulletLifeMs: b.bulletLifeMs
+      })));
+    }
+
     for (const [id, bullet] of this.bullets) {
-      // 更新位置
-      bullet.x += bullet.vx * dtSec;
-      bullet.y += bullet.vy * dtSec;
+      // 手雷特殊物理模拟
+      if (bullet.isGrenade && bullet.targetX !== undefined && bullet.targetY !== undefined) {
+        const dx = bullet.targetX - bullet.x;
+        const dy = bullet.targetY - bullet.y;
+        const distToTarget = Math.sqrt(dx * dx + dy * dy);
+        const speed = Math.sqrt(bullet.vx * bullet.vx + bullet.vy * bullet.vy);
+        const moveDistance = speed * dtSec;
+
+        // 如果接近目标，停在目标位置
+        if (distToTarget <= moveDistance || speed === 0) {
+          bullet.x = bullet.targetX;
+          bullet.y = bullet.targetY;
+          bullet.vx = 0;
+          bullet.vy = 0;
+        } else {
+          // 继续飞行
+          bullet.x += bullet.vx * dtSec;
+          bullet.y += bullet.vy * dtSec;
+        }
+      } else {
+        // 普通子弹：匀速移动
+        bullet.x += bullet.vx * dtSec;
+        bullet.y += bullet.vy * dtSec;
+      }
 
       // 检查 TTL（使用武器特定的bulletLifeMs）
       if (nowMs - bullet.spawnTimeMs > bullet.bulletLifeMs) {
         toRemove.push({ id, reason: 'ttl' });
+        continue;
+      }
+
+      // 手雷不检测碰撞（穿过墙体和玩家，只在 TTL 到期时移除）
+      if (bullet.isGrenade) {
         continue;
       }
 
@@ -368,6 +587,7 @@ export class BulletTrackManager {
 
       // 检查玩家碰撞（不检测自己发射的子弹打自己）
       let hitPlayer = false;
+      let hitTarget: PLAYER_STATE | null = null;
       for (const player of this.players) {
         if (player.id === bullet.ownerId) continue; // 不打自己
         if (player.status !== 'ALIVE') continue; // 只打活人
@@ -375,10 +595,14 @@ export class BulletTrackManager {
         // 玩家碰撞半径约 16px（方块大小的一半）
         if (pointVsCircle(bullet.x, bullet.y, player.x, player.y, 16)) {
           hitPlayer = true;
+          hitTarget = player;
           break;
         }
       }
       if (hitPlayer) {
+        if (hitTarget) {
+          this.emitLocalHit(bullet, hitTarget);
+        }
         toRemove.push({ id, reason: 'player' });
         continue;
       }
@@ -388,6 +612,19 @@ export class BulletTrackManager {
     for (const { id, reason } of toRemove) {
       const bullet = this.bullets.get(id);
       if (bullet) {
+        // 日志：记录手雷被移除的原因
+        if (bullet.weaponTypeId === 'frag_grenade' || bullet.weaponTypeId === 'w_grenade_launcher') {
+          console.log('[BulletTracks] 手雷被移除:', {
+            id,
+            reason,
+            weaponTypeId: bullet.weaponTypeId,
+            age: nowMs - bullet.spawnTimeMs,
+            bulletLifeMs: bullet.bulletLifeMs,
+            x: bullet.x.toFixed(1),
+            y: bullet.y.toFixed(1)
+          });
+        }
+
         // 添加命中特效（只对碰撞类型添加，TTL/边界不需要）
         if (reason === 'obstacle' || reason === 'player') {
           this.hitEffects.push({
@@ -397,13 +634,13 @@ export class BulletTrackManager {
             type: reason,
           });
         }
-        
+
         // 记录本地销毁的子弹 ID（防止服务端"回放"）
         if (!bullet.isLocalPrediction) {
           this.locallyDestroyedIds.add(id);
           this.destroyedCleanupTime.set(id, nowMs);
         }
-        
+
         if (bullet.localShotId !== undefined) {
           this.localPredictions.delete(bullet.localShotId);
         }
@@ -424,7 +661,14 @@ export class BulletTrackManager {
         y: bullet.y,
         vx: bullet.vx,
         vy: bullet.vy,
+        weaponTypeId: bullet.weaponTypeId, // 传递武器类型ID给渲染器
       });
+    }
+
+    // 日志：记录渲染列表中的手雷
+    const grenadeCount = this.renderList.filter(b => b.weaponTypeId === 'frag_grenade' || b.weaponTypeId === 'w_grenade_launcher').length;
+    if (grenadeCount > 0) {
+      console.log('[BulletTracks] 渲染列表包含手雷:', grenadeCount, '总子弹数:', this.renderList.length);
     }
     
     // 调试日志：每10帧打印一次子弹数量
@@ -465,5 +709,29 @@ export class BulletTrackManager {
     this.destroyedCleanupTime.clear();
     this.hitEffects = [];
     this.tempIdCounter = 0;
+  }
+
+  private emitLocalHit(bullet: LocalBullet, target: PLAYER_STATE): void {
+    if (bullet.ownerId !== this.localPlayerId) return;
+    if (bullet.localHitReported) return;
+    const spawnX = bullet.spawnX ?? bullet.x;
+    const spawnY = bullet.spawnY ?? bullet.y;
+    const hitInfo: LocalHitInfo = {
+      bulletId: bullet.id,
+      ownerId: bullet.ownerId,
+      targetId: target.id,
+      targetX: target.x,
+      targetY: target.y,
+      hitX: bullet.x,
+      hitY: bullet.y,
+      spawnX,
+      spawnY,
+      clientShotId: bullet.localShotId,
+      timestamp: Date.now(),
+    };
+    bullet.localHitReported = true;
+    for (const cb of this.localHitCallbacks) {
+      cb(hitInfo);
+    }
   }
 }

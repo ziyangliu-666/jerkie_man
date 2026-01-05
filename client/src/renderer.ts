@@ -402,12 +402,57 @@ export class Renderer {
     // 修复: 不 round，允许 subpixel 绘制（子弹是小圆点，用 subpixel 更丝滑）
     const screenX = bullet.x - this.camX;
     const screenY = bullet.y - this.camY;
-    
-    // 绘制小圆点
-    this.ctx.fillStyle = '#ffff00'; // 黄色
-    this.ctx.beginPath();
-    this.ctx.arc(screenX, screenY, 3, 0, Math.PI * 2);
-    this.ctx.fill();
+
+    // 检查是否是手雷/榴弹（包括榴弹炮的子弹和投掷手雷）
+    const isGrenade = bullet.weaponTypeId === 'w_grenade_launcher' || bullet.weaponTypeId === 'frag_grenade';
+
+    // 日志：记录手雷子弹渲染
+    if (isGrenade) {
+      console.log('[Renderer] 绘制手雷:', {
+        id: bullet.id,
+        weaponTypeId: bullet.weaponTypeId,
+        x: bullet.x.toFixed(1),
+        y: bullet.y.toFixed(1),
+        screenX: screenX.toFixed(1),
+        screenY: screenY.toFixed(1)
+      });
+    }
+
+    if (isGrenade) {
+      // 手雷：更大、更明显，使用橙红色渐变
+      const grenadeRadius = 8; // 比普通子弹大很多
+
+      // 绘制外圈（深橙色）
+      this.ctx.fillStyle = '#ff4500';
+      this.ctx.beginPath();
+      this.ctx.arc(screenX, screenY, grenadeRadius, 0, Math.PI * 2);
+      this.ctx.fill();
+
+      // 绘制内圈（亮橙色）
+      this.ctx.fillStyle = '#ff8c00';
+      this.ctx.beginPath();
+      this.ctx.arc(screenX, screenY, grenadeRadius * 0.6, 0, Math.PI * 2);
+      this.ctx.fill();
+
+      // 绘制中心高光（黄色）
+      this.ctx.fillStyle = '#ffff00';
+      this.ctx.beginPath();
+      this.ctx.arc(screenX, screenY, grenadeRadius * 0.3, 0, Math.PI * 2);
+      this.ctx.fill();
+
+      // 绘制边框（黑色，增加辨识度）
+      this.ctx.strokeStyle = '#000000';
+      this.ctx.lineWidth = 2;
+      this.ctx.beginPath();
+      this.ctx.arc(screenX, screenY, grenadeRadius, 0, Math.PI * 2);
+      this.ctx.stroke();
+    } else {
+      // 普通子弹：小黄色圆点
+      this.ctx.fillStyle = '#ffff00'; // 黄色
+      this.ctx.beginPath();
+      this.ctx.arc(screenX, screenY, 3, 0, Math.PI * 2);
+      this.ctx.fill();
+    }
   }
 
   // 命中特效（简易版：圆形闪光，逐渐消失）

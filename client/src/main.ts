@@ -5,6 +5,7 @@ import { HUD } from './hud.js';
 import { DebugLog } from './debugLog.js'; // 修复: 添加 debug log 系统
 import { BulletTrackManager } from './bulletTracks.js'; // 子弹轨迹管理器（dead-reckoning + 本地预测）
 import { UIOverlay } from './uiOverlay.js'; // 新增: 屏幕 HUD 层
+import { ThrowingAim } from './throwingAim.js'; // 新增: 投掷瞄准系统
 import type {
   S2C_SNAPSHOT,
   PLAYER_STATE,
@@ -116,6 +117,13 @@ const renderer = new Renderer(worldCanvas);
 
 // 初始化 UI 覆盖层（屏幕 HUD：准星、受伤红边等）
 const uiOverlay = new UIOverlay(uiCanvas);
+
+// 初始化投掷瞄准系统
+const throwingAim = new ThrowingAim(uiCanvas);
+
+// 新增: 投掷瞄准状态
+let isThrowingMode = false;
+let throwingItemType: string | null = null;
 
 // 初始化子弹轨迹管理器（dead-reckoning，解决子弹"忽快忽慢"）
 const bulletTracks = new BulletTrackManager();
@@ -305,6 +313,10 @@ let healthHud: HTMLElement | null = null;
 let healthHudValue: HTMLElement | null = null;
 let healthHudFill: HTMLElement | null = null;
 
+// 新增: 快捷栏 HUD 元素
+let hotbarHud: HTMLElement | null = null;
+let hotbarSlots: HTMLElement[] = [];
+
 // 获取 Hideout UI DOM 元素的辅助函数
 function getHideoutElements(): void {
   if (!hideoutUI) hideoutUI = document.getElementById('hideoutUI');
@@ -342,6 +354,15 @@ function getRaidElements(): void {
   if (!raidBagList) raidBagList = document.getElementById('raidBagList');
   if (!raidArmorName) raidArmorName = document.getElementById('raidArmorName');
   if (!raidArmorMeta) raidArmorMeta = document.getElementById('raidArmorMeta');
+  
+  // 获取快捷栏元素
+  if (!hotbarHud) hotbarHud = document.getElementById('hotbarHud');
+  if (hotbarSlots.length === 0) {
+    for (let i = 1; i <= 5; i++) {
+      const slot = document.getElementById(`hotbarSlot${i}`);
+      if (slot) hotbarSlots.push(slot);
+    }
+  }
 }
 
 function getWeaponHudElements(): void {
@@ -1027,6 +1048,58 @@ function updateEquipmentSlots(): void {
   }
 }
 
+// 新增: 更新快捷栏 HUD
+function updateHotbarHud(localPlayer: PLAYER_STATE | null): void {
+  getRaidElements();
+  
+  if (!hotbarHud) {
+    console.warn('[updateHotbarHud] hotbarHud element not found');
+    return;
+  }
+  
+  if (currentPhase !== 'RAID' || !localPlayer || localPlayer.status !== 'ALIVE') {
+    hotbarHud.style.display = 'none';
+    return;
+  }
+  
+  hotbarHud.style.display = 'flex';
+  
+  // 获取可使用的物品（医疗包和手雷）
+  const usableItems = localPlayer.inventory?.items?.filter(item => {
+    return item.typeId === 'medkit' || item.typeId === 'frag_grenade';
+  }) || [];
+  
+  // 更新每个槽位
+  for (let i = 0; i < 5; i++) {
+    const slot = hotbarSlots[i];
+    if (!slot) continue;
+    
+    const item = usableItems[i];
+    const iconEl = slot.querySelector('.hotbar-slot-icon') as HTMLElement;
+    const countEl = slot.querySelector('.hotbar-slot-count') as HTMLElement;
+    
+    if (item) {
+      // 有物品
+      slot.className = 'hotbar-slot has-item';
+      
+      if (item.typeId === 'medkit') {
+        slot.classList.add('medkit');
+        iconEl.textContent = '医疗';
+      } else if (item.typeId === 'frag_grenade') {
+        slot.classList.add('grenade');
+        iconEl.textContent = '手雷';
+      }
+      
+      countEl.textContent = `x${item.qty}`;
+    } else {
+      // 空槽位
+      slot.className = 'hotbar-slot empty';
+      iconEl.textContent = '-';
+      countEl.textContent = '';
+    }
+  }
+}
+
 // 新增: 更新局内装备 HUD
 function updateRaidEquipmentUI(localPlayer: PLAYER_STATE | null): void {
   getRaidElements();
@@ -1383,6 +1456,11 @@ function updateItemLists(): void {
 
 // 新增: 检查物品类型（武器/背包/防具）
 function getItemSlot(typeId: string): 'weapon' | 'bag' | 'armor' | null {
+  // 排除手雷等消耗品，它们不能装备
+  if (typeId === 'frag_grenade' || typeId === 'medkit') {
+    return null;
+  }
+  
   try {
     getWeaponDef(typeId);
     return 'weapon';
@@ -2242,6 +2320,23 @@ worldCanvas.addEventListener('contextmenu', (e) => {
   }
 });
 
+bulletTracks.onLocalHit(info => {
+  network.sendLocalBulletHit({
+    bulletId: info.bulletId,
+    clientShotId: info.clientShotId,
+    targetId: info.targetId,
+    targetX: info.targetX,
+    targetY: info.targetY,
+    hitX: info.hitX,
+    hitY: info.hitY,
+    spawnX: info.spawnX,
+    spawnY: info.spawnY,
+    timestamp: info.timestamp,
+  });
+  console.log(`[LOCAL_BULLET_HIT] owner=${info.ownerId} bullet=${info.bulletId} target=${info.targetId} spawn=${info.spawnX.toFixed(1)},${info.spawnY.toFixed(1)} hit=${info.hitX.toFixed(1)},${info.hitY.toFixed(1)}`);
+  hud.addEvent(`[LOCAL HIT] bullet=${info.bulletId} target=${info.targetId} spawn=(${info.spawnX.toFixed(1)},${info.spawnY.toFixed(1)}) hit=(${info.hitX.toFixed(1)},${info.hitY.toFixed(1)})`);
+});
+
 // 修复: 输入发送已整合到 clientTick 中，不再需要单独的节流逻辑
 let lastSentKeys: { up: boolean; down: boolean; left: boolean; right: boolean } | null = null;
 let lastSentAim = NaN;
@@ -2340,6 +2435,12 @@ function renderLoop(): void {
         // 使用 BulletTrackManager 的 dead-reckoning + 本地预测渲染
         // 本地预测子弹会通过 shotId 自动对齐到服务端子弹（无接棒割裂）
         const bulletsToRender = bulletTracks.getBulletsForRender();
+
+        // 日志：记录渲染的手雷
+        const grenadesInRender = bulletsToRender.filter(b => b.weaponTypeId === 'frag_grenade' || b.weaponTypeId === 'w_grenade_launcher');
+        if (grenadesInRender.length > 0) {
+          console.log('[Main] 准备渲染手雷:', grenadesInRender.length, grenadesInRender);
+        }
         const nowPerf2 = performance.now();
         const meleeSwingsToRender = meleeSwings
           .map((swing) => ({
@@ -2418,6 +2519,15 @@ function renderLoop(): void {
       
       // 绘制 UI 覆盖层（准星、受伤红边、撤离进度等）
       uiOverlay.draw();
+      
+      // 新增: 更新和渲染投掷瞄准
+      if (currentPhase === 'RAID' && localPlayerId) {
+        const localPlayer = renderLocalPlayer ?? predictedLocalPlayer ?? state.players.find((p) => p.id === localPlayerId);
+        if (localPlayer && isThrowingMode) {
+          // 在投掷模式下渲染瞄准界面
+          throwingAim.render((x, y) => renderer.worldToScreen(x, y));
+        }
+      }
 
   // 修复: 客户端 tick 对齐（严格 20Hz，与 server 同步）
   const now = Date.now();
@@ -2448,7 +2558,7 @@ function renderLoop(): void {
         }
         return inputManager.getAimAngle(worldCanvas);
       })();
-      const rawShoot = canControl ? inputManager.getShoot() : false;
+      const rawShoot = canControl && !isThrowingMode ? inputManager.getShoot() : false; // 投掷模式下禁用开火
       const weaponDef = (() => {
         if (localPlayer?.weaponRuntime?.weaponTypeId) {
           try {
@@ -2515,6 +2625,82 @@ function renderLoop(): void {
         dbg.push('INTERACT_EXPIRE', { was: interactUntil });
         interactUntil = 0;
       }
+      
+      // 新增: 处理快捷栏使用物品（1-5键）
+      if (canControl && connState.connected) {
+        for (let slot = 1; slot <= 5; slot++) {
+          if (inputManager.consumeUseItem(slot)) {
+            // 检查是否是手雷
+            const localPlayer = predictedLocalPlayer ?? state.players.find((p) => p.id === localPlayerId) ?? null;
+            if (localPlayer) {
+              const usableItems = localPlayer.inventory?.items?.filter(item => {
+                return item.typeId === 'medkit' || item.typeId === 'frag_grenade';
+              }) || [];
+              
+              const item = usableItems[slot - 1];
+              if (item && item.typeId === 'frag_grenade') {
+                // 进入投掷瞄准模式
+                isThrowingMode = true;
+                throwingItemType = 'frag_grenade';
+                throwingAim.startAiming(); // 不再传入玩家位置，由更新时自动跟随
+                dbg.push('THROWING_MODE_START', { slot, itemType: item.typeId });
+              } else {
+                // 其他物品直接使用
+                const sent = network.sendUseItem(slot);
+                dbg.push('USE_ITEM_SENT', { slot, sent });
+              }
+            }
+          }
+        }
+      }
+      
+      // 新增: 处理投掷模式
+      if (isThrowingMode && canControl) {
+        const localPlayer = predictedLocalPlayer ?? state.players.find((p) => p.id === localPlayerId) ?? null;
+        if (localPlayer) {
+          // 更新瞄准目标（自动跟随玩家位置）
+          const mouseWorldPos = inputManager.getMouseWorldPos((x, y) => renderer.screenToWorld(x, y));
+          throwingAim.updateTarget(mouseWorldPos.x, mouseWorldPos.y, localPlayer.x, localPlayer.y);
+          
+          // 检查左键投掷
+          if (inputManager.consumeShoot()) { // 修复：消费左键点击，防止触发开火
+            const throwingState = throwingAim.getState();
+            // 发送投掷消息到服务器
+            const success = network.sendThrow(throwingState.targetX, throwingState.targetY, throwingItemType!);
+            if (success) {
+              dbg.push('THROWING_SENT', { x: throwingState.targetX, y: throwingState.targetY, itemType: throwingItemType });
+
+              // 立即创建本地预测手雷（流畅渲染，不等服务器）
+              bulletTracks.spawnLocalGrenade(
+                localPlayer.x,
+                localPlayer.y,
+                throwingState.targetX,
+                throwingState.targetY,
+                'frag_grenade'
+              );
+              console.log('本地预测手雷已创建:', throwingState.targetX, throwingState.targetY);
+            } else {
+              dbg.push('THROWING_SEND_FAILED', {});
+            }
+            console.log('Throwing grenade to:', throwingState.targetX, throwingState.targetY);
+            
+            // 退出投掷模式
+            isThrowingMode = false;
+            throwingItemType = null;
+            throwingAim.stopAiming();
+            dbg.push('THROWING_CONFIRMED', { x: throwingState.targetX, y: throwingState.targetY });
+          }
+          
+          // 检查右键取消
+          if (inputManager.getRightClick()) {
+            isThrowingMode = false;
+            throwingItemType = null;
+            throwingAim.stopAiming();
+            dbg.push('THROWING_CANCELLED', {});
+          }
+        }
+      }
+      
       if (connState.connected && canControl) {
         // 修复: 持续输入流式发送逻辑
         // 检查是否有持续态输入（移动/射击/撤离）
@@ -2532,6 +2718,8 @@ function renderLoop(): void {
         
         // 只要在"持续态"（移动/射击/撤离），每 tick 都发；idle 时才用 change-based
         // P0-1 修复: interact 不再通过 input 发送（拾取走独立的 C2S_PICKUP_* 消息）
+        let shotOriginX: number | undefined;
+        let shotOriginY: number | undefined;
         const shouldSend = mustStream || keysChanged || aimChanged || shootChanged || extractHeldChanged;
         
         if (shouldSend) {
@@ -2569,12 +2757,14 @@ function renderLoop(): void {
           
               if (canShoot) {
                 lastLocalFireMs = nowPerf2;
-          
+
                 localShotIdCounter++;
                 shotIdToSend = localShotIdCounter;
-          
+
                 const localP = renderLocalPlayer ?? predictedLocalPlayer ?? localPlayer;
                 if (localP && localP.weaponRuntime) {
+                  shotOriginX = localP.x;
+                  shotOriginY = localP.y;
                   bulletTracks.spawnLocalPrediction(
                     shotIdToSend,
                     localP.x,
@@ -2584,13 +2774,17 @@ function renderLoop(): void {
                     localP.weaponRuntime.weaponTypeId
                   );
                 } else {
+                  shotOriginX = undefined;
+                  shotOriginY = undefined;
                 }
               } else {
                 uiOverlay.showText('NO AMMO'); // dry fire feedback
               }
             }
           }
-const sent = network.sendInput(nextSeq, tickKeys, tickAim, tickShoot, tickReload, false, false, tickExtractHeld, shotIdToSend);
+          const sent = network.sendInput(nextSeq, tickKeys, tickAim, tickShoot, tickReload, false, false, tickExtractHeld, shotIdToSend, shotOriginX, shotOriginY);
+          shotOriginX = undefined;
+          shotOriginY = undefined;
           
           if (sent) {
             inputSeq = nextSeq;
@@ -2751,6 +2945,7 @@ const sent = network.sendInput(nextSeq, tickKeys, tickAim, tickShoot, tickReload
 
     raidLocalPlayer = stateLocalPlayer ?? hudLocalPlayer ?? null;
     updateRaidEquipmentUI(raidLocalPlayer);
+    updateHotbarHud(raidLocalPlayer); // 新增: 更新快捷栏
   }
 
   rafId = requestAnimationFrame(renderLoop);

@@ -24,6 +24,8 @@ export class Player {
   public killedBy: string | undefined; // 新增: 击杀者玩家ID
   public killedByWeaponName: string | undefined; // 新增: 击杀使用的武器名称
   public positionHistory: PositionHistory; // 延迟补偿: 位置历史记录
+  public lastShotOriginX?: number;
+  public lastShotOriginY?: number;
 
   // 修复: 移动速度已移至 shared/sim.ts，这里不再需要（保留注释用于文档）
   // SPEED = 200 (在 shared/sim.ts 中定义)
@@ -157,10 +159,20 @@ export class Player {
     
     item.qty -= qty;
     if (item.qty <= 0) {
+      // 确保完全移除数量为0或负数的物品
       const index = this.inventory.items.indexOf(item);
-      this.inventory.items.splice(index, 1);
+      if (index !== -1) {
+        this.inventory.items.splice(index, 1);
+      }
     }
     return true;
+  }
+
+  /**
+   * 清理背包中数量为0或负数的物品
+   */
+  cleanupInventory(): void {
+    this.inventory.items = this.inventory.items.filter(item => item.qty > 0);
   }
 
   /**

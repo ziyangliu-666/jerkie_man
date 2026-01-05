@@ -134,6 +134,15 @@ export const ITEM_CATALOG: Record<string, ItemType> = {
     stackMax: 1,
   },
   
+  // 投掷物消耗品
+  frag_grenade: {
+    id: 'frag_grenade',
+    name: '破片手雷',
+    rarity: 'COMMON',
+    value: 150,
+    stackMax: 5, // 可以堆叠5个
+  },
+  
   // 背包 (4个)
   bag_sling: {
     id: 'bag_sling',

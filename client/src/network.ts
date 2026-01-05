@@ -6,6 +6,8 @@ import {
   C2S_PICKUP_LOOT_BAG_SCHEMA, // 保留兼容（deprecated）
   C2S_SELL_FROM_STASH_SCHEMA, // 新增: 从仓库卖出
   C2S_INTERACT_SCHEMA, // 新增: 通用交互
+  C2S_USE_ITEM_SCHEMA, // 新增: 使用物品
+  C2S_THROW_SCHEMA, // 新增: 投掷物品
   C2S_ADMIN_SCHEMA, // 管理员命令
   C2S_SET_NAME_SCHEMA, // 新增: 设置昵称
   C2S_MOVE_STASH_TO_PREP_SCHEMA, // 新增: 从仓库移动到整备区
@@ -15,6 +17,7 @@ import {
   C2S_EQUIP_SCHEMA, // 新增: 装备/卸下装备
   C2S_DROP_ITEM_SCHEMA, // 新增: 局内丢弃物品
   C2S_RAID_EQUIP_SCHEMA, // 新增: 局内装备切换
+  C2S_LOCAL_BULLET_HIT_SCHEMA, // 新增: 本地命中上报
   S2C_MESSAGE_SCHEMA,
   type S2C_MESSAGE,
   type S2C_SNAPSHOT,
@@ -400,6 +403,44 @@ export class Network {
     }
   }
 
+  // 新增: 发送使用物品（快捷栏1-5键）
+  sendUseItem(slot: number): boolean {
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+      return false;
+    }
+    try {
+      const message = C2S_USE_ITEM_SCHEMA.parse({
+        type: 'C2S_USE_ITEM',
+        slot,
+      });
+      this.ws.send(JSON.stringify(message));
+      return true;
+    } catch (error) {
+      console.error('Failed to send use item:', error);
+      return false;
+    }
+  }
+
+  // 新增: 发送投掷物品
+  sendThrow(targetX: number, targetY: number, itemType: string): boolean {
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+      return false;
+    }
+    try {
+      const message = C2S_THROW_SCHEMA.parse({
+        type: 'C2S_THROW',
+        targetX,
+        targetY,
+        itemType,
+      });
+      this.ws.send(JSON.stringify(message));
+      return true;
+    } catch (error) {
+      console.error('Failed to send throw:', error);
+      return false;
+    }
+  }
+
   // 新增: 发送管理员命令
   sendAdminCommand(command: 'show_status' | 'reset_world'): boolean {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
@@ -577,7 +618,9 @@ export class Network {
     interact: boolean = false,
     extract: boolean = false,
     extractHeld: boolean = false, // 游戏化增强: 撤离持续状态
-    shotId?: number // 本次发射的唯一ID（用于客户端预测子弹对齐）
+    shotId?: number, // 本次发射的唯一ID（用于客户端预测子弹对齐）
+    shootOriginX?: number,
+    shootOriginY?: number
   ): boolean {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
       return false; // P0-1: 发送失败，返回 false
@@ -595,10 +638,42 @@ export class Network {
       extract, // Day3: 传递撤离脉冲事件（已废弃，保留兼容）
       extractHeld, // 游戏化增强: 传递撤离持续状态
       shotId, // 本次发射的唯一ID（用于客户端预测子弹对齐）
+      shootOriginX,
+      shootOriginY,
     });
 
     this.ws.send(JSON.stringify(message));
     return true; // P0-1: 发送成功，返回 true
+  }
+
+  sendLocalBulletHit(data: {
+    bulletId: string;
+    clientShotId?: number;
+    targetId: string;
+    targetX: number;
+    targetY: number;
+    hitX: number;
+    hitY: number;
+    spawnX: number;
+    spawnY: number;
+    timestamp: number;
+  }): boolean {
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+      return false;
+    }
+
+    try {
+      const message = C2S_LOCAL_BULLET_HIT_SCHEMA.parse({
+        type: 'C2S_LOCAL_BULLET_HIT',
+        ...data,
+      });
+      this.ws.send(JSON.stringify(message));
+      console.log('[network] sent LOCAL_BULLET_HIT', data.bulletId);
+      return true;
+    } catch (error) {
+      console.error('Failed to send local bullet hit report:', error);
+      return false;
+    }
   }
 
   getSnapshotBuffer(): SnapshotBuffer {
