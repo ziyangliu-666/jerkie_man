@@ -556,8 +556,10 @@ export class Renderer {
         this.ctx.fillStyle = '#00ff00'; // 绿色
       } else if (itemType.rarity === 'RARE') {
         this.ctx.fillStyle = '#0088ff'; // 蓝色
+      } else if (itemType.rarity === 'EPIC') {
+        this.ctx.fillStyle = '#9d4edd'; // 紫色（史诗）
       } else {
-        this.ctx.fillStyle = '#ff8800'; // 橙色（QUEST）
+        this.ctx.fillStyle = '#00ff00'; // 默认绿色
       }
     } catch {
       this.ctx.fillStyle = '#00ff00'; // 默认绿色

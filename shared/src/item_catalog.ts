@@ -60,30 +60,30 @@ export const ITEM_CATALOG: Record<string, ItemType> = {
     stackMax: 8,
   },
   
-  // QUEST items (3个)
-  keycard_alpha: {
-    id: 'keycard_alpha',
-    name: '门禁卡A',
-    rarity: 'QUEST',
+  // EPIC items (新增材料)
+  rare_metal: {
+    id: 'rare_metal',
+    name: '稀有金属',
+    rarity: 'EPIC',
     value: 100,
-    stackMax: 1,
+    stackMax: 5,
   },
-  keycard_beta: {
-    id: 'keycard_beta',
-    name: '门禁卡B',
-    rarity: 'QUEST',
+  advanced_circuit: {
+    id: 'advanced_circuit',
+    name: '高级电路板',
+    rarity: 'EPIC',
     value: 150,
-    stackMax: 1,
+    stackMax: 3,
   },
-  intel_document: {
-    id: 'intel_document',
-    name: '情报文件',
-    rarity: 'QUEST',
+  combat_stim: {
+    id: 'combat_stim',
+    name: '战斗兴奋剂',
+    rarity: 'EPIC',
     value: 200,
-    stackMax: 1,
+    stackMax: 3,
   },
   
-  // 武器 (5个)
+  // 武器
   w_pistol: {
     id: 'w_pistol',
     name: '手枪',
@@ -129,8 +129,71 @@ export const ITEM_CATALOG: Record<string, ItemType> = {
   w_grenade_launcher: {
     id: 'w_grenade_launcher',
     name: '榴弹炮',
-    rarity: 'RARE',
+    rarity: 'EPIC',
     value: 2200,
+    stackMax: 1,
+  },
+  w_minigun: {
+    id: 'w_minigun',
+    name: '加特林机枪',
+    rarity: 'EPIC',
+    value: 3000,
+    stackMax: 1,
+  },
+  w_anti_material: {
+    id: 'w_anti_material',
+    name: '反器材狙击枪',
+    rarity: 'EPIC',
+    value: 3500,
+    stackMax: 1,
+  },
+  w_double_barrel: {
+    id: 'w_double_barrel',
+    name: '双管霰弹枪',
+    rarity: 'RARE',
+    value: 1500,
+    stackMax: 1,
+  },
+  w_laser_rifle: {
+    id: 'w_laser_rifle',
+    name: '激光步枪',
+    rarity: 'EPIC',
+    value: 2500,
+    stackMax: 1,
+  },
+  w_crossbow: {
+    id: 'w_crossbow',
+    name: '弩',
+    rarity: 'RARE',
+    value: 1400,
+    stackMax: 1,
+  },
+  w_auto_shotgun: {
+    id: 'w_auto_shotgun',
+    name: '全自动霰弹枪',
+    rarity: 'RARE',
+    value: 1800,
+    stackMax: 1,
+  },
+  w_precision_rifle: {
+    id: 'w_precision_rifle',
+    name: '精确射手步枪',
+    rarity: 'EPIC',
+    value: 2000,
+    stackMax: 1,
+  },
+  w_micro_smg: {
+    id: 'w_micro_smg',
+    name: '微型冲锋枪',
+    rarity: 'RARE',
+    value: 1000,
+    stackMax: 1,
+  },
+  w_chainsaw: {
+    id: 'w_chainsaw',
+    name: '链锯',
+    rarity: 'RARE',
+    value: 1200,
     stackMax: 1,
   },
   
@@ -142,8 +205,38 @@ export const ITEM_CATALOG: Record<string, ItemType> = {
     value: 150,
     stackMax: 5, // 可以堆叠5个
   },
+  flash_grenade: {
+    id: 'flash_grenade',
+    name: '闪光弹',
+    rarity: 'RARE',
+    value: 200,
+    stackMax: 3,
+  },
+  smoke_grenade: {
+    id: 'smoke_grenade',
+    name: '烟雾弹',
+    rarity: 'RARE',
+    value: 180,
+    stackMax: 3,
+  },
   
-  // 背包 (4个)
+  // EPIC 消耗品
+  advanced_medkit: {
+    id: 'advanced_medkit',
+    name: '高级急救包',
+    rarity: 'EPIC',
+    value: 500,
+    stackMax: 3,
+  },
+  armor_plate_item: {
+    id: 'armor_plate_item',
+    name: '防弹插板',
+    rarity: 'EPIC',
+    value: 800,
+    stackMax: 2,
+  },
+  
+  // 背包 (5个)
   bag_sling: {
     id: 'bag_sling',
     name: '小挎包',
@@ -172,8 +265,15 @@ export const ITEM_CATALOG: Record<string, ItemType> = {
     value: 1200,
     stackMax: 1,
   },
+  bag_military: {
+    id: 'bag_military',
+    name: '军用背包',
+    rarity: 'EPIC',
+    value: 2000,
+    stackMax: 1,
+  },
   
-  // 防具 (4个)
+  // 防具 (5个)
   armor_light: {
     id: 'armor_light',
     name: '轻甲',
@@ -198,8 +298,15 @@ export const ITEM_CATALOG: Record<string, ItemType> = {
   armor_heavy: {
     id: 'armor_heavy',
     name: '重甲',
-    rarity: 'RARE',
+    rarity: 'EPIC',
     value: 1600,
+    stackMax: 1,
+  },
+  armor_exo: {
+    id: 'armor_exo',
+    name: '外骨骼装甲',
+    rarity: 'EPIC',
+    value: 2500,
     stackMax: 1,
   },
 };

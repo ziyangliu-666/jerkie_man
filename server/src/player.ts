@@ -1,5 +1,5 @@
 import type { PLAYER_STATE, OBSTACLE_STATE, PlayerInventory, ItemInstance, WeaponRuntime } from '@jerkie-man/shared';
-import { simulatePlayerMove, getItemType, PositionHistory } from '@jerkie-man/shared';
+import { simulatePlayerMove, getItemType, getWeaponDef, PositionHistory } from '@jerkie-man/shared';
 
 export class Player {
   public id: string;
@@ -191,7 +191,10 @@ export class Player {
     return `i${Date.now()}_${Math.random().toString(36).substring(2, 11)}`;
   }
 
-  toState(): PLAYER_STATE {
+  toState(currentTick: number): PLAYER_STATE {
+    const weaponRuntime = this.weaponRuntime
+      ? { ...this.weaponRuntime, fireCredit: this.getFireCredit(currentTick) }
+      : undefined;
     return {
       id: this.id,
       x: this.x,
@@ -204,7 +207,7 @@ export class Player {
       extractProgress: this.extractProgress, // 游戏化增强: 包含撤离进度
       inventory: this.inventory, // 新增: 包含背包
       name: this.name, // 新增: 包含玩家昵称
-      weaponRuntime: this.weaponRuntime, // 新增: 包含武器运行时状态
+      weaponRuntime, // 新增: 包含武器运行时状态
       raidEquipment: {
         weaponIid: this.equippedWeaponItem?.iid ?? null,
         bagIid: this.equippedBagItem?.iid ?? null,
@@ -215,5 +218,25 @@ export class Player {
       killedBy: this.killedBy, // 新增: 击杀者名字
       killedByWeaponName: this.killedByWeaponName, // 新增: 击杀使用的武器名称
     };
+  }
+
+  private getFireCredit(currentTick: number): number {
+    const wr = this.weaponRuntime;
+    if (!wr) return 0;
+    if (currentTick < wr.reloadingUntilTick) return 0;
+    if ((wr.burstRemaining ?? 0) > 0) return 0;
+
+    let hasAmmo = wr.ammoInMag > 0;
+    if (!hasAmmo) {
+      try {
+        const weaponDef = getWeaponDef(wr.weaponTypeId);
+        hasAmmo = weaponDef.weaponKind === 'melee';
+      } catch {
+        return 0;
+      }
+    }
+
+    if (!hasAmmo) return 0;
+    return currentTick >= wr.nextFireTick ? 1 : 0;
   }
 }

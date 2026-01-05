@@ -44,6 +44,7 @@ export interface UIOverlayState {
   textHint: {
     alpha: number; // 0~1，文本透明度（逐渐消失）
     text: string; // 提示文本
+    color?: string; // 可选：文本颜色，默认为白色
   };
 }
 
@@ -60,7 +61,7 @@ export class UIOverlay {
     hitMarker: { alpha: 0 },
     extractProgress: { enabled: false, progress: 0 },
     weaponStatus: { enabled: false, weaponName: '', ammoInMag: 0, magSize: 0, reloading: false, reloadProgress: 0 },
-    textHint: { alpha: 0, text: '' },
+    textHint: { alpha: 0, text: '', color: undefined },
   };
 
   constructor(canvas: HTMLCanvasElement) {
@@ -111,9 +112,10 @@ export class UIOverlay {
   /**
    * 显示文本提示（屏幕中央）
    */
-  showText(text: string): void {
+  showText(text: string, color?: string): void {
     this.state.textHint.alpha = 1.0;
     this.state.textHint.text = text;
+    this.state.textHint.color = color;
   }
 
   /**
@@ -132,7 +134,7 @@ export class UIOverlay {
     
     // 文本提示衰减
     if (this.state.textHint.alpha > 0) {
-      this.state.textHint.alpha = Math.max(0, this.state.textHint.alpha - dtSec * 2);
+      this.state.textHint.alpha = Math.max(0, this.state.textHint.alpha - dtSec * 1);
     }
   }
 
@@ -174,7 +176,7 @@ export class UIOverlay {
     
     // 5. 文本提示（屏幕中央）
     if (this.state.textHint.alpha > 0 && this.state.textHint.text) {
-      this.drawTextHint(ctx, cx, cy, this.state.textHint.text, this.state.textHint.alpha);
+      this.drawTextHint(ctx, cx, cy, this.state.textHint.text, this.state.textHint.alpha, this.state.textHint.color);
     }
   }
 
@@ -245,8 +247,10 @@ export class UIOverlay {
   /**
    * 绘制文本提示（屏幕中央）
    */
-  private drawTextHint(ctx: CanvasRenderingContext2D, cx: number, cy: number, text: string, alpha: number): void {
-    ctx.fillStyle = `rgba(255, 255, 255, ${alpha})`;
+  private drawTextHint(ctx: CanvasRenderingContext2D, cx: number, cy: number, text: string, alpha: number, color?: string): void {
+    // 默认白色，如果指定了颜色则使用指定颜色
+    const textColor = color || '255, 255, 255';
+    ctx.fillStyle = `rgba(${textColor}, ${alpha})`;
     ctx.font = 'bold 24px monospace';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';

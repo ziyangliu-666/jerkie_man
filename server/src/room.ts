@@ -1,6 +1,6 @@
 import { Player } from './player.js';
 import { ProfileManager } from './profile.js';
-import type { PLAYER_STATE, BULLET_STATE, ITEM_STATE, C2S_INPUT, MAP_CONFIG, OBSTACLE_STATE, WorldItem, LootBag, ItemInstance, WeaponRuntime, WeaponDef } from '@jerkie-man/shared';
+import type { PLAYER_STATE, BULLET_STATE, ITEM_STATE, C2S_INPUT, MAP_CONFIG, OBSTACLE_STATE, WorldItem, LootBag, ItemInstance, WeaponRuntime, WeaponDef, MapTemplate, SpawnPoint } from '@jerkie-man/shared';
 import { loadMapConfig, loadItemTypes, circleVsAABB, createRng, rectIntersects, segmentIntersectsCircle, getItemType, getAllItemTypes, getItemTypesByRarity, getWeaponDef, getArmorDef, getBagDef, applySpread, msToTicks, getFireSchedule, shouldStartBurst, canFireTick, advanceBurstAfterShot, PLAYER_HIT_RADIUS } from '@jerkie-man/shared';
 import { log } from './logger.js';
 
@@ -22,53 +22,47 @@ type Bullet = BULLET_STATE & {
 export class Room {
   public id: string;
   public players: Map<string, Player>;
-  public bullets: Bullet[]; // Step4: 使用内部类型，包含spawnAt
-  public items: ITEM_STATE[]; // Day1占位（测试数据）
-  public obstacles: OBSTACLE_STATE[]; // Day4-2: 障碍物列表
-  // 新增: 物品系统
-  public worldItems: Map<string, WorldItem>; // 世界物品（wid -> WorldItem）
-  public lootBags: Map<string, LootBag>; // 掉落包（bid -> LootBag）
-  public profileManager: ProfileManager; // 玩家档案管理器
-  // 新增: playerId -> accountId 映射（用于撤离时保存到正确的 Profile）
+  public bullets: Bullet[];
+  public items: ITEM_STATE[];
+  public obstacles: OBSTACLE_STATE[];
+  public worldItems: Map<string, WorldItem>;
+  public lootBags: Map<string, LootBag>;
+  public profileManager: ProfileManager;
   private playerToAccount: Map<string, string> = new Map();
-  // Day4-1: Room 持有世界配置（seed + mapConfig），作为唯一真相来源
   public readonly seed: number;
   public readonly mapConfig: MAP_CONFIG;
+  public readonly mapTemplateId?: string;
   public tick: number;
-  // 修复: 可复现 ID 生成，使用 rng 而不是 Date.now()
-  private itemIdCounter = 0; // items ID 计数器
-  private bulletIdCounter = 0; // bullets ID 计数器
-  private worldItemIdCounter = 0; // worldItems ID 计数器
-  private lootBagIdCounter = 0; // lootBags ID 计数器
-  // 游戏化增强: 事件队列（ring buffer），最多保留 50 条
+  private readonly spawnPoints: SpawnPoint[];
+  private itemIdCounter = 0;
+  private bulletIdCounter = 0;
+  private worldItemIdCounter = 0;
+  private lootBagIdCounter = 0;
   private events: Array<{ tick: number; timestamp: number; message: string }> = [];
   private readonly MAX_EVENTS = 50;
-  private readonly PICKUP_RADIUS = 40; // 拾取半径（像素）
-  // 新增: 战局结果队列（playerId -> result）
+  private readonly PICKUP_RADIUS = 40;
   public raidResults: Map<string, { result: 'EXTRACTED' | 'DIED'; accountId: string; loot?: ItemInstance[]; moneyGained?: number; moneyLost?: number }> = new Map();
-  // 新增: 战斗事件队列（playerId -> 事件列表）
   public combatEvents: Map<string, Array<{ kind: 'DRY_FIRE' | 'HIT' | 'DAMAGE_TAKEN'; direction?: number }>> = new Map();
-  // 新增: 近战挥击事件（广播给所有客户端）
   public meleeSwings: Array<{ playerId: string; x: number; y: number; aimRad: number; range: number; arcRad: number }> = [];
-  // 新增: 爆炸事件（广播给所有客户端）
   public explosions: Array<{ x: number; y: number; radius: number }> = [];
 
-  constructor(id: string, seed?: number) {
+  constructor(id: string, options?: { seed?: number; mapTemplate?: MapTemplate }) {
     this.id = id;
     this.players = new Map();
     this.bullets = [];
-    this.items = []; // 保留兼容
-    this.obstacles = []; // Day4-2: 初始化障碍物列表
-    // 新增: 初始化物品系统
+    this.items = [];
+    this.obstacles = [];
     this.worldItems = new Map();
     this.lootBags = new Map();
     this.profileManager = new ProfileManager();
     this.explosions = [];
-    
-    // P1-1 修复: 支持 seed 注入（优先级：参数 > 环境变量 > 随机）
-    // 用于调试/测试时稳定生成同一场景
-    if (seed !== undefined) {
-      this.seed = seed;
+
+    const mapTemplate = options?.mapTemplate;
+    const seedOverride = options?.seed;
+    if (seedOverride !== undefined) {
+      this.seed = seedOverride;
+    } else if (mapTemplate) {
+      this.seed = mapTemplate.mapConfig.seed;
     } else if (process.env.SEED !== undefined) {
       const envSeed = parseInt(process.env.SEED, 10);
       if (isNaN(envSeed)) {
@@ -76,24 +70,24 @@ export class Room {
       }
       this.seed = envSeed;
     } else {
-      // Day4-1: 随机生成 seed（int，范围 0 到 2^31-1）
       this.seed = Math.floor(Math.random() * 2**31);
     }
-    
-    // P1-1 修复: 使用 this.seed 加载 mapConfig，确保 seed 和 mapConfig.seed 一致
-    this.mapConfig = loadMapConfig(this.seed);
-    
+
+    this.mapConfig = mapTemplate ? { ...mapTemplate.mapConfig, seed: this.seed } : loadMapConfig(this.seed);
+    this.mapTemplateId = mapTemplate?.id;
+    this.spawnPoints = mapTemplate?.spawns ? mapTemplate.spawns.map((s) => ({ ...s })) : [];
+
     this.tick = 0;
-    
-    // Day4-2: 初始化时生成障碍物（用 seed）
-    this.generateObstacles();
-    
-    // P2-1: 停用旧 items 系统（只使用 worldItems）
-    // this.generateItems(30);
-    
-    // 新增: 生成世界物品（使用新的物品系统）
+
+    if (mapTemplate) {
+      this.obstacles = mapTemplate.obstacles.map((obs) => ({ ...obs }));
+    } else {
+      this.generateObstacles();
+    }
+
     this.generateWorldItems(30);
   }
+
 
   findBulletById(id: string): Bullet | undefined {
     return this.bullets.find(b => b.id === id);
@@ -186,7 +180,7 @@ export class Room {
     // 按稀有度权重分组物品
     const commonItems = getItemTypesByRarity('COMMON');
     const rareItems = getItemTypesByRarity('RARE');
-    const questItems = getItemTypesByRarity('QUEST');
+    const epicItems = getItemTypesByRarity('EPIC');
     
     for (let i = 0; i < count; i++) {
       let attempts = 0;
@@ -230,15 +224,15 @@ export class Room {
       }
       
       if (valid) {
-        // 按权重选择物品类型（70% COMMON, 25% RARE, 5% QUEST）
+        // 按权重选择物品类型（60% COMMON, 30% RARE, 10% EPIC）
         const roll = itemsRng();
         let itemType;
-        if (roll < 0.7 && commonItems.length > 0) {
+        if (roll < 0.6 && commonItems.length > 0) {
           itemType = commonItems[Math.floor(itemsRng() * commonItems.length)];
-        } else if (roll < 0.95 && rareItems.length > 0) {
+        } else if (roll < 0.9 && rareItems.length > 0) {
           itemType = rareItems[Math.floor(itemsRng() * rareItems.length)];
-        } else if (questItems.length > 0) {
-          itemType = questItems[Math.floor(itemsRng() * questItems.length)];
+        } else if (epicItems.length > 0) {
+          itemType = epicItems[Math.floor(itemsRng() * epicItems.length)];
         } else {
           itemType = allItemTypes[Math.floor(itemsRng() * allItemTypes.length)];
         }
@@ -483,6 +477,52 @@ export class Room {
     const randomOffset = Math.floor(Math.random() * 1000000);
     const spawnRng = createRng(this.seed + this.tick * 10000 + this.players.size * 1000 + randomOffset);
     
+    if (this.spawnPoints.length > 0) {
+      const ordered = [...this.spawnPoints];
+      for (let i = ordered.length - 1; i > 0; i--) {
+        const j = Math.floor(spawnRng() * (i + 1));
+        [ordered[i], ordered[j]] = [ordered[j], ordered[i]];
+      }
+      for (const spawn of ordered) {
+        const x = spawn.x;
+        const y = spawn.y;
+        if (x < PLAYER_RADIUS || x > this.mapConfig.width - PLAYER_RADIUS ||
+            y < PLAYER_RADIUS || y > this.mapConfig.height - PLAYER_RADIUS) {
+          continue;
+        }
+        if (this.isInExtractZone(x, y)) {
+          continue;
+        }
+        let collided = false;
+        for (const obstacle of this.obstacles) {
+          if (circleVsAABB(x, y, PLAYER_RADIUS, obstacle)) {
+            collided = true;
+            break;
+          }
+        }
+        if (collided) {
+          continue;
+        }
+        let tooCloseToPlayer = false;
+        for (const [, player] of this.players.entries()) {
+          if (player.status !== 'ALIVE') {
+            continue;
+          }
+          const dx = x - player.x;
+          const dy = y - player.y;
+          const dist = Math.sqrt(dx * dx + dy * dy);
+          if (dist < MIN_SPAWN_PLAYER_DISTANCE) {
+            tooCloseToPlayer = true;
+            break;
+          }
+        }
+        if (tooCloseToPlayer) {
+          continue;
+        }
+        return { x, y };
+      }
+    }
+
     for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
       // 随机点，但是离边界至少 PLAYER_RADIUS
       const x = PLAYER_RADIUS + spawnRng() * (this.mapConfig.width - 2 * PLAYER_RADIUS);
@@ -1191,7 +1231,8 @@ export class Room {
     weaponDef: WeaponDef,
     shotId: number | undefined,
     originX?: number,
-    originY?: number
+    originY?: number,
+    spreadSeed?: number
   ): string {
     const pelletCount = weaponDef.pelletCount ?? 1; // 默认1颗子弹
     const spawnX = originX ?? player.x;
@@ -1222,10 +1263,13 @@ export class Room {
     // 霰弹枪：一次发射多颗弹丸
     if (pelletCount > 1) {
       const spreadRad = (weaponDef.spreadDeg * Math.PI) / 180; // 总散布角度（弧度）
-      
+
       for (let i = 0; i < pelletCount; i++) {
         // 为每颗弹丸生成独立的随机数生成器
-        const bulletRng = createRng(this.seed + this.tick + this.bulletIdCounter + i);
+        // 优先使用客户端提供的 spreadSeed（保证散布一致），否则使用服务端生成
+        const bulletRng = spreadSeed !== undefined
+          ? createRng(spreadSeed + i)
+          : createRng(this.seed + this.tick + this.bulletIdCounter + i);
         
         // 在总散布角度内均匀分布弹丸
         // 使用均匀分布：从 -spreadRad/2 到 +spreadRad/2
@@ -1270,7 +1314,10 @@ export class Room {
       }
     } else {
       // 普通武器：单颗子弹
-      const bulletRng = createRng(this.seed + this.tick + this.bulletIdCounter);
+      // 优先使用客户端提供的 spreadSeed（保证散布一致），否则使用服务端生成
+      const bulletRng = spreadSeed !== undefined
+        ? createRng(spreadSeed)
+        : createRng(this.seed + this.tick + this.bulletIdCounter);
       const actualAimRad = applySpread(aimRad, weaponDef.spreadDeg, bulletRng);
       
       // 生成子弹
@@ -1562,7 +1609,7 @@ export class Room {
         const shotOriginY = input.shootOriginY ?? player.y;
         player.lastShotOriginX = shotOriginX;
         player.lastShotOriginY = shotOriginY;
-        const bulletId = this.spawnBullet(playerId, player, input.aim, weaponDef, input.shotId, shotOriginX, shotOriginY);
+        const bulletId = this.spawnBullet(playerId, player, input.aim, weaponDef, input.shotId, shotOriginX, shotOriginY, input.spreadSeed);
         const pelletCount = weaponDef.pelletCount ?? 1;
         
         log('SPAWN_BULLET', {
@@ -2039,13 +2086,15 @@ export class Room {
     // 未来会改为检查 inWorld 字段
     const visiblePlayers = Array.from(this.players.values())
       .filter(p => p.status !== 'EXTRACTED')
-      .map((p) => p.toState());
+      .map((p) => p.toState(this.tick));
     
     const snapshotBullets = this.bullets.map(({ spawnAt, damage, isGrenade, explodeTick, targetX, targetY, ...b }) => ({
       ...b,
       clientShotId: b.clientShotId, // 传递客户端发射ID
       weaponTypeId: b.weaponTypeId, // 传递武器类型ID（用于客户端渲染样式）
       bulletLifeMs: b.bulletLifeMs, // 传递子弹生命周期（用于客户端TTL判断）
+      targetX,
+      targetY,
     }));
 
     // 日志：记录快照中的手雷

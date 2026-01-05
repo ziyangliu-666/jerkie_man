@@ -7,7 +7,7 @@ import type { Rarity } from './types.js';
 export const RARITY_ZH: Record<Rarity, string> = {
   COMMON: '普通',
   RARE: '稀有',
-  QUEST: '任务',
+  EPIC: '史诗',
 };
 
 /**

@@ -346,7 +346,7 @@ export class ProfileManager {
   private getRarityOrder(rarity?: string): number {
     if (rarity === 'COMMON') return 0;
     if (rarity === 'RARE') return 1;
-    if (rarity === 'QUEST') return 2;
+    if (rarity === 'EPIC') return 2;
     return 3;
   }
 

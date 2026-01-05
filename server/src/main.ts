@@ -1,5 +1,6 @@
 import { WebSocketServer, WebSocket } from 'ws';
 import { Room } from './room.js';
+import { getMapTemplate, listMapTemplateIds, loadMapTemplates, resolveMapTemplateDir } from './mapTemplates.js';
 import { log } from './logger.js';
 import {
   C2S_MESSAGE_SCHEMA,
@@ -25,8 +26,33 @@ const TICK_INTERVAL_MS = 50; // 20Hz
 const SNAPSHOT_INTERVAL_MS = 100; // 10Hz
 
 const wss = new WebSocketServer({ host: HOST, port: PORT });
-// P1-1 修复: 支持通过环境变量 SEED 注入 seed（用于调试/测试）
-const room = new Room('local', process.env.SEED ? parseInt(process.env.SEED, 10) : undefined);
+
+const mapTemplateDir = resolveMapTemplateDir(process.env.MAP_TEMPLATE_DIR);
+let mapTemplateCatalog = loadMapTemplates(mapTemplateDir);
+let activeMapTemplateId = process.env.MAP_TEMPLATE ?? null;
+let activeMapTemplate = getMapTemplate(mapTemplateCatalog, activeMapTemplateId);
+
+if (activeMapTemplateId && !activeMapTemplate) {
+  console.warn(`[SERVER] Map template "${activeMapTemplateId}" not found in ${mapTemplateDir}`);
+}
+
+function parseEnvSeed(): number | undefined {
+  if (process.env.SEED === undefined) return undefined;
+  const envSeed = parseInt(process.env.SEED, 10);
+  if (isNaN(envSeed)) {
+    throw new Error(`Invalid SEED environment variable: ${process.env.SEED}`);
+  }
+  return envSeed;
+}
+
+function createRoom(): Room {
+  return new Room('local', {
+    seed: parseEnvSeed(),
+    mapTemplate: activeMapTemplate,
+  });
+}
+
+const room = createRoom();
 
 // 处理server级别的错误
 wss.on('error', (error: Error) => {
@@ -123,7 +149,7 @@ const admin = {
     lastExtractedInventoryCount.clear();
     
     // 重新创建房间（会生成新的 seed）
-    const newRoom = new Room('local', process.env.SEED ? parseInt(process.env.SEED, 10) : undefined);
+    const newRoom = createRoom();
     Object.assign(room, newRoom);
     
     console.log('[ADMIN] Room reset complete. New seed:', room.seed);
@@ -135,6 +161,7 @@ const admin = {
       id: room.id,
       tick: room.tick,
       seed: room.seed,
+      mapTemplateId: room.mapTemplateId ?? null,
       players: room.players.size,
       bullets: Array.from(room.players.values()).reduce((sum, p) => sum, 0), // 简化显示
       connections: connections.size,
@@ -161,6 +188,39 @@ const admin = {
     console.log('[ADMIN] Profile manager attached to room');
     console.log('[ADMIN] Call from room context or check server/data/profiles.json');
   },
+
+  listMapTemplates: () => {
+    console.log('[ADMIN] Map templates:', listMapTemplateIds(mapTemplateCatalog));
+    console.log('[ADMIN] Map template dir:', mapTemplateCatalog.dir);
+  },
+
+  reloadMapTemplates: () => {
+    mapTemplateCatalog = loadMapTemplates(mapTemplateDir);
+    activeMapTemplate = getMapTemplate(mapTemplateCatalog, activeMapTemplateId);
+    if (activeMapTemplateId && !activeMapTemplate) {
+      console.warn(`[ADMIN] Map template "${activeMapTemplateId}" not found in ${mapTemplateDir}`);
+    }
+    console.log('[ADMIN] Map templates reloaded.');
+  },
+
+  setMapTemplate: (id: string | null) => {
+    if (!id) {
+      activeMapTemplateId = null;
+      activeMapTemplate = undefined;
+      console.log('[ADMIN] Map template cleared. Using random map generation.');
+      admin.resetRoom();
+      return;
+    }
+    const next = getMapTemplate(mapTemplateCatalog, id);
+    if (!next) {
+      console.warn(`[ADMIN] Map template "${id}" not found in ${mapTemplateDir}`);
+      return;
+    }
+    activeMapTemplateId = id;
+    activeMapTemplate = next;
+    console.log(`[ADMIN] Map template set to "${id}". Resetting room...`);
+    admin.resetRoom();
+  },
   
   // 帮助信息
   help: () => {
@@ -169,11 +229,14 @@ const admin = {
 调用方式：在服务端控制台输入 admin.命令名()
 
 可用命令：
-  resetRoom()    - 重置整个房间（断开所有连接，重新生成世界）
-  showRoom()     - 显示房间状态
-  showPlayers()  - 显示所有在线玩家
-  showProfiles() - 显示 Profile 信息
-  help()         - 显示此帮助信息
+  resetRoom()         - 重置整个房间（断开所有连接，重新生成世界）
+  showRoom()          - 显示房间状态
+  showPlayers()       - 显示所有在线玩家
+  showProfiles()      - 显示 Profile 信息
+  listMapTemplates()  - 列出可用地图模板
+  reloadMapTemplates() - 重新加载地图模板
+  setMapTemplate(id)  - 切换地图模板并重置房间（传 null 清除）
+  help()              - 显示此帮助信息
 
 例如：
   admin.showRoom()

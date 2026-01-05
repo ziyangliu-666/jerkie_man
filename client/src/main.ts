@@ -42,6 +42,22 @@ let lastLocalFireMs = 0;
 let lastLocalShoot = false;
 let localBurstStreamUntil = 0;
 let lastLocalMeleeMs = 0;
+// 本地弹药预测计数（防止快速点击绕过服务端快照延迟）
+let localPredictedAmmo: number | null = null;
+let localFireCredit: number | null = null;
+let localNextFireTick: number | null = null;
+let lastLocalShotServerTick = 0;
+let localBurstPendingShots = 0;
+let localBurstNextShotAtMs = 0;
+let localBurstIntervalMs = 0;
+let localBurstWeaponTypeId: string | null = null;
+
+function resetLocalBurst(): void {
+  localBurstPendingShots = 0;
+  localBurstNextShotAtMs = 0;
+  localBurstIntervalMs = 0;
+  localBurstWeaponTypeId = null;
+}
 
 type MeleeSwing = {
   x: number;
@@ -279,6 +295,10 @@ let hideoutEquipment: HTMLElement | null = null;
 let prepList: HTMLElement | null = null;
 let stashList: HTMLElement | null = null;
 let shopList: HTMLElement | null = null;
+let shopTabs: HTMLElement | null = null;
+let currentShopCategory: string = 'weapon';
+let stashTabs: HTMLElement | null = null;
+let currentStashCategory: string = 'weapon';
 let prepCapacity: HTMLElement | null = null;
 let enterRaidBtn: HTMLButtonElement | null = null;
 let equipmentWeapon: HTMLElement | null = null;
@@ -330,6 +350,8 @@ function getHideoutElements(): void {
   if (!prepList) prepList = document.getElementById('prepList');
   if (!stashList) stashList = document.getElementById('stashList');
   if (!shopList) shopList = document.getElementById('shopList');
+  if (!shopTabs) shopTabs = document.getElementById('shopTabs');
+  if (!stashTabs) stashTabs = document.getElementById('stashTabs');
   if (!prepCapacity) prepCapacity = document.getElementById('prepCapacity');
   if (!enterRaidBtn) enterRaidBtn = document.getElementById('enterRaidBtn') as HTMLButtonElement;
   if (!equipmentWeapon) equipmentWeapon = document.getElementById('equipmentWeapon');
@@ -894,19 +916,42 @@ function closeEquipSelectModal(): void {
 
 // 新增: 按钮点击反馈
 function addButtonFeedback(btn: HTMLButtonElement, success: boolean, message?: string): void {
+  // 保存原始文本和样式
+  const originalText = btn.textContent;
+  const originalClasses = btn.className;
+  
+  // 添加反馈类
   btn.classList.add(success ? 'success' : 'error');
+  
+  // 如果有消息，更新文本
   if (message) {
-    const originalText = btn.textContent;
     btn.textContent = message;
-    setTimeout(() => {
-      btn.classList.remove('success', 'error');
-      btn.textContent = originalText;
-    }, 1000);
-  } else {
-    setTimeout(() => {
-      btn.classList.remove('success', 'error');
-    }, 500);
   }
+  
+  // 添加成功图标（可选）
+  if (success && !message) {
+    const icon = document.createElement('span');
+    icon.textContent = ' ✓';
+    icon.style.marginLeft = '4px';
+    btn.appendChild(icon);
+  }
+  
+  // 恢复原始状态
+  const duration = message ? 1500 : 800;
+  setTimeout(() => {
+    btn.classList.remove('success', 'error');
+    if (message) {
+      btn.textContent = originalText;
+    } else {
+      // 移除添加的图标
+      const icon = btn.querySelector('span');
+      if (icon) {
+        icon.remove();
+      }
+    }
+    // 确保恢复原始类名（移除可能残留的类）
+    btn.className = originalClasses;
+  }, duration);
 }
 
 // 新增: 更新装备槽位显示
@@ -1356,30 +1401,249 @@ function updateItemLists(): void {
     }
   }
   
-  // 更新仓库列表（过滤已装备的物品）
-    if (stashList && playerProfile.stash) {
-      stashList.innerHTML = '';
-      const availableStashItems = sortItemInstances(playerProfile.stash.filter(item => !isItemEquipped(item)));
-      if (availableStashItems.length === 0) {
-        stashList.innerHTML = '<div style="color: #666; padding: 20px; text-align: center;">仓库为空</div>';
-      } else {
-      for (const item of availableStashItems) {
-        const itemType = getItemType(item.typeId);
-        const row = createItemRow(item, itemType, 'stash');
-        stashList.appendChild(row);
+  // 更新仓库列表（按分类和稀有度组织，过滤已装备的物品）
+  updateStashList();
+}
+
+// 更新商店列表（按当前选中的分类和稀有度组织）
+function updateShopList(): void {
+    if (shopList) {
+      shopList.innerHTML = '';
+      const allItemTypes = getAllItemTypes();
+      
+      // 按分类分组
+      const categories: Record<string, Array<{ id: string; name: string; rarity: string; value: number; stackMax: number }>> = {
+        weapon: [],
+        armor: [],
+        bag: [],
+        consumable: [],
+        material: [],
+      };
+      
+      for (const itemType of allItemTypes) {
+        const category = getItemCategory(itemType.id);
+        if (categories[category]) {
+          categories[category].push(itemType);
+        }
+      }
+      
+      // 只显示当前选中的分类
+      const items = categories[currentShopCategory] || [];
+      if (items.length === 0) {
+        shopList.innerHTML = '<div style="color: #666; padding: 20px; text-align: center;">该分类暂无物品</div>';
+        return;
+      }
+      
+      // 按稀有度分组
+      const rarityGroups: Record<string, typeof items> = {
+        COMMON: [],
+        RARE: [],
+        EPIC: [],
+      };
+      
+      for (const item of items) {
+        const rarity = item.rarity || 'COMMON';
+        if (rarityGroups[rarity]) {
+          rarityGroups[rarity].push(item);
+        }
+      }
+      
+      // 为每个稀有度创建区域
+      const rarityOrder = ['COMMON', 'RARE', 'EPIC'];
+      for (const rarity of rarityOrder) {
+        const rarityItems = rarityGroups[rarity];
+        if (rarityItems.length === 0) continue;
+        
+        // 稀有度区域
+        const raritySection = document.createElement('div');
+        raritySection.className = 'shop-rarity-section';
+        
+        // 稀有度标题
+        const rarityHeader = document.createElement('div');
+        rarityHeader.className = `shop-rarity-header ${rarity.toLowerCase()}`;
+        rarityHeader.textContent = rarity === 'COMMON' ? '普通' : rarity === 'RARE' ? '稀有' : '史诗';
+        raritySection.appendChild(rarityHeader);
+        
+        // 物品列表
+        const rarityItemsDiv = document.createElement('div');
+        rarityItemsDiv.className = 'shop-rarity-items';
+        
+        // 按名称排序
+        rarityItems.sort((a, b) => a.name.localeCompare(b.name));
+        
+        for (const itemType of rarityItems) {
+          const row = createShopRow(itemType);
+          rarityItemsDiv.appendChild(row);
+        }
+        
+        raritySection.appendChild(rarityItemsDiv);
+        shopList.appendChild(raritySection);
       }
     }
   }
+
+// 初始化商店 Tab 切换
+function initShopTabs(): void {
+    if (!shopTabs) return;
+    
+    const tabButtons = shopTabs.querySelectorAll('.shop-tab-btn');
+    tabButtons.forEach(btn => {
+      btn.addEventListener('click', () => {
+        const category = btn.getAttribute('data-shop-category');
+        if (category) {
+          // 移除所有 active 类
+          tabButtons.forEach(b => b.classList.remove('active'));
+          // 添加 active 类到当前按钮
+          btn.classList.add('active');
+          // 更新当前分类
+          currentShopCategory = category;
+          // 更新商店列表
+          updateShopList();
+        }
+      });
+    });
+  }
+
+// 更新仓库列表（按当前选中的分类和稀有度组织）
+function updateStashList(): void {
+  if (!stashList || !playerProfile || !playerProfile.stash) return;
   
-  // 更新商店列表
-    if (shopList) {
-      shopList.innerHTML = '';
-      const allItemTypes = sortItemTypes(getAllItemTypes());
-      for (const itemType of allItemTypes) {
-        const row = createShopRow(itemType);
-        shopList.appendChild(row);
+  stashList.innerHTML = '';
+  const availableStashItems = playerProfile.stash.filter(item => !isItemEquipped(item));
+  
+  if (availableStashItems.length === 0) {
+    stashList.innerHTML = '<div style="color: #666; padding: 20px; text-align: center;">仓库为空</div>';
+    return;
+  }
+  
+  // 按分类分组
+  const categories: Record<string, ItemInstance[]> = {
+    weapon: [],
+    armor: [],
+    bag: [],
+    consumable: [],
+    material: [],
+  };
+  
+  for (const item of availableStashItems) {
+    const category = getItemCategory(item.typeId);
+    if (categories[category]) {
+      categories[category].push(item);
+    }
+  }
+  
+  // 只显示当前选中的分类
+  const selectedCategory = (typeof currentStashCategory !== 'undefined' ? currentStashCategory : 'weapon');
+  const items = categories[selectedCategory] || [];
+  if (items.length === 0) {
+    stashList.innerHTML = '<div style="color: #666; padding: 20px; text-align: center;">该分类暂无物品</div>';
+    return;
+  }
+  
+  // 按稀有度分组
+  const rarityGroups: Record<string, ItemInstance[]> = {
+    COMMON: [],
+    RARE: [],
+    EPIC: [],
+  };
+  
+  for (const item of items) {
+    try {
+      const itemType = getItemType(item.typeId);
+      const rarity = itemType.rarity || 'COMMON';
+      if (rarityGroups[rarity]) {
+        rarityGroups[rarity].push(item);
+      }
+    } catch {
+      // 如果无法获取物品类型，归类为 COMMON
+      rarityGroups['COMMON'].push(item);
+    }
+  }
+  
+  // 为每个稀有度创建区域
+  const rarityOrder = ['COMMON', 'RARE', 'EPIC'];
+  for (const rarity of rarityOrder) {
+    const rarityItems = rarityGroups[rarity];
+    if (rarityItems.length === 0) continue;
+    
+    // 稀有度区域
+    const raritySection = document.createElement('div');
+    raritySection.className = 'shop-rarity-section';
+    
+    // 稀有度标题
+    const rarityHeader = document.createElement('div');
+    rarityHeader.className = `shop-rarity-header ${rarity.toLowerCase()}`;
+    rarityHeader.textContent = rarity === 'COMMON' ? '普通' : rarity === 'RARE' ? '稀有' : '史诗';
+    raritySection.appendChild(rarityHeader);
+    
+    // 物品列表
+    const rarityItemsDiv = document.createElement('div');
+    rarityItemsDiv.className = 'shop-rarity-items';
+    
+    // 排序物品
+    const sortedItems = sortItemInstances(rarityItems);
+    
+    for (const item of sortedItems) {
+      try {
+        const itemType = getItemType(item.typeId);
+        const row = createItemRow(item, itemType, 'stash');
+        rarityItemsDiv.appendChild(row);
+      } catch {
+        // 跳过无法获取类型的物品
       }
     }
+    
+    raritySection.appendChild(rarityItemsDiv);
+    stashList.appendChild(raritySection);
+  }
+}
+
+// 初始化仓库 Tab 切换
+function initStashTabs(): void {
+  if (!stashTabs) return;
+  
+  const tabButtons = stashTabs.querySelectorAll('.shop-tab-btn');
+  tabButtons.forEach((btn: Element) => {
+    btn.addEventListener('click', () => {
+      const category = btn.getAttribute('data-stash-category');
+      if (category) {
+        // 移除所有 active 类
+        tabButtons.forEach((b: Element) => b.classList.remove('active'));
+        // 添加 active 类到当前按钮
+        btn.classList.add('active');
+        // 更新当前分类
+        currentStashCategory = category;
+        // 更新仓库列表
+        updateStashList();
+      }
+    });
+  });
+}
+
+// 获取物品分类
+function getItemCategory(typeId: string): string {
+    try {
+      getWeaponDef(typeId);
+      return 'weapon';
+    } catch {}
+    try {
+      getArmorDef(typeId);
+      return 'armor';
+    } catch {}
+    try {
+      getBagDef(typeId);
+      return 'bag';
+    } catch {}
+    
+    // 判断是否为消耗品
+    if (typeId === 'ammo' || typeId === 'medkit' || typeId === 'advanced_medkit' || 
+        typeId === 'frag_grenade' || typeId === 'flash_grenade' || typeId === 'smoke_grenade' ||
+        typeId === 'armor_plate_item' || typeId === 'combat_stim') {
+      return 'consumable';
+    }
+    
+    // 其他为材料
+    return 'material';
   }
 
   function getItemCategoryOrder(typeId: string): number {
@@ -1401,7 +1665,7 @@ function updateItemLists(): void {
   function getRarityOrder(rarity?: string): number {
     if (rarity === 'COMMON') return 0;
     if (rarity === 'RARE') return 1;
-    if (rarity === 'QUEST') return 2;
+    if (rarity === 'EPIC') return 2;
     return 3;
   }
 
@@ -1609,13 +1873,15 @@ function createShopRow(itemType: any): HTMLElement {
       buyBtn.classList.add('loading');
       network.sendBuy(itemType.id, 1);
       hud.addEvent(`购买: ${itemType.name}`);
+      // 延迟反馈，等待服务器响应
       setTimeout(() => {
         buyBtn.classList.remove('loading');
         addButtonFeedback(buyBtn, true, '已购买');
       }, 300);
     } else {
-      hud.addEvent(`金钱不足: 需要 ${itemType.value}，当前 ${playerProfile?.money ?? 0}`);
+      // 立即显示错误反馈
       addButtonFeedback(buyBtn, false, '金钱不足');
+      hud.addEvent(`金钱不足: 需要 ${itemType.value}，当前 ${playerProfile?.money ?? 0}`);
     }
   };
   actions.appendChild(buyBtn);
@@ -1652,8 +1918,16 @@ function initHideoutUI(): void {
           hideoutEquipment.classList.add('active');
         } else if (tabName === 'stash' && hideoutStash) {
           hideoutStash.classList.add('active');
+          // 初始化仓库 tabs（如果还没初始化）
+          initStashTabs();
+          // 更新仓库列表
+          updateStashList();
         } else if (tabName === 'shop' && hideoutShop) {
           hideoutShop.classList.add('active');
+          // 初始化商店 tabs（如果还没初始化）
+          initShopTabs();
+          // 更新商店列表
+          updateShopList();
         }
       }
     });
@@ -1871,6 +2145,13 @@ function smoothTo(current: number, target: number, dtSec: number, halfLifeSec = 
 
 // 修复: 客户端 tick 对齐（严格 20Hz，与 server 同步）
 const CLIENT_TICK_MS = 50; // 与 server tick 间隔一致
+function getEstimatedServerTick(): number {
+  const latest = network.getSnapshotBuffer().getLatest();
+  if (!latest) return network.getConnectionState().lastServerTick;
+  const serverNowMs = Date.now() + network.getSnapshotBuffer().getServerOffsetMs();
+  const deltaMs = Math.max(0, serverNowMs - latest.timestamp);
+  return latest.tick + Math.floor(deltaMs / CLIENT_TICK_MS);
+}
 let clientAccMs = 0; // 客户端 tick 累积器（毫秒）
 let lastClientTickTime = 0; // 上次客户端 tick 的时间戳
 
@@ -2027,6 +2308,7 @@ const network = new Network(getWebSocketUrl(), 'local', {
     renderLocalPlayer = null; // 修复: 同时清空渲染平滑状态
     clientAccMs = 0;
     lastClientTickTime = 0;
+    resetLocalBurst();
     // P0-2 修复: snapshotBuffer 已在 Network.onclose 中清理，这里不需要再清理
   },
   onWelcome: (playerId: string, accountId: string, roomInfo?: { seed?: number; mapConfig?: MAP_CONFIG }) => {
@@ -2043,6 +2325,7 @@ const network = new Network(getWebSocketUrl(), 'local', {
     // 重置本地发射计数器
     localShotIdCounter = 0;
     lastLocalFireMs = 0;
+    resetLocalBurst();
     
     // Day4-1: 接收并保存 server 下发的世界配置
     if (roomInfo?.mapConfig) {
@@ -2109,6 +2392,10 @@ const network = new Network(getWebSocketUrl(), 'local', {
           pendingInputs = [];
           predictedLocalPlayer = { ...serverPlayer };
           renderLocalPlayer = { ...serverPlayer }; // 直接对齐，避免还在 smooth "飘"
+          localPredictedAmmo = null;
+          localFireCredit = null;
+          localNextFireTick = null;
+          resetLocalBurst();
           
           // 重置发送缓存，避免还在 stream
           lastSentKeys = null;
@@ -2165,12 +2452,28 @@ const network = new Network(getWebSocketUrl(), 'local', {
           x: predictedPos.x,
           y: predictedPos.y,
         };
+
+        // 同步本地弹药预测计数（使用服务端权威值）
+        if (serverPlayer.weaponRuntime) {
+          localPredictedAmmo = serverPlayer.weaponRuntime.ammoInMag;
+          localFireCredit = serverPlayer.weaponRuntime.fireCredit ?? 0;
+          localNextFireTick = serverPlayer.weaponRuntime.nextFireTick;
+        } else {
+          localPredictedAmmo = null;
+          localFireCredit = null;
+          localNextFireTick = null;
+          resetLocalBurst();
+        }
       }
     }
   },
   onError: (error: string) => {
     console.error('Network error:', error);
     hud.addEvent(`错误：${error}`);
+    // 背包已满时显示红色提示
+    if (error === 'Inventory full' || error.includes('Inventory full')) {
+      uiOverlay.showText('背包已满', '255, 0, 0');
+    }
   },
   // 游戏化增强: 接收服务端事件并显示在 HUD
   onEvent: (message: string) => {
@@ -2559,6 +2862,7 @@ function renderLoop(): void {
         return inputManager.getAimAngle(worldCanvas);
       })();
       const rawShoot = canControl && !isThrowingMode ? inputManager.getShoot() : false; // 投掷模式下禁用开火
+      const shootPressed = rawShoot && !lastLocalShoot;
       const weaponDef = (() => {
         if (localPlayer?.weaponRuntime?.weaponTypeId) {
           try {
@@ -2594,7 +2898,34 @@ function renderLoop(): void {
       }
       
       // 新增: 消费换弹脉冲事件（edge-trigger）
-      const tickReload = canControl ? inputManager.consumeReload() : false;
+      const manualReload = canControl ? inputManager.consumeReload() : false;
+      const weaponRuntime = localPlayer?.weaponRuntime;
+      const ammoInMag = localPredictedAmmo ?? weaponRuntime?.ammoInMag ?? 0;
+      const isReloadingNow =
+        weaponRuntime &&
+        weaponRuntime.reloadingUntilTick > 0 &&
+        network.getConnectionState().lastServerTick < weaponRuntime.reloadingUntilTick;
+      const serverTickEstimate = getEstimatedServerTick();
+      const hasAmmoForFire = weaponDef?.weaponKind === 'melee' ? true : ammoInMag > 0;
+      const burstRemaining = weaponRuntime?.burstRemaining ?? 0;
+      if (weaponRuntime && localNextFireTick !== null) {
+        if (burstRemaining > 0) {
+          localFireCredit = 0;
+        } else if (!isReloadingNow && hasAmmoForFire && serverTickEstimate >= localNextFireTick) {
+          localFireCredit = 1;
+        } else if (isReloadingNow || !hasAmmoForFire) {
+          localFireCredit = 0;
+        }
+      }
+      const autoReload = !!(
+        shootPressed &&
+        weaponRuntime &&
+        weaponDef &&
+        weaponDef.reloadMs > 0 &&
+        ammoInMag <= 0 &&
+        !isReloadingNow
+      );
+      const tickReload = manualReload || autoReload;
       
       // 新增: 只在 RAID phase 时发送输入和进行预测
       if (currentPhase === 'RAID') {
@@ -2702,90 +3033,170 @@ function renderLoop(): void {
       }
       
       if (connState.connected && canControl) {
-        // 修复: 持续输入流式发送逻辑
-        // 检查是否有持续态输入（移动/射击/撤离）
+        // 修复: 提前计算射击逻辑（边缘触发，只在实际射击时发送）
+        const nowPerf2 = performance.now();
+        let shotIdToSend: number | undefined = undefined;
+        let spreadSeedToSend: number | undefined = undefined;
+        let shotOriginX: number | undefined;
+        let shotOriginY: number | undefined;
+        let meleeAttackToSend: boolean = false; // 修复: 近战攻击标志（近战武器不需要shotId，但需要发送shoot=true）
+        const fireCooldownMs = getLocalFireCooldownMs();
+        // 修复: 防止快速连点绕过冷却限制 - 使用严格的时间检查
+        // 注意: 即使在同一循环中执行多个 tick，每次检查都会使用最新的 nowPerf2
+        // 但为了更严格，我们在通过检查后立即更新 lastLocalFireMs
+        if (tickShoot) {
+          const weaponRuntime = localPlayer?.weaponRuntime;
+          const ammoCount =
+            weaponDef?.weaponKind === 'melee'
+              ? 1
+              : localPredictedAmmo ?? weaponRuntime?.ammoInMag ?? 0;
+          const hasAmmo = weaponDef?.weaponKind === 'melee' ? true : ammoCount > 0;
+          const hasCredit = (localFireCredit ?? 0) > 0;
+          // 修复: 添加冷却时间检查，防止一次点击射出多发子弹
+          const isMelee = weaponDef?.weaponKind === 'melee';
+          const timeSinceLastFire = nowPerf2 - (isMelee ? lastLocalMeleeMs : lastLocalFireMs);
+          const cooldownOk = isMelee ? (timeSinceLastFire >= fireCooldownMs || lastLocalMeleeMs === 0) : (timeSinceLastFire >= fireCooldownMs || lastLocalFireMs === 0);
+          const canShoot = !!(localPlayer && weaponRuntime && hasAmmo && !isReloadingNow && hasCredit && cooldownOk);
+          const localP = renderLocalPlayer ?? predictedLocalPlayer ?? localPlayer;
+
+          if (canShoot && weaponDef?.weaponKind === 'melee') {
+            if (localP) {
+              const baseRange = weaponDef.meleeRange ?? DEFAULT_MELEE_RANGE;
+              const baseArcRad = ((weaponDef.meleeArcDeg ?? DEFAULT_MELEE_ARC_DEG) * Math.PI) / 180;
+              meleeSwings.push({
+                x: localP.x,
+                y: localP.y,
+                aimRad: tickAim,
+                range: baseRange,
+                arcRad: baseArcRad,
+                spawnTimeMs: nowPerf2,
+              });
+              lastLocalMeleeMs = nowPerf2;
+              meleeAttackToSend = true;
+            }
+          } else if (canShoot) {
+            lastLocalFireMs = nowPerf2;
+            localShotIdCounter++;
+            shotIdToSend = localShotIdCounter;
+            spreadSeedToSend = Math.floor(Math.random() * 1000000);
+
+            if (localP && localP.weaponRuntime) {
+              shotOriginX = localP.x;
+              shotOriginY = localP.y;
+              bulletTracks.spawnLocalPrediction(
+                shotIdToSend,
+                localP.x,
+                localP.y,
+                tickAim,
+                getLocalBulletSpeed(),
+                localP.weaponRuntime.weaponTypeId,
+                spreadSeedToSend
+              );
+
+              if (localPredictedAmmo !== null) {
+                localPredictedAmmo = Math.max(0, localPredictedAmmo - 1);
+              }
+            } else {
+              shotOriginX = undefined;
+              shotOriginY = undefined;
+            }
+            if (schedule && schedule.burstCount > 1) {
+              localBurstPendingShots = schedule.burstCount - 1;
+              localBurstIntervalMs = schedule.burstIntervalMs;
+              localBurstNextShotAtMs = nowPerf2 + schedule.burstIntervalMs;
+              localBurstWeaponTypeId = weaponRuntime?.weaponTypeId ?? null;
+            } else {
+              resetLocalBurst();
+            }
+          } else if (!hasAmmo && weaponDef?.weaponKind !== 'melee') {
+            uiOverlay.showText('NO AMMO');
+          }
+
+          if (canShoot) {
+            if (localFireCredit !== null) {
+              localFireCredit = Math.max(0, localFireCredit - 1);
+            }
+            if (weaponDef) {
+              const fireIntervalMs = weaponDef.fireIntervalMs ?? fireCooldownMs;
+              const burstExtraTicks =
+                schedule && schedule.burstCount > 1
+                  ? msToTicks((schedule.burstCount - 1) * schedule.burstIntervalMs)
+                  : 0;
+              const baseTick = Math.max(serverTickEstimate, localNextFireTick ?? serverTickEstimate);
+              localNextFireTick = baseTick + burstExtraTicks + msToTicks(fireIntervalMs);
+              lastLocalShotServerTick = Math.max(lastLocalShotServerTick, serverTickEstimate);
+            }
+          }
+        }
+
+        // 修复: 只在实际射击时发送 shoot=true（边缘触发，防止持续发送导致服务器时机偏差）
+        // 注意: 近战武器不需要shotId，但需要通过meleeAttackToSend标志发送shoot=true
+        if (localBurstPendingShots > 0) {
+          const burstRuntime = localPlayer?.weaponRuntime;
+          const currentWeaponId = burstRuntime?.weaponTypeId ?? null;
+          const burstAmmo = localPredictedAmmo ?? burstRuntime?.ammoInMag ?? 0;
+          if (!burstRuntime || !weaponDef || weaponDef.weaponKind === 'melee' ||
+            currentWeaponId !== localBurstWeaponTypeId ||
+            isReloadingNow || burstAmmo <= 0 || localBurstIntervalMs <= 0) {
+            resetLocalBurst();
+          } else {
+            const localP = renderLocalPlayer ?? predictedLocalPlayer ?? localPlayer;
+            while (localBurstPendingShots > 0 && nowPerf2 >= localBurstNextShotAtMs) {
+              if (!localP || !localP.weaponRuntime) {
+                resetLocalBurst();
+                break;
+              }
+              if (localPredictedAmmo !== null && localPredictedAmmo <= 0) {
+                resetLocalBurst();
+                break;
+              }
+              bulletTracks.spawnLocalPrediction(
+                undefined,
+                localP.x,
+                localP.y,
+                tickAim,
+                getLocalBulletSpeed(),
+                localP.weaponRuntime.weaponTypeId,
+                Math.floor(Math.random() * 1000000)
+              );
+              if (localPredictedAmmo !== null) {
+                localPredictedAmmo = Math.max(0, localPredictedAmmo - 1);
+              }
+              localBurstPendingShots--;
+              if (localBurstPendingShots <= 0) {
+                resetLocalBurst();
+                break;
+              }
+              localBurstNextShotAtMs += localBurstIntervalMs;
+            }
+          }
+        }
+
+        const shootToSend = shotIdToSend !== undefined || meleeAttackToSend;
+
+        // 检查是否有持续态输入（移动/撤离）
+        // 注意：射击改为边缘触发，不再持续发送（连发武器由 burstStreaming 处理）
         const keysAny = tickKeys.up || tickKeys.down || tickKeys.left || tickKeys.right;
         const burstStreaming = isBurstWeapon && performance.now() < localBurstStreamUntil;
-        const mustStream = keysAny || rawShoot || burstStreaming || tickExtractHeld;
-        
+        const mustStream = keysAny || burstStreaming || tickExtractHeld;
+
         // 检查变化（用于 idle 时的省包逻辑）
-        const keysChanged = !lastSentKeys || 
+        const keysChanged = !lastSentKeys ||
           tickKeys.up !== lastSentKeys.up || tickKeys.down !== lastSentKeys.down ||
           tickKeys.left !== lastSentKeys.left || tickKeys.right !== lastSentKeys.right;
         const aimChanged = isNaN(lastSentAim) || Math.abs(tickAim - lastSentAim) > 0.01;
-        const shootChanged = tickShoot !== lastSentShoot;
+        const shootChanged = shootToSend !== (lastSentShoot ?? false);
         const extractHeldChanged = tickExtractHeld !== (lastSentExtractHeld ?? false);
-        
-        // 只要在"持续态"（移动/射击/撤离），每 tick 都发；idle 时才用 change-based
-        // P0-1 修复: interact 不再通过 input 发送（拾取走独立的 C2S_PICKUP_* 消息）
-        let shotOriginX: number | undefined;
-        let shotOriginY: number | undefined;
-        const shouldSend = mustStream || keysChanged || aimChanged || shootChanged || extractHeldChanged;
-        
+
+        // 只要在"持续态"（移动/撤离），或有任何变化，或实际射击，就发送
+        const shouldSend = mustStream || keysChanged || aimChanged || shootChanged || extractHeldChanged || tickReload;
+
         if (shouldSend) {
           const nextSeq = inputSeq + 1;
-          
-          // 检查是否需要本地预测子弹（开火 + 冷却通过 + 武器状态检查）
-          const nowPerf2 = performance.now();
-          let shotIdToSend: number | undefined = undefined;
-          const fireCooldownMs = getLocalFireCooldownMs();
-          // 修复: 防止快速连点绕过冷却限制 - 使用严格的时间检查
-          // 注意: 即使在同一循环中执行多个 tick，每次检查都会使用最新的 nowPerf2
-          // 但为了更严格，我们在通过检查后立即更新 lastLocalFireMs
-          if (tickShoot) {
-            if (weaponDef?.weaponKind === 'melee') {
-              if (nowPerf2 - lastLocalMeleeMs >= fireCooldownMs) {
-                const localP = renderLocalPlayer ?? predictedLocalPlayer ?? localPlayer;
-                if (localP) {
-                  const baseRange = weaponDef.meleeRange ?? DEFAULT_MELEE_RANGE;
-                  const baseArcRad = ((weaponDef.meleeArcDeg ?? DEFAULT_MELEE_ARC_DEG) * Math.PI) / 180;
-                  meleeSwings.push({
-                    x: localP.x,
-                    y: localP.y,
-                    aimRad: tickAim,
-                    range: baseRange,
-                    arcRad: baseArcRad,
-                    spawnTimeMs: nowPerf2,
-                  });
-                  lastLocalMeleeMs = nowPerf2;
-                }
-              }
-            } else if (nowPerf2 - lastLocalFireMs >= fireCooldownMs) {
-              const canShoot = localPlayer && localPlayer.weaponRuntime &&
-                localPlayer.weaponRuntime.ammoInMag > 0 &&
-                !(localPlayer.weaponRuntime.reloadingUntilTick > 0 && network.getConnectionState().lastServerTick < localPlayer.weaponRuntime.reloadingUntilTick);
-          
-              if (canShoot) {
-                lastLocalFireMs = nowPerf2;
-
-                localShotIdCounter++;
-                shotIdToSend = localShotIdCounter;
-
-                const localP = renderLocalPlayer ?? predictedLocalPlayer ?? localPlayer;
-                if (localP && localP.weaponRuntime) {
-                  shotOriginX = localP.x;
-                  shotOriginY = localP.y;
-                  bulletTracks.spawnLocalPrediction(
-                    shotIdToSend,
-                    localP.x,
-                    localP.y,
-                    tickAim,
-                    getLocalBulletSpeed(),
-                    localP.weaponRuntime.weaponTypeId
-                  );
-                } else {
-                  shotOriginX = undefined;
-                  shotOriginY = undefined;
-                }
-              } else {
-                uiOverlay.showText('NO AMMO'); // dry fire feedback
-              }
-            }
-          }
-          const sent = network.sendInput(nextSeq, tickKeys, tickAim, tickShoot, tickReload, false, false, tickExtractHeld, shotIdToSend, shotOriginX, shotOriginY);
+          const sent = network.sendInput(nextSeq, tickKeys, tickAim, shootToSend, tickReload, false, false, tickExtractHeld, shotIdToSend, shotOriginX, shotOriginY, spreadSeedToSend);
           shotOriginX = undefined;
           shotOriginY = undefined;
-          
+
           if (sent) {
             inputSeq = nextSeq;
             // 同时写入 pendingInputs（同一份快照）
@@ -2802,15 +3213,15 @@ function renderLoop(): void {
               seq: nextSeq,
               tick: connState.lastServerTick,
               keys: tickKeys,
-              shoot: tickShoot,
+              shoot: shootToSend,
               eh: tickExtractHeld,
               pi: pendingInputs.length,
               shotId: shotIdToSend,
             });
-            
+
             lastSentKeys = { ...tickKeys };
             lastSentAim = tickAim;
-            lastSentShoot = tickShoot;
+            lastSentShoot = shootToSend;
             lastSentExtractHeld = tickExtractHeld;
             // P2-2: interact 已改为 TTL 脉冲，不再在这里处理
           } else {
@@ -3082,3 +3493,5 @@ rafId = requestAnimationFrame(renderLoop);
 
 console.log('Client initialized');
 console.log('Type __admin.help() in console for admin commands');
+
+

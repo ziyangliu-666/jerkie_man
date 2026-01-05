@@ -684,8 +684,66 @@
       font-size: 14px;
     }
 
+    .topBar-right {
+      display: flex;
+      align-items: center;
+    }
+
     .separator {
       color: #666;
+    }
+
+    /* 进入战局按钮样式 */
+    .enter-raid-btn {
+      padding: 10px 24px;
+      background: linear-gradient(135deg, #0ff 0%, #08f 100%);
+      color: #000;
+      border: none;
+      font-family: 'Courier New', monospace;
+      font-size: 15px;
+      font-weight: bold;
+      cursor: pointer;
+      border-radius: 6px;
+      transition: all 0.3s ease;
+      box-shadow: 0 4px 12px rgba(0, 255, 255, 0.3);
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .enter-raid-btn::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: -100%;
+      width: 100%;
+      height: 100%;
+      background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.3), transparent);
+      transition: left 0.5s;
+    }
+
+    .enter-raid-btn:hover:not(:disabled)::before {
+      left: 100%;
+    }
+
+    .enter-raid-btn:hover:not(:disabled) {
+      background: linear-gradient(135deg, #1ff 0%, #19f 100%);
+      box-shadow: 0 6px 16px rgba(0, 255, 255, 0.5);
+      transform: translateY(-2px);
+    }
+
+    .enter-raid-btn:active:not(:disabled) {
+      transform: translateY(0);
+      box-shadow: 0 2px 8px rgba(0, 255, 255, 0.3);
+    }
+
+    .enter-raid-btn:disabled {
+      background: #444;
+      color: #888;
+      cursor: not-allowed;
+      box-shadow: none;
+      opacity: 0.6;
     }
 
     #hideoutStatus {
@@ -775,6 +833,103 @@
       align-items: center;
     }
 
+    /* 商店容器样式 */
+    .shop-container {
+      display: flex;
+      flex-direction: column;
+      gap: 24px;
+    }
+
+    .shop-category {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .shop-category-title {
+      color: #0ff;
+      font-size: 16px;
+      font-weight: bold;
+      padding-bottom: 8px;
+      border-bottom: 2px solid #444;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+    }
+
+    .shop-rarity-section {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .shop-rarity-header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 10px;
+      background: rgba(0, 255, 255, 0.1);
+      border-left: 3px solid;
+      font-size: 13px;
+      font-weight: bold;
+    }
+
+    .shop-rarity-header.common {
+      border-left-color: #00ff00;
+      color: #00ff00;
+    }
+
+    .shop-rarity-header.rare {
+      border-left-color: #0088ff;
+      color: #0088ff;
+    }
+
+    .shop-rarity-header.epic {
+      border-left-color: #9d4edd;
+      color: #9d4edd;
+    }
+
+    .shop-rarity-items {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      margin-left: 16px;
+    }
+
+    /* 商店分类 Tab */
+    .shop-tabs {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 20px;
+      padding-bottom: 12px;
+      border-bottom: 2px solid #444;
+    }
+
+    .shop-tab-btn {
+      padding: 8px 16px;
+      background: #2a2a2a;
+      border: 1px solid #444;
+      color: #aaa;
+      cursor: pointer;
+      font-family: 'Courier New', monospace;
+      font-size: 13px;
+      transition: all 0.2s;
+      border-radius: 4px;
+    }
+
+    .shop-tab-btn:hover {
+      background: #333;
+      color: #fff;
+      border-color: #666;
+    }
+
+    .shop-tab-btn.active {
+      background: #2a2a2a;
+      color: #0ff;
+      border-color: #0ff;
+      border-bottom: 2px solid #0ff;
+      margin-bottom: -2px;
+    }
+
     .item-info {
       flex: 1;
     }
@@ -801,31 +956,40 @@
       border: 1px solid #666;
       color: #fff;
       cursor: pointer;
+      transition: all 0.3s ease;
       font-family: 'Courier New', monospace;
       font-size: 12px;
       transition: all 0.2s;
     }
 
-    .item-btn:hover {
+    .item-btn:hover:not(.loading):not(.success):not(.error) {
       background: #555;
       border-color: #0ff;
+      transform: translateY(-1px);
+      box-shadow: 0 2px 8px rgba(0, 255, 255, 0.3);
+    }
+
+    .item-btn:active:not(.loading):not(.success):not(.error) {
+      transform: translateY(0);
+      box-shadow: 0 1px 4px rgba(0, 255, 255, 0.2);
     }
 
     .item-btn.primary {
       background: #0ff;
       color: #000;
       border-color: #0ff;
+      font-weight: bold;
     }
 
-    .item-btn.primary:hover {
+    .item-btn.primary:hover:not(.loading):not(.success):not(.error) {
       background: #0dd;
+      transform: translateY(-1px);
+      box-shadow: 0 2px 8px rgba(0, 255, 255, 0.4);
     }
 
-    /* 右下角主按钮 */
-    #hideoutActions {
-      position: fixed;
-      bottom: 20px;
-      right: 20px;
+    .item-btn.primary:active:not(.loading):not(.success):not(.error) {
+      transform: translateY(0);
+      box-shadow: 0 1px 4px rgba(0, 255, 255, 0.3);
     }
 
     .primary-btn {
@@ -998,16 +1162,63 @@
       opacity: 0.6;
       cursor: wait;
       pointer-events: none;
+      position: relative;
+    }
+
+    .item-btn.loading::after {
+      content: '';
+      position: absolute;
+      width: 16px;
+      height: 16px;
+      top: 50%;
+      left: 50%;
+      margin-left: -8px;
+      margin-top: -8px;
+      border: 2px solid #0ff;
+      border-top-color: transparent;
+      border-radius: 50%;
+      animation: spin 0.6s linear infinite;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
     }
 
     .item-btn.success {
       background: #4CAF50 !important;
       border-color: #4CAF50 !important;
+      color: #fff !important;
+      animation: successPulse 0.4s ease-out;
+      box-shadow: 0 0 12px rgba(76, 175, 80, 0.5);
     }
 
     .item-btn.error {
       background: #f44 !important;
       border-color: #f44 !important;
+      color: #fff !important;
+      animation: errorShake 0.4s ease-out;
+      box-shadow: 0 0 12px rgba(255, 68, 68, 0.5);
+    }
+
+    @keyframes successPulse {
+      0% {
+        transform: scale(1);
+        box-shadow: 0 0 0 0 rgba(76, 175, 80, 0.7);
+      }
+      50% {
+        transform: scale(1.05);
+        box-shadow: 0 0 0 8px rgba(76, 175, 80, 0);
+      }
+      100% {
+        transform: scale(1);
+        box-shadow: 0 0 0 0 rgba(76, 175, 80, 0);
+      }
+    }
+
+    @keyframes errorShake {
+      0%, 100% { transform: translateX(0); }
+      10%, 30%, 50%, 70%, 90% { transform: translateX(-4px); }
+      20%, 40%, 60%, 80% { transform: translateX(4px); }
     }
 
     /* 装备槽位点击反馈 */
@@ -1287,6 +1498,9 @@
             <span class="separator">|</span>
             <span id="hideoutStatus">连接中...</span>
           </div>
+          <div class="topBar-right">
+            <button id="enterRaidBtn" class="enter-raid-btn" disabled>进入战局</button>
+          </div>
         </div>
 
         <!-- 主内容区 -->
@@ -1336,22 +1550,34 @@
             <div id="hideoutStash" class="hideout-panel">
               <h3>仓库</h3>
               <p class="panel-desc">你的物品存储</p>
-              <div id="stashList" class="item-list"></div>
+              <!-- 仓库分类 Tab -->
+              <div id="stashTabs" class="shop-tabs">
+                <button class="shop-tab-btn active" data-stash-category="weapon">武器</button>
+                <button class="shop-tab-btn" data-stash-category="armor">防具</button>
+                <button class="shop-tab-btn" data-stash-category="bag">背包</button>
+                <button class="shop-tab-btn" data-stash-category="consumable">消耗品</button>
+                <button class="shop-tab-btn" data-stash-category="material">材料</button>
+              </div>
+              <div id="stashList" class="shop-container"></div>
             </div>
 
             <!-- 商店 -->
             <div id="hideoutShop" class="hideout-panel">
               <h3>商店</h3>
               <p class="panel-desc">购买物品（买到仓库）</p>
-              <div id="shopList" class="item-list"></div>
+              <!-- 商店分类 Tab -->
+              <div id="shopTabs" class="shop-tabs">
+                <button class="shop-tab-btn active" data-shop-category="weapon">武器</button>
+                <button class="shop-tab-btn" data-shop-category="armor">防具</button>
+                <button class="shop-tab-btn" data-shop-category="bag">背包</button>
+                <button class="shop-tab-btn" data-shop-category="consumable">消耗品</button>
+                <button class="shop-tab-btn" data-shop-category="material">材料</button>
+              </div>
+              <div id="shopList" class="shop-container"></div>
             </div>
           </div>
         </div>
 
-        <!-- 右下角主按钮 -->
-        <div id="hideoutActions">
-          <button id="enterRaidBtn" class="primary-btn" disabled>进入战局</button>
-        </div>
       </div>
 
       </div>

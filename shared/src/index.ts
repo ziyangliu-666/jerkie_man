@@ -31,6 +31,7 @@ export * from './constants.js';
 
 // Profile工具函数（单一数据源）
 export * from './profileUtils.js';
+export * from './mapTemplate.js';
 
 // 显式导出内容加载器函数
 export { loadMapConfig, loadItemTypes } from './content.js';

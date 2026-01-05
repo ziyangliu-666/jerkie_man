@@ -265,8 +265,16 @@ export class HUD {
               try {
                 const itemType = getItemType(item.typeId);
                 itemName = itemType.name;
-                rarityLabel = itemType.rarity === 'COMMON' ? '常见' : itemType.rarity === 'RARE' ? '稀有' : '任务';
-                rarityColor = itemType.rarity === 'COMMON' ? '#aaa' : itemType.rarity === 'RARE' ? '#4CAF50' : '#f5c542';
+                if (itemType.rarity === 'COMMON') {
+                  rarityLabel = '常见';
+                  rarityColor = '#aaa';
+                } else if (itemType.rarity === 'RARE') {
+                  rarityLabel = '稀有';
+                  rarityColor = '#4CAF50';
+                } else if (itemType.rarity === 'EPIC') {
+                  rarityLabel = '史诗';
+                  rarityColor = '#9d4edd';
+                }
                 const itemValue = itemType.value * item.qty;
                 totalValue += itemValue;
                 valueText = `$${itemValue}`;

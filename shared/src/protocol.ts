@@ -27,6 +27,7 @@ export const C2S_INPUT_SCHEMA = z.object({
   shotId: z.number().int().optional(), // 本次发射的唯一ID（用于客户端预测子弹对齐）
   shootOriginX: z.number().optional(), // 客户端渲染时的射击原点X
   shootOriginY: z.number().optional(), // 客户端渲染时的射击原点Y
+  spreadSeed: z.number().optional(), // 散布随机种子（客户端生成，服务端使用相同种子保证散布一致）
 });
 
 export const C2S_LOCAL_BULLET_HIT_SCHEMA = z.object({
@@ -200,6 +201,9 @@ export const WEAPON_RUNTIME_SCHEMA = z.object({
   ammoInMag: z.number().int().nonnegative(),
   reloadingUntilTick: z.number().int().nonnegative(),
   nextFireTick: z.number().int().nonnegative(),
+  burstRemaining: z.number().int().nonnegative().optional(),
+  burstNextTick: z.number().int().nonnegative().optional(),
+  fireCredit: z.number().int().nonnegative().optional(),
 });
 
 export const PLAYER_STATE_SCHEMA = z.object({
@@ -230,6 +234,8 @@ export const BULLET_STATE_SCHEMA = z.object({
   clientShotId: z.number().int().optional(), // 客户端发射ID（用于预测子弹对齐）
   weaponTypeId: z.string().optional(), // 武器类型ID（用于区分手雷、子弹等视觉样式）
   bulletLifeMs: z.number().optional(), // 子弹生命周期（毫秒，用于客户端TTL判断）
+  targetX: z.number().optional(),
+  targetY: z.number().optional(),
 });
 
 export const ITEM_STATE_SCHEMA = z.object({

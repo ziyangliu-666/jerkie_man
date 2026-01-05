@@ -149,6 +149,112 @@ export const WEAPONS: Record<string, WeaponDef> = {
     explosionRadius: 120,
     explosionDamage: 70,
   },
+  w_minigun: {
+    typeId: 'w_minigun',
+    name: '加特林机枪',
+    magSize: 200,        // 超大弹匣
+    reloadMs: 6000,      // 换弹极慢（6秒）
+    fireIntervalMs: 50,  // 极快射速（20发/秒）
+    spreadDeg: 8,        // 较大散布
+    bulletSpeed: 1000,
+    damage: 18,          // 单发伤害较低，但射速快
+    bulletLifeMs: 1200,
+  },
+  w_anti_material: {
+    typeId: 'w_anti_material',
+    name: '反器材狙击枪',
+    magSize: 3,          // 极小弹匣
+    reloadMs: 5000,      // 换弹极慢（5秒）
+    fireIntervalMs: 1500, // 极慢射速
+    spreadDeg: 0.3,      // 极高精度
+    bulletSpeed: 2000,   // 极快弹速
+    damage: 150,         // 超高伤害（一枪秒杀无甲）
+    bulletLifeMs: 3000,  // 超远射程
+  },
+  w_double_barrel: {
+    typeId: 'w_double_barrel',
+    name: '双管霰弹枪',
+    magSize: 2,          // 只有2发
+    reloadMs: 4000,      // 换弹慢
+    fireIntervalMs: 200, // 可以快速连射2发
+    spreadDeg: 15,       // 极大散布
+    bulletSpeed: 500,    // 慢弹速
+    damage: 25,          // 单弹丸伤害
+    bulletLifeMs: 300,   // 极短射程（0.3秒）
+    pelletCount: 12,     // 12颗弹丸（总伤害300）
+  },
+  w_laser_rifle: {
+    typeId: 'w_laser_rifle',
+    name: '激光步枪',
+    magSize: 30,
+    reloadMs: 2500,
+    fireIntervalMs: 150,
+    spreadDeg: 0,        // 零散布（激光）
+    bulletSpeed: 3000,   // 光速（几乎瞬间命中）
+    damage: 35,
+    bulletLifeMs: 500,   // 短射程（激光衰减）
+  },
+  w_crossbow: {
+    typeId: 'w_crossbow',
+    name: '弩',
+    magSize: 1,          // 单发装填
+    reloadMs: 3000,      // 装填慢
+    fireIntervalMs: 100, // 装填后可以快速射击
+    spreadDeg: 0.5,      // 高精度
+    bulletSpeed: 800,    // 中等速度
+    damage: 80,          // 高伤害
+    bulletLifeMs: 2000,  // 中等射程
+  },
+  w_auto_shotgun: {
+    typeId: 'w_auto_shotgun',
+    name: '全自动霰弹枪',
+    magSize: 12,
+    reloadMs: 4000,
+    fireIntervalMs: 150, // 全自动快速射击
+    spreadDeg: 10,
+    bulletSpeed: 550,
+    damage: 18,
+    bulletLifeMs: 400,
+    pelletCount: 6,      // 每次6颗弹丸
+  },
+  w_precision_rifle: {
+    typeId: 'w_precision_rifle',
+    name: '精确射手步枪',
+    magSize: 15,
+    reloadMs: 2800,
+    fireIntervalMs: 400,
+    spreadDeg: 0.4,      // 极高精度
+    bulletSpeed: 1400,
+    damage: 65,          // 高伤害
+    bulletLifeMs: 1800,
+    burstCount: 2,       // 二连发
+    burstIntervalMs: 80,
+  },
+  w_micro_smg: {
+    typeId: 'w_micro_smg',
+    name: '微型冲锋枪',
+    magSize: 50,         // 超大弹匣
+    reloadMs: 1800,      // 快速换弹
+    fireIntervalMs: 60,  // 极快射速
+    spreadDeg: 12,       // 极大散布
+    bulletSpeed: 850,
+    damage: 12,          // 低伤害
+    bulletLifeMs: 700,
+  },
+  w_chainsaw: {
+    typeId: 'w_chainsaw',
+    name: '链锯',
+    weaponKind: 'melee',
+    magSize: 0,
+    reloadMs: 0,
+    fireIntervalMs: 200, // 快速连续攻击
+    spreadDeg: 0,
+    bulletSpeed: 0,
+    damage: 30,          // 高近战伤害
+    bulletLifeMs: 0,
+    meleeRange: 60,      // 稍长近战范围
+    meleeArcDeg: 180,    // 180度扇形
+  },
 };
 
 // 背包配置
@@ -173,6 +279,11 @@ export const BAGS: Record<string, BagDef> = {
     name: '大背包',
     bagCap: 20,
   },
+  bag_military: {
+    typeId: 'bag_military',
+    name: '军用背包',
+    bagCap: 24, // 超大容量
+  },
 };
 
 // 防具配置
@@ -196,6 +307,11 @@ export const ARMORS: Record<string, ArmorDef> = {
     typeId: 'armor_heavy',
     name: '重甲',
     damageReduction: 0.5, // 减少 50% 伤害
+  },
+  armor_exo: {
+    typeId: 'armor_exo',
+    name: '外骨骼装甲',
+    damageReduction: 0.65, // 减少 65% 伤害（最强护甲）
   },
 };
 

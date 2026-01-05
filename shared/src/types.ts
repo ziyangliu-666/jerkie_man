@@ -3,7 +3,7 @@
  * 用于替换 lootCount，实现完整的背包/仓库/经济系统
  */
 
-export type Rarity = "COMMON" | "RARE" | "QUEST";
+export type Rarity = "COMMON" | "RARE" | "EPIC";
 
 export type ItemType = {
   id: string;        // "scrap_metal"
@@ -54,6 +54,7 @@ export type WeaponRuntime = {
   nextFireTick: number;        // tick < nextFireTick 禁止开火
   burstRemaining?: number;     // 连发剩余次数（0表示不在连发中）
   burstNextTick?: number;      // 连发下一发的时间（tick）
+  fireCredit?: number;         // ?????????????
 };
 
 export type PlayerProfile = {

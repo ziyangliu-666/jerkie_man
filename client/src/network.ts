@@ -620,7 +620,8 @@ export class Network {
     extractHeld: boolean = false, // 游戏化增强: 撤离持续状态
     shotId?: number, // 本次发射的唯一ID（用于客户端预测子弹对齐）
     shootOriginX?: number,
-    shootOriginY?: number
+    shootOriginY?: number,
+    spreadSeed?: number // 散布随机种子（客户端生成，服务端使用相同种子保证散布一致）
   ): boolean {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
       return false; // P0-1: 发送失败，返回 false
@@ -640,6 +641,7 @@ export class Network {
       shotId, // 本次发射的唯一ID（用于客户端预测子弹对齐）
       shootOriginX,
       shootOriginY,
+      spreadSeed, // 散布随机种子（客户端生成，服务端使用相同种子保证散布一致）
     });
 
     this.ws.send(JSON.stringify(message));

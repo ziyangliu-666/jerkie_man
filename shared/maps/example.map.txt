@@ -1,0 +1,12 @@
+# MAPTEXT v1
+@meta id=example name="Example Map"
+@map width=2000 height=2000 seed=12345
+@extract x=1800 y=1800 w=200 h=200
+
+@obstacle x=300 y=300 w=200 h=40
+@obstacle x=600 y=500 w=120 h=180
+@obstacle x=1200 y=260 w=160 h=120
+
+@spawn x=200 y=200
+@spawn x=400 y=400
+@spawn x=800 y=300
