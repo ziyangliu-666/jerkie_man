@@ -347,6 +347,8 @@ let stashList: HTMLElement | null = null;
 let shopList: HTMLElement | null = null;
 let shopTabs: HTMLElement | null = null;
 let currentShopCategory: string = 'weapon';
+// 跟踪每个物品的购买数量（key: itemType.id, value: 购买数量）
+const shopBuyCounts = new Map<string, number>();
 let stashTabs: HTMLElement | null = null;
 let currentStashCategory: string = 'weapon';
 let prepCapacity: HTMLElement | null = null;
@@ -1459,6 +1461,8 @@ function updateItemLists(): void {
 function updateShopList(): void {
     if (shopList) {
       shopList.innerHTML = '';
+      // 重置购买计数（切换分类或刷新时重置）
+      shopBuyCounts.clear();
       const allItemTypes = getAllItemTypes();
       
       // 按分类分组
@@ -1917,21 +1921,59 @@ function createShopRow(itemType: any): HTMLElement {
   
   const buyBtn = document.createElement('button');
   buyBtn.className = 'item-btn primary';
-  buyBtn.textContent = `购买 (${itemType.value})`;
+  
+  // 获取当前购买数量
+  const getBuyCount = (): number => shopBuyCounts.get(itemType.id) || 0;
+  
+  // 更新按钮文本
+  const updateButtonText = (count: number, animate: boolean = false) => {
+    if (count > 0) {
+      buyBtn.textContent = `已购买 ${count} 个`;
+      buyBtn.classList.add('success');
+      buyBtn.classList.remove('primary');
+      // 只有在需要时才播放动画
+      if (animate) {
+        buyBtn.style.animation = 'none';
+        setTimeout(() => {
+          buyBtn.style.animation = 'successPulse 0.4s ease-out';
+        }, 10);
+      } else {
+        // 移除动画，保持静态样式
+        buyBtn.style.animation = 'none';
+      }
+    } else {
+      buyBtn.textContent = `购买 (${itemType.value})`;
+      buyBtn.classList.remove('success');
+      buyBtn.classList.add('primary');
+      buyBtn.style.animation = 'none';
+    }
+  };
+  
+  // 初始化按钮状态
+  updateButtonText(getBuyCount());
+  
   buyBtn.onclick = () => {
-    if (playerProfile && playerProfile.money >= itemType.value) {
+    const currentCount = getBuyCount();
+    const newCount = currentCount + 1;
+    const totalCost = itemType.value * newCount;
+    
+    if (playerProfile && playerProfile.money >= totalCost) {
       buyBtn.classList.add('loading');
       network.sendBuy(itemType.id, 1);
-      hud.addEvent(`购买: ${itemType.name}`);
+      hud.addEvent(`购买: ${itemType.name} x${newCount}`);
+      
+      // 更新购买计数
+      shopBuyCounts.set(itemType.id, newCount);
+      
       // 延迟反馈，等待服务器响应
       setTimeout(() => {
         buyBtn.classList.remove('loading');
-        addButtonFeedback(buyBtn, true, '已购买');
+        updateButtonText(newCount, true); // 播放成功动画
       }, 300);
     } else {
       // 立即显示错误反馈
       addButtonFeedback(buyBtn, false, '金钱不足');
-      hud.addEvent(`金钱不足: 需要 ${itemType.value}，当前 ${playerProfile?.money ?? 0}`);
+      hud.addEvent(`金钱不足: 需要 ${totalCost}，当前 ${playerProfile?.money ?? 0}`);
     }
   };
   actions.appendChild(buyBtn);

@@ -776,9 +776,13 @@ ws.on('message', (data: Buffer) => {
             )
           );
         } else {
-          // 如果玩家在战局中，需要更新 weaponRuntime（仅武器槽）
-          if (playerId && parsed.slot === 'weapon') {
-            room.updatePlayerWeaponFromProfile(playerId, accountId);
+          // If the player is live, sync the equipped gear onto the entity.
+          if (playerId) {
+            if (parsed.slot === 'weapon') {
+              room.updatePlayerWeaponFromProfile(playerId, accountId);
+            } else {
+              room.updatePlayerGearFromProfile(playerId, accountId);
+            }
           }
           sendProfile(ws, accountId);
         }
