@@ -119,6 +119,20 @@ export const ITEM_CATALOG: Record<string, ItemType> = {
     value: 900,
     stackMax: 1,
   },
+  w_sniper: {
+    id: 'w_sniper',
+    name: '狙击步枪',
+    rarity: 'RARE',
+    value: 1800,
+    stackMax: 1,
+  },
+  w_grenade_launcher: {
+    id: 'w_grenade_launcher',
+    name: '榴弹炮',
+    rarity: 'RARE',
+    value: 2200,
+    stackMax: 1,
+  },
   
   // 背包 (4个)
   bag_sling: {

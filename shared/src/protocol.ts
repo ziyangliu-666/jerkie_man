@@ -89,6 +89,21 @@ export const C2S_EQUIP_SCHEMA = z.object({
   iid: z.string().nullable(), // null 表示卸下
 });
 
+// 新增: 局内丢弃物品
+export const C2S_DROP_ITEM_SCHEMA = z.object({
+  type: z.literal('C2S_DROP_ITEM'),
+  iid: z.string(),
+  qty: z.number().int().positive(),
+});
+
+// 新增: 局内装备切换（使用 typeId）
+export const C2S_RAID_EQUIP_SCHEMA = z.object({
+  type: z.literal('C2S_RAID_EQUIP'),
+  slot: z.enum(['weapon', 'bag', 'armor']),
+  iid: z.string().nullable().optional().default(null),
+  typeId: z.string().nullable().optional(), // 兼容旧客户端
+});
+
 // 新增: 通用交互消息（服务端选最近可交互目标，避免客户端指定ID）
 export const C2S_INTERACT_SCHEMA = z.object({
   type: z.literal('C2S_INTERACT'),
@@ -115,6 +130,8 @@ export const C2S_MESSAGE_SCHEMA = z.discriminatedUnion('type', [
   C2S_BUY_SCHEMA, // 新增: 商店购买物品
   C2S_ENTER_RAID_SCHEMA, // 新增: 进入战局
   C2S_EQUIP_SCHEMA, // 新增: 装备/卸下装备
+  C2S_DROP_ITEM_SCHEMA, // 新增: 局内丢弃物品
+  C2S_RAID_EQUIP_SCHEMA, // 新增: 局内装备切换
 ]);
 
 // S2C (Server to Client) 消息
@@ -134,6 +151,15 @@ export const PLAYER_EQUIPMENT_SCHEMA = z.object({
   weaponIid: z.string().nullable(),
   bagIid: z.string().nullable(),
   armorIid: z.string().nullable(),
+});
+
+// 新增: 局内装备状态（typeId）
+export const PLAYER_RAID_EQUIPMENT_SCHEMA = z.object({
+  weaponIid: z.string().nullable(),
+  bagIid: z.string().nullable(),
+  armorIid: z.string().nullable(),
+  bagTypeId: z.string().nullable(),
+  armorTypeId: z.string().nullable(),
 });
 
 export const WEAPON_RUNTIME_SCHEMA = z.object({
@@ -156,6 +182,7 @@ export const PLAYER_STATE_SCHEMA = z.object({
   inventory: PLAYER_INVENTORY_SCHEMA.optional(), // 新增: 背包系统
   name: z.string().optional(), // 新增: 玩家昵称（用于显示）
   weaponRuntime: WEAPON_RUNTIME_SCHEMA.optional(), // 新增: 武器运行时状态（局内状态）
+  raidEquipment: PLAYER_RAID_EQUIPMENT_SCHEMA.optional(), // 新增: 局内装备状态
   killedBy: z.string().optional(), // 新增: 击杀者名字
   killedByWeaponName: z.string().optional(), // 新增: 击杀使用的武器名称
 });
@@ -283,7 +310,6 @@ export const S2C_COMBAT_EVENT_SCHEMA = z.object({
   direction: z.number().optional(), // 可选：方向（弧度，用于受伤方向指示）
 });
 
-// ??: ????????????????
 export const S2C_MELEE_SWING_SCHEMA = z.object({
   type: z.literal('S2C_MELEE_SWING'),
   playerId: z.string(),
@@ -292,6 +318,13 @@ export const S2C_MELEE_SWING_SCHEMA = z.object({
   aimRad: z.number(),
   range: z.number(),
   arcRad: z.number(),
+});
+
+export const S2C_EXPLOSION_SCHEMA = z.object({
+  type: z.literal('S2C_EXPLOSION'),
+  x: z.number(),
+  y: z.number(),
+  radius: z.number().positive(),
 });
 
 export const S2C_MESSAGE_SCHEMA = z.discriminatedUnion('type', [
@@ -304,7 +337,8 @@ export const S2C_MESSAGE_SCHEMA = z.discriminatedUnion('type', [
   S2C_PROFILE_SCHEMA, // P1-1: Profile 消息
   S2C_RAID_RESULT_SCHEMA, // 新增: 战局结果消息
   S2C_COMBAT_EVENT_SCHEMA, // 新增: 战斗事件消息
-  S2C_MELEE_SWING_SCHEMA, // ??: ??????
+  S2C_MELEE_SWING_SCHEMA, // 新增: 近战挥击事件
+  S2C_EXPLOSION_SCHEMA, // 新增: 爆炸事件
 ]);
 
 // TypeScript 类型推导
@@ -326,7 +360,8 @@ export type S2C_PONG = z.infer<typeof S2C_PONG_SCHEMA>; // Day5: Pong 类型
 export type S2C_PROFILE = z.infer<typeof S2C_PROFILE_SCHEMA>;
 export type S2C_RAID_RESULT = z.infer<typeof S2C_RAID_RESULT_SCHEMA>; // P1-1: Profile 类型
 export type S2C_COMBAT_EVENT = z.infer<typeof S2C_COMBAT_EVENT_SCHEMA>; // 新增: 战斗事件类型
-export type S2C_MELEE_SWING = z.infer<typeof S2C_MELEE_SWING_SCHEMA>; // ??: ????????
+export type S2C_MELEE_SWING = z.infer<typeof S2C_MELEE_SWING_SCHEMA>; // 新增: 近战挥击事件类型
+export type S2C_EXPLOSION = z.infer<typeof S2C_EXPLOSION_SCHEMA>; // 新增: 爆炸事件类型
 export type S2C_MESSAGE = z.infer<typeof S2C_MESSAGE_SCHEMA>;
 
 // 新增: 物品系统类型导出
@@ -335,6 +370,7 @@ export type WORLD_ITEM = z.infer<typeof WORLD_ITEM_SCHEMA>;
 export type LOOT_BAG = z.infer<typeof LOOT_BAG_SCHEMA>;
 export type PLAYER_INVENTORY = z.infer<typeof PLAYER_INVENTORY_SCHEMA>;
 export type PLAYER_EQUIPMENT = z.infer<typeof PLAYER_EQUIPMENT_SCHEMA>;
+export type PLAYER_RAID_EQUIPMENT = z.infer<typeof PLAYER_RAID_EQUIPMENT_SCHEMA>;
 export type WEAPON_RUNTIME = z.infer<typeof WEAPON_RUNTIME_SCHEMA>;
 
 // 新增: 客户端动作消息类型
@@ -349,3 +385,5 @@ export type C2S_MOVE_PREP_TO_STASH = z.infer<typeof C2S_MOVE_PREP_TO_STASH_SCHEM
 export type C2S_BUY = z.infer<typeof C2S_BUY_SCHEMA>;
 export type C2S_ENTER_RAID = z.infer<typeof C2S_ENTER_RAID_SCHEMA>;
 export type C2S_EQUIP = z.infer<typeof C2S_EQUIP_SCHEMA>;
+export type C2S_DROP_ITEM = z.infer<typeof C2S_DROP_ITEM_SCHEMA>;
+export type C2S_RAID_EQUIP = z.infer<typeof C2S_RAID_EQUIP_SCHEMA>;

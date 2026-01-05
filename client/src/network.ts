@@ -13,6 +13,8 @@ import {
   C2S_BUY_SCHEMA, // 新增: 商店购买物品
   C2S_ENTER_RAID_SCHEMA, // 新增: 进入战局
   C2S_EQUIP_SCHEMA, // 新增: 装备/卸下装备
+  C2S_DROP_ITEM_SCHEMA, // 新增: 局内丢弃物品
+  C2S_RAID_EQUIP_SCHEMA, // 新增: 局内装备切换
   S2C_MESSAGE_SCHEMA,
   type S2C_MESSAGE,
   type S2C_SNAPSHOT,
@@ -20,6 +22,7 @@ import {
   type S2C_RAID_RESULT, // 新增: 战局结果消息类型
   type S2C_COMBAT_EVENT, // 新增: 战斗事件消息类型
   type S2C_MELEE_SWING, // 新增: 近战挥击事件类型
+  type S2C_EXPLOSION, // 新增: 爆炸事件类型
   type MAP_CONFIG, // P0-1 修复: 使用 shared 的 MAP_CONFIG 类型，避免类型漂移
   type OBSTACLE_STATE, // 修复: 静态世界初始化
   type ITEM_STATE, // 修复: 静态世界初始化
@@ -64,6 +67,7 @@ export interface NetworkCallbacks {
   onRaidResult?: (result: S2C_RAID_RESULT) => void; // 新增: 战局结果回调
   onCombatEvent?: (event: { kind: 'DRY_FIRE' | 'HIT' | 'DAMAGE_TAKEN'; direction?: number }) => void; // 新增: 战斗事件回调
   onMeleeSwing?: (event: S2C_MELEE_SWING) => void; // 新增: 近战挥击事件回调
+  onExplosion?: (event: S2C_EXPLOSION) => void; // 新增: 爆炸事件回调
 }
 
 export class Network {
@@ -216,6 +220,10 @@ export class Network {
             // 新增: 处理近战挥击事件
             if (this.callbacks.onMeleeSwing) {
               this.callbacks.onMeleeSwing(message);
+            }
+          } else if (message.type === 'S2C_EXPLOSION') {
+            if (this.callbacks.onExplosion) {
+              this.callbacks.onExplosion(message);
             }
           } else if (message.type === 'S2C_ERROR') {
             console.error('Server error:', message.message);
@@ -500,6 +508,44 @@ export class Network {
       return true;
     } catch (error) {
       console.error('Failed to send equip:', error);
+      return false;
+    }
+  }
+
+  // 新增: 发送局内装备切换消息
+  sendRaidEquip(slot: 'weapon' | 'bag' | 'armor', iid: string | null): boolean {
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+      return false;
+    }
+    try {
+      const message = C2S_RAID_EQUIP_SCHEMA.parse({
+        type: 'C2S_RAID_EQUIP',
+        slot,
+        iid,
+      });
+      this.ws.send(JSON.stringify(message));
+      return true;
+    } catch (error) {
+      console.error('Failed to send raid equip:', error);
+      return false;
+    }
+  }
+
+  // 新增: 局内丢弃物品
+  sendDropItem(iid: string, qty: number): boolean {
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+      return false;
+    }
+    try {
+      const message = C2S_DROP_ITEM_SCHEMA.parse({
+        type: 'C2S_DROP_ITEM',
+        iid,
+        qty,
+      });
+      this.ws.send(JSON.stringify(message));
+      return true;
+    } catch (error) {
+      console.error('Failed to send drop item:', error);
       return false;
     }
   }

@@ -24,6 +24,10 @@ export class Renderer {
   // 修复: 兜底刷新策略 - 记录上次刷新时间
   private lastRectUpdateAt: number = 0;
   private readonly RECT_REFRESH_INTERVAL_MS = 250; // 最多每 250ms 刷新一次
+  private shakeEndAt = 0;
+  private shakeStartAt = 0;
+  private shakeIntensity = 0;
+  private shakeDurationMs = 0;
 
   constructor(canvas: HTMLCanvasElement) {
     this.canvas = canvas;
@@ -33,6 +37,35 @@ export class Renderer {
     }
     this.ctx = ctx;
     // 不再自动resize，由外部调用resize()方法
+  }
+
+  triggerShake(intensity: number, durationMs: number = 180): void {
+    const clamped = Math.max(0, Math.min(1, intensity));
+    if (clamped <= 0) return;
+    const now = performance.now();
+    if (now > this.shakeEndAt || clamped > this.shakeIntensity) {
+      this.shakeIntensity = clamped;
+      this.shakeDurationMs = durationMs;
+      this.shakeStartAt = now;
+      this.shakeEndAt = now + durationMs;
+    } else {
+      this.shakeEndAt = Math.max(this.shakeEndAt, now + durationMs);
+    }
+  }
+
+  private getShakeOffset(): { x: number; y: number } {
+    const now = performance.now();
+    if (now >= this.shakeEndAt) {
+      return { x: 0, y: 0 };
+    }
+    const remaining = this.shakeEndAt - now;
+    const progress = Math.max(0, Math.min(1, remaining / this.shakeDurationMs));
+    const strength = this.shakeIntensity * progress;
+    const maxOffset = 14 * strength;
+    return {
+      x: (Math.random() - 0.5) * 2 * maxOffset,
+      y: (Math.random() - 0.5) * 2 * maxOffset,
+    };
   }
 
   // 屏幕坐标转世界坐标
@@ -395,6 +428,34 @@ export class Renderer {
     this.ctx.fill();
   }
 
+  drawExplosionEffect(effect: { x: number; y: number; radius: number; age: number }): void {
+    const screenX = effect.x - this.camX;
+    const screenY = effect.y - this.camY;
+
+    const alpha = Math.max(0, 1 - effect.age);
+    const ringAlpha = alpha * 0.9;
+    const fillAlpha = alpha * 0.12;
+
+    this.ctx.save();
+    this.ctx.strokeStyle = `rgba(255, 200, 80, ${ringAlpha})`;
+    this.ctx.lineWidth = 2;
+    this.ctx.beginPath();
+    this.ctx.arc(screenX, screenY, effect.radius, 0, Math.PI * 2);
+    this.ctx.stroke();
+
+    this.ctx.fillStyle = `rgba(255, 140, 0, ${fillAlpha})`;
+    this.ctx.beginPath();
+    this.ctx.arc(screenX, screenY, effect.radius, 0, Math.PI * 2);
+    this.ctx.fill();
+
+    const coreRadius = Math.max(6, Math.min(18, effect.radius * 0.2)) * (1 - effect.age * 0.5);
+    this.ctx.fillStyle = `rgba(255, 255, 255, ${alpha * 0.7})`;
+    this.ctx.beginPath();
+    this.ctx.arc(screenX, screenY, coreRadius, 0, Math.PI * 2);
+    this.ctx.fill();
+    this.ctx.restore();
+  }
+
   // 近战挥击特效（扇形弧线）
   drawMeleeSwing(effect: { x: number; y: number; aimRad: number; range: number; arcRad: number; age: number }): void {
     const screenX = effect.x - this.camX;
@@ -557,6 +618,7 @@ export class Renderer {
     lootBags: LootBag[] = [], // 新增: 掉落包列表
     meleeSwings: Array<{ x: number; y: number; aimRad: number; range: number; arcRad: number; age: number }> = [],
     hitEffects: Array<{ x: number; y: number; age: number; type: 'obstacle' | 'player' }> = [], // 命中特效
+    explosionEffects: Array<{ x: number; y: number; radius: number; age: number }> = [],
     currentServerTick?: number // 新增: 当前服务器 tick（用于计算换弹进度）
   ): void {
     this.clear();
@@ -580,6 +642,9 @@ export class Renderer {
         this.camY = targetCamY;
       }
     }
+    const shakeOffset = this.getShakeOffset();
+    this.camX += shakeOffset.x;
+    this.camY += shakeOffset.y;
     // 如果本地玩家不存在，camX/camY保持0（不移动camera）
 
     // 新增: 绘制地图边界框（最底层）
@@ -635,6 +700,11 @@ export class Renderer {
     // Day2: 绘制所有子弹
     for (const bullet of bullets) {
       this.drawBullet(bullet);
+    }
+
+    // 爆炸特效（真实半径）
+    for (const explosion of explosionEffects) {
+      this.drawExplosionEffect(explosion);
     }
 
     // 绘制命中特效（简易闪光）

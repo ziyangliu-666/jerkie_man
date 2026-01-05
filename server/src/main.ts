@@ -13,6 +13,7 @@ import {
   S2C_RAID_RESULT_SCHEMA, // 新增: 战局结果消息
   S2C_COMBAT_EVENT_SCHEMA, // 新增: 战斗事件消息
   S2C_MELEE_SWING_SCHEMA, // 新增: 近战挥击事件
+  S2C_EXPLOSION_SCHEMA, // 新增: 爆炸事件
   getWeaponDef, // 新增: 用于重置武器运行时状态
   type C2S_MESSAGE,
 } from '@jerkie-man/shared';
@@ -621,6 +622,60 @@ ws.on('message', (data: Buffer) => {
           }
           sendProfile(ws, accountId);
         }
+      } else if (parsed.type === 'C2S_RAID_EQUIP') {
+        // 新增: 处理局内装备切换
+        if (!playerId) {
+          ws.send(
+            JSON.stringify(
+              S2C_ERROR_SCHEMA.parse({
+                type: 'S2C_ERROR',
+                code: 'NOT_AUTHENTICATED',
+                message: 'Must send C2S_HELLO first',
+              })
+            )
+          );
+          return;
+        }
+
+        const result = room.handleRaidEquip(playerId, parsed.slot, parsed.iid, parsed.typeId ?? null);
+        if (!result.success) {
+          ws.send(
+            JSON.stringify(
+              S2C_ERROR_SCHEMA.parse({
+                type: 'S2C_ERROR',
+                code: 'RAID_EQUIP_FAILED',
+                message: result.message || 'Failed to equip raid item',
+              })
+            )
+          );
+        }
+      } else if (parsed.type === 'C2S_DROP_ITEM') {
+        // 新增: 处理局内丢弃物品
+        if (!playerId) {
+          ws.send(
+            JSON.stringify(
+              S2C_ERROR_SCHEMA.parse({
+                type: 'S2C_ERROR',
+                code: 'NOT_AUTHENTICATED',
+                message: 'Must send C2S_HELLO first',
+              })
+            )
+          );
+          return;
+        }
+
+        const result = room.handleDropItem(playerId, parsed.iid, parsed.qty);
+        if (!result.success) {
+          ws.send(
+            JSON.stringify(
+              S2C_ERROR_SCHEMA.parse({
+                type: 'S2C_ERROR',
+                code: 'DROP_FAILED',
+                message: result.message || 'Failed to drop item',
+              })
+            )
+          );
+        }
       } else if (parsed.type === 'C2S_ENTER_RAID') {
         // 新增: 处理进入战局
         if (!playerId) {
@@ -700,6 +755,7 @@ ws.on('message', (data: Buffer) => {
                   reloadingUntilTick: 0,
                   nextFireTick: room.tick,
                 };
+                player.equippedWeaponItem = { ...weaponItem };
               } catch {
                 // 无效武器类型，使用默认 FISTS
                 const defaultWeaponDef = getWeaponDef('w_fists');
@@ -709,6 +765,7 @@ ws.on('message', (data: Buffer) => {
                   reloadingUntilTick: 0,
                   nextFireTick: room.tick,
                 };
+                player.equippedWeaponItem = null;
               }
             } else {
               // 武器不在 stash 或 prep 中，使用默认 FISTS
@@ -719,6 +776,7 @@ ws.on('message', (data: Buffer) => {
                 reloadingUntilTick: 0,
                 nextFireTick: room.tick,
               };
+              player.equippedWeaponItem = null;
             }
           } else {
             // 没有装备武器，使用默认 FISTS
@@ -729,6 +787,7 @@ ws.on('message', (data: Buffer) => {
               reloadingUntilTick: 0,
               nextFireTick: room.tick,
             };
+            player.equippedWeaponItem = null;
           }
           
           log('PLAYER_RESPAWN', {
@@ -741,8 +800,25 @@ ws.on('message', (data: Buffer) => {
           });
         }
         
+        // 进入战局前重置局内背包/护甲状态
+        room.updatePlayerGearFromProfile(playerId, accountId);
+
+        const equippedIids = new Set<string>();
+        if (profile.equipment.weaponIid) equippedIids.add(profile.equipment.weaponIid);
+        if (profile.equipment.bagIid) equippedIids.add(profile.equipment.bagIid);
+        if (profile.equipment.armorIid) equippedIids.add(profile.equipment.armorIid);
+
+        if (profile.prep.length > 0 && equippedIids.size > 0) {
+          const stashIids = new Set(profile.stash.map(item => item.iid));
+          const equipFromPrep = profile.prep.filter(item => equippedIids.has(item.iid));
+          const moveToStash = equipFromPrep.filter(item => !stashIids.has(item.iid));
+          if (moveToStash.length > 0) {
+            room.profileManager.addToStash(accountId, moveToStash);
+          }
+        }
+
         // 将 prep 物品移到 inventory（允许空 prep）
-        const prepItems = profile.prep || [];
+        const prepItems = profile.prep.filter(item => !equippedIids.has(item.iid));
         for (const prepItem of prepItems) {
           // 检查背包容量
           const currentCount = player.inventory.items.reduce((sum, item) => sum + item.qty, 0);
@@ -1189,6 +1265,32 @@ setInterval(() => {
         aimRad: swing.aimRad,
         range: swing.range,
         arcRad: swing.arcRad,
+      });
+
+      for (const ws of connections.keys()) {
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify(message));
+        }
+      }
+    }
+  }
+
+  // 广播爆炸事件（用于视觉效果）
+  const explosions = room.drainExplosions();
+  if (explosions.length > 0) {
+    for (const explosion of explosions) {
+      log('EXPLOSION_BROADCAST', {
+        room: room.id,
+        x: explosion.x,
+        y: explosion.y,
+        radius: explosion.radius,
+        tick: room.tick,
+      });
+      const message = S2C_EXPLOSION_SCHEMA.parse({
+        type: 'S2C_EXPLOSION',
+        x: explosion.x,
+        y: explosion.y,
+        radius: explosion.radius,
       });
 
       for (const ws of connections.keys()) {

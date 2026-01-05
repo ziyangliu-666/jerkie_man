@@ -259,6 +259,97 @@ export class ProfileManager {
     }
   }
 
+  private normalizeContainers(profile: PlayerProfile): void {
+    profile.stash = this.normalizeContainer(profile.stash);
+    profile.prep = this.normalizeContainer(profile.prep);
+  }
+
+  private normalizeContainer(items: ItemInstance[]): ItemInstance[] {
+    const stackTotals = new Map<string, number>();
+    const keepItems: ItemInstance[] = [];
+
+    for (const item of items) {
+      let itemType: ReturnType<typeof getItemType> | null = null;
+      try {
+        itemType = getItemType(item.typeId);
+      } catch {
+        keepItems.push(item);
+        continue;
+      }
+
+      if (itemType.stackMax <= 1) {
+        keepItems.push(item);
+        continue;
+      }
+      stackTotals.set(item.typeId, (stackTotals.get(item.typeId) ?? 0) + item.qty);
+    }
+
+    const stackedItems: ItemInstance[] = [];
+    for (const [typeId, qty] of stackTotals) {
+      const itemType = getItemType(typeId);
+      let remaining = qty;
+      while (remaining > 0) {
+        const stackQty = Math.min(remaining, itemType.stackMax);
+        stackedItems.push({
+          iid: this.generateIid(),
+          typeId,
+          qty: stackQty,
+        });
+        remaining -= stackQty;
+      }
+    }
+
+    const merged = [...keepItems, ...stackedItems];
+    merged.sort((a, b) => this.compareItems(a, b));
+    return merged;
+  }
+
+  private compareItems(a: ItemInstance, b: ItemInstance): number {
+    const aCategory = this.getCategoryOrder(a.typeId);
+    const bCategory = this.getCategoryOrder(b.typeId);
+    if (aCategory !== bCategory) return aCategory - bCategory;
+
+    const aType = this.safeGetItemType(a.typeId);
+    const bType = this.safeGetItemType(b.typeId);
+    const aRarity = this.getRarityOrder(aType?.rarity);
+    const bRarity = this.getRarityOrder(bType?.rarity);
+    if (aRarity !== bRarity) return aRarity - bRarity;
+
+    const aName = aType?.name ?? a.typeId;
+    const bName = bType?.name ?? b.typeId;
+    if (aName !== bName) return aName.localeCompare(bName);
+
+    const aStackable = (aType?.stackMax ?? 1) > 1;
+    const bStackable = (bType?.stackMax ?? 1) > 1;
+    if (aStackable && bStackable && a.qty !== b.qty) {
+      return b.qty - a.qty;
+    }
+    return a.typeId.localeCompare(b.typeId);
+  }
+
+  private safeGetItemType(typeId: string): ReturnType<typeof getItemType> | null {
+    try {
+      return getItemType(typeId);
+    } catch {
+      return null;
+    }
+  }
+
+  private getCategoryOrder(typeId: string): number {
+    const slot = this.getItemSlot(typeId);
+    if (slot === 'weapon') return 0;
+    if (slot === 'armor') return 1;
+    if (slot === 'bag') return 2;
+    return 3;
+  }
+
+  private getRarityOrder(rarity?: string): number {
+    if (rarity === 'COMMON') return 0;
+    if (rarity === 'RARE') return 1;
+    if (rarity === 'QUEST') return 2;
+    return 3;
+  }
+
   /**
    * 计算添加物品会额外占多少槽位
    */
@@ -419,6 +510,9 @@ export class ProfileManager {
     if (updates.bagCap !== undefined) {
       profile.bagCap = updates.bagCap;
     }
+    if (updates.stash !== undefined || updates.prep !== undefined) {
+      this.normalizeContainers(profile);
+    }
     this.markDirty();
     return profile;
   }
@@ -447,6 +541,7 @@ export class ProfileManager {
     }
     
     this.markDirty();
+    this.normalizeContainers(profile);
     this.normalizeEquipment(profile);
     log('STASH_ADD', { accountId, itemCount: items.length, totalStash: profile.stash.length });
   }
@@ -511,6 +606,7 @@ export class ProfileManager {
     profile.money += earned;
     
     this.markDirty();
+    this.normalizeContainers(profile);
     this.normalizeEquipment(profile);
     log('STASH_SELL', { accountId, iid, qty, earned, newMoney: profile.money });
     
@@ -557,6 +653,7 @@ export class ProfileManager {
       profile.prep.push(moved);
       
       this.markDirty();
+      this.normalizeContainers(profile);
       this.normalizeEquipment(profile);
       log('MOVE_STASH_TO_PREP', { accountId, iid, qty: 1, typeId: stashItem.typeId });
       return { success: true };
@@ -583,6 +680,7 @@ export class ProfileManager {
     this.addStackableToContainer(profile.prep, stashItem.typeId, qty);
     
     this.markDirty();
+    this.normalizeContainers(profile);
     this.normalizeEquipment(profile);
     log('MOVE_STASH_TO_PREP', { accountId, iid, qty, typeId: stashItem.typeId });
     return { success: true };
@@ -623,6 +721,7 @@ export class ProfileManager {
       profile.stash.push(moved);
       
       this.markDirty();
+      this.normalizeContainers(profile);
       this.normalizeEquipment(profile);
       log('MOVE_PREP_TO_STASH', { accountId, iid, qty: 1, typeId: prepItem.typeId });
       return { success: true };
@@ -643,6 +742,7 @@ export class ProfileManager {
     this.addStackableToContainer(profile.stash, prepItem.typeId, qty);
     
     this.markDirty();
+    this.normalizeContainers(profile);
     this.normalizeEquipment(profile);
     log('MOVE_PREP_TO_STASH', { accountId, iid, qty, typeId: prepItem.typeId });
     return { success: true };
@@ -689,6 +789,7 @@ export class ProfileManager {
     }
     
     this.markDirty();
+    this.normalizeContainers(profile);
     this.normalizeEquipment(profile);
     log('BUY_ITEM', { accountId, typeId, qty, cost: totalCost, newMoney: profile.money });
     return { success: true, money: profile.money };
@@ -747,6 +848,7 @@ export class ProfileManager {
     profile.equipment[`${slot}Iid` as keyof PlayerEquipment] = iid;
     
     this.markDirty();
+    this.normalizeContainers(profile);
     this.normalizeEquipment(profile);
     
     log('EQUIP_ITEM', { accountId, slot, iid: item.iid, typeId: item.typeId });

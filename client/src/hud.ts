@@ -1,5 +1,5 @@
-import type { PLAYER_STATE, S2C_SNAPSHOT, PlayerInventory, ItemInstance } from '@jerkie-man/shared';
-import { getItemType, ITEM_CATALOG } from '@jerkie-man/shared';
+import type { PLAYER_STATE, PlayerInventory, ItemInstance } from '@jerkie-man/shared';
+import { getItemType, getWeaponDef, ticksToMs } from '@jerkie-man/shared';
 
 /**
  * HTML 转义函数（防止 XSS）
@@ -42,14 +42,14 @@ export interface HUDData {
   money?: number; // 钱（需要从服务器获取，暂时留空）
   // 新增: 局内交互提示
   nearbyInteractable?: { type: 'worldItem' | 'lootBag' | 'extractZone'; name: string; distance: number } | null;
+  localPlayer?: PLAYER_STATE | null;
 }
 
 export class HUD {
   private container: HTMLElement;
   private events: string[] = [];
   private readonly maxEvents = 30;
-  // 缓存上次渲染的 stash 数据，避免频繁重建 DOM
-  private lastStashJson: string = '';
+  private lastInventorySignature: string | null = null;
 
   constructor(containerId: string) {
     const container = document.getElementById(containerId);
@@ -70,18 +70,15 @@ export class HUD {
       
       <h3>计数</h3>
       <div id="hud-counts"></div>
+
+      <h3>战斗状态</h3>
+      <div id="hud-status"></div>
       
       <h3>附近交互（按E）</h3>
       <div id="hud-nearby" style="color: #4CAF50; font-weight: bold;"></div>
       
       <h3>背包（局内）</h3>
       <div id="hud-inventory"></div>
-      
-      <h3>仓库（局外）</h3>
-      <div id="hud-stash"></div>
-      
-      <h3>金钱</h3>
-      <div id="hud-money"></div>
       
       <h3>选中实体</h3>
       <div id="hud-selected"></div>
@@ -140,22 +137,21 @@ export class HUD {
         playersEl.innerHTML = '<div>无玩家</div>';
       } else {
         // 修复: 对玩家数据使用 escapeHtml（防止恶意 playerId 等字段注入）
-        let html = '<table><tr><th>ID</th><th>X</th><th>Y</th><th>血量</th><th>状态</th><th>战利品</th><th>序号</th></tr>';
+        let html = '<table><tr><th>名字</th><th>血量</th><th>坐标</th><th>状态</th></tr>';
         for (const player of data.players) {
           let statusText: string;
           if (player.status === 'ALIVE') statusText = '存活';
           else if (player.status === 'DEAD') statusText = '死亡';
           else if (player.status === 'EXTRACTED') statusText = '已撤离';
           else statusText = player.status;
+          const displayName = player.name && player.name.trim().length > 0 ? player.name : player.id.substring(0, 8);
+          const coordText = `(${player.x.toFixed(1)}, ${player.y.toFixed(1)})`;
           html += `
             <tr>
-              <td>${escapeHtml(player.id.substring(0, 8))}</td>
-              <td>${escapeHtml(player.x.toFixed(1))}</td>
-              <td>${escapeHtml(player.y.toFixed(1))}</td>
+              <td>${escapeHtml(displayName)}</td>
               <td>${escapeHtml(player.hp)}</td>
+              <td>${escapeHtml(coordText)}</td>
               <td>${escapeHtml(statusText)}</td>
-              <td>${escapeHtml(player.lootCount ?? 0)}</td>
-              <td>${escapeHtml(player.lastInputSeq)}</td>
             </tr>
           `;
         }
@@ -174,6 +170,62 @@ export class HUD {
       `;
     }
 
+    // Status (Local Player)
+    const statusEl = document.getElementById('hud-status');
+    if (statusEl) {
+      const local = data.localPlayer;
+      if (!local) {
+        statusEl.innerHTML = '<div>未进入战局</div>';
+      } else {
+        const hp = local.hp;
+        let hpLabel = '良好';
+        if (hp <= 20) hpLabel = '危急';
+        else if (hp <= 40) hpLabel = '重伤';
+        else if (hp <= 70) hpLabel = '轻伤';
+
+        let statusText = local.status === 'ALIVE' ? '存活' : local.status === 'DEAD' ? '阵亡' : '已撤离';
+        let extraStatus = '';
+        if (local.status === 'DEAD' && local.killedBy) {
+          const weaponName = local.killedByWeaponName ? `（${escapeHtml(local.killedByWeaponName)}）` : '';
+          extraStatus = `<div><strong>击杀来源：</strong> ${escapeHtml(local.killedBy)}${weaponName}</div>`;
+        }
+
+        let weaponName = '空手';
+        let ammoLine = '';
+        let reloadLine = '';
+        let cooldownLine = '';
+        if (local.weaponRuntime) {
+          try {
+            const weaponDef = getWeaponDef(local.weaponRuntime.weaponTypeId);
+            weaponName = weaponDef.name;
+            if (weaponDef.magSize > 0) {
+              ammoLine = `<div><strong>弹匣：</strong> ${escapeHtml(local.weaponRuntime.ammoInMag)}/${escapeHtml(weaponDef.magSize)}</div>`;
+            }
+          } catch {
+            weaponName = local.weaponRuntime.weaponTypeId;
+          }
+          const reloadRemaining = local.weaponRuntime.reloadingUntilTick - data.connection.lastServerTick;
+          if (reloadRemaining > 0) {
+            reloadLine = `<div><strong>换弹：</strong> 进行中（${escapeHtml(ticksToMs(reloadRemaining))}ms）</div>`;
+          }
+          const cooldownRemaining = local.weaponRuntime.nextFireTick - data.connection.lastServerTick;
+          if (cooldownRemaining > 0) {
+            cooldownLine = `<div><strong>冷却：</strong> ${escapeHtml(ticksToMs(cooldownRemaining))}ms</div>`;
+          }
+        }
+
+        statusEl.innerHTML = `
+          <div><strong>状态：</strong> ${escapeHtml(statusText)}</div>
+          <div><strong>生命：</strong> ${escapeHtml(hp)}/100（${escapeHtml(hpLabel)}）</div>
+          <div><strong>武器：</strong> ${escapeHtml(weaponName)}</div>
+          ${ammoLine}
+          ${reloadLine}
+          ${cooldownLine}
+          ${extraStatus}
+        `;
+      }
+    }
+
     // 新增: Nearby Interaction
     const nearbyEl = document.getElementById('hud-nearby');
     if (nearbyEl) {
@@ -189,72 +241,63 @@ export class HUD {
     // 新增: Inventory (In-Raid)
     const inventoryEl = document.getElementById('hud-inventory');
     if (inventoryEl) {
-      if (data.inventory) {
-        const items = data.inventory.items;
-        if (items.length === 0) {
-          inventoryEl.innerHTML = '<div>空</div>';
-        } else {
-          let html = `<div><strong>容量：</strong> ${items.length}/${data.inventory.bagCap}</div><ul>`;
-          for (const item of items) {
-            try {
-              const itemType = getItemType(item.typeId);
-              html += `<li>${escapeHtml(itemType.name)} x${escapeHtml(item.qty)}</li>`;
-            } catch {
-              html += `<li>${escapeHtml(item.typeId)} x${escapeHtml(item.qty)}</li>`;
-            }
-          }
-          html += '</ul>';
-          inventoryEl.innerHTML = html;
-        }
-      } else {
-        inventoryEl.innerHTML = '<div>不可用</div>';
-      }
-    }
+      const inventorySignature = data.inventory
+        ? `${data.inventory.bagCap}|${data.inventory.items
+            .map((item) => `${item.iid}:${item.typeId}:${item.qty}`)
+            .join(',')}`
+        : 'none';
 
-    // 新增: Stash (Out-of-Raid)
-    const stashEl = document.getElementById('hud-stash');
-    if (stashEl) {
-      // 关键优化：只在 stash 数据真正变化时才重建 DOM（避免点击时按钮被销毁）
-      const currentStashJson = JSON.stringify(data.stash || []);
-      if (currentStashJson !== this.lastStashJson) {
-        this.lastStashJson = currentStashJson;
-        
-        if (data.stash && data.stash.length > 0) {
-          // 逐条显示每个 ItemInstance（不显示 Sell 按钮）
-          let html = '<ul style="list-style: none; padding: 0; margin: 0;">';
-          for (const item of data.stash) {
-            try {
-              const itemType = getItemType(item.typeId);
-              const value = itemType.value * item.qty;
-              html += `
-                <li style="display:flex; justify-content:space-between; align-items:center; margin:4px 0; gap:8px;">
-                  <span>${escapeHtml(itemType.name)} x${escapeHtml(item.qty)} ($${escapeHtml(value)})</span>
-                </li>
-              `;
-            } catch {
-              // 未知物品类型，仍然显示但标记为 Unknown
-              html += `
-                <li style="display:flex; justify-content:space-between; align-items:center; margin:4px 0; gap:8px;">
-                  <span>${escapeHtml(item.typeId)} x${escapeHtml(item.qty)} (未知)</span>
-                </li>
+      if (inventorySignature !== this.lastInventorySignature) {
+        this.lastInventorySignature = inventorySignature;
+        if (data.inventory) {
+          const items = data.inventory.items;
+          if (items.length === 0) {
+            inventoryEl.innerHTML = '<div>空</div>';
+          } else {
+            let totalValue = 0;
+            let rows = '';
+            for (const item of items) {
+              let itemName = item.typeId;
+              let rarityLabel = '未知';
+              let rarityColor = '#888';
+              let valueText = '未知';
+              let stackableText = '未知';
+              try {
+                const itemType = getItemType(item.typeId);
+                itemName = itemType.name;
+                rarityLabel = itemType.rarity === 'COMMON' ? '常见' : itemType.rarity === 'RARE' ? '稀有' : '任务';
+                rarityColor = itemType.rarity === 'COMMON' ? '#aaa' : itemType.rarity === 'RARE' ? '#4CAF50' : '#f5c542';
+                const itemValue = itemType.value * item.qty;
+                totalValue += itemValue;
+                valueText = `$${itemValue}`;
+                stackableText = itemType.stackMax > 1 ? `可堆叠(${itemType.stackMax})` : '不可堆叠';
+              } catch {
+                itemName = item.typeId;
+              }
+              rows += `
+                <tr>
+                  <td>${escapeHtml(itemName)} <span style="color: ${rarityColor}; font-size: 10px; margin-left: 4px;">${escapeHtml(rarityLabel)}</span></td>
+                  <td>x${escapeHtml(item.qty)}</td>
+                  <td>${escapeHtml(valueText)}</td>
+                  <td>${escapeHtml(stackableText)}</td>
+                  <td><button class="item-btn hud-drop-btn" data-iid="${escapeHtml(item.iid)}" data-qty="${escapeHtml(item.qty)}">丢弃</button></td>
+                </tr>
               `;
             }
+            const totalQty = items.reduce((sum, entry) => sum + entry.qty, 0);
+            let html = `
+              <div><strong>容量：</strong> ${escapeHtml(items.length)}/${escapeHtml(data.inventory.bagCap)} <span style="color: #666;">| 总数 ${escapeHtml(totalQty)}</span></div>
+              <div><strong>总价值：</strong> $${escapeHtml(totalValue)}</div>
+              <table>
+                <tr><th>物品</th><th>数量</th><th>价值</th><th>堆叠</th><th>操作</th></tr>
+                ${rows}
+              </table>
+            `;
+            inventoryEl.innerHTML = html;
           }
-          html += '</ul>';
-          stashEl.innerHTML = html;
         } else {
-          stashEl.innerHTML = '<div>空</div>';
+          inventoryEl.innerHTML = '<div>不可用</div>';
         }
-      }
-    }
-
-    // 新增: Money
-    const moneyEl = document.getElementById('hud-money');
-    if (moneyEl) {
-      if (data.money !== undefined) {
-        moneyEl.innerHTML = `<div><strong>$${escapeHtml(data.money)}</strong></div>`;
-      } else {
-        moneyEl.innerHTML = '<div>不可用</div>';
       }
     }
 

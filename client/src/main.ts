@@ -56,6 +56,16 @@ const DEFAULT_MELEE_ARC_DEG = 60;
 const MELEE_SWING_TTL_MS = 160;
 let meleeSwings: MeleeSwing[] = [];
 
+type ExplosionEffect = {
+  x: number;
+  y: number;
+  radius: number;
+  spawnTimeMs: number;
+};
+
+const EXPLOSION_EFFECT_TTL_MS = 500;
+let explosionEffects: ExplosionEffect[] = [];
+
 /**
  * 获取本地开火冷却时间（毫秒）
  * 使用shared层的单一数据源，不再有默认值回退
@@ -272,6 +282,29 @@ let equipSelectTitle: HTMLElement | null = null;
 let equipSelectCancel: HTMLButtonElement | null = null;
 let currentSelectSlot: 'weapon' | 'bag' | 'armor' | null = null;
 
+// 新增: RAID 局内装备 UI
+let raidEquipment: HTMLElement | null = null;
+let raidWeaponName: HTMLElement | null = null;
+let raidWeaponMeta: HTMLElement | null = null;
+let raidWeaponSwap: HTMLButtonElement | null = null;
+let raidWeaponUnequip: HTMLButtonElement | null = null;
+let raidBagName: HTMLElement | null = null;
+let raidBagMeta: HTMLElement | null = null;
+let raidBagToggle: HTMLButtonElement | null = null;
+let raidBagList: HTMLElement | null = null;
+let raidArmorName: HTMLElement | null = null;
+let raidArmorMeta: HTMLElement | null = null;
+let weaponHud: HTMLElement | null = null;
+let weaponHudName: HTMLElement | null = null;
+let weaponHudAmmo: HTMLElement | null = null;
+let weaponHudMag: HTMLElement | null = null;
+let weaponHudState: HTMLElement | null = null;
+let weaponHudReload: HTMLElement | null = null;
+let weaponHudReloadFill: HTMLElement | null = null;
+let healthHud: HTMLElement | null = null;
+let healthHudValue: HTMLElement | null = null;
+let healthHudFill: HTMLElement | null = null;
+
 // 获取 Hideout UI DOM 元素的辅助函数
 function getHideoutElements(): void {
   if (!hideoutUI) hideoutUI = document.getElementById('hideoutUI');
@@ -296,15 +329,51 @@ function getHideoutElements(): void {
   if (!equipSelectCancel) equipSelectCancel = document.getElementById('equipSelectCancel') as HTMLButtonElement;
 }
 
+// 新增: 获取 RAID UI DOM 元素
+function getRaidElements(): void {
+  if (!raidEquipment) raidEquipment = document.getElementById('raidEquipment');
+  if (!raidWeaponName) raidWeaponName = document.getElementById('raidWeaponName');
+  if (!raidWeaponMeta) raidWeaponMeta = document.getElementById('raidWeaponMeta');
+  if (!raidWeaponSwap) raidWeaponSwap = document.getElementById('raidWeaponSwap') as HTMLButtonElement;
+  if (!raidWeaponUnequip) raidWeaponUnequip = document.getElementById('raidWeaponUnequip') as HTMLButtonElement;
+  if (!raidBagName) raidBagName = document.getElementById('raidBagName');
+  if (!raidBagMeta) raidBagMeta = document.getElementById('raidBagMeta');
+  if (!raidBagToggle) raidBagToggle = document.getElementById('raidBagToggle') as HTMLButtonElement;
+  if (!raidBagList) raidBagList = document.getElementById('raidBagList');
+  if (!raidArmorName) raidArmorName = document.getElementById('raidArmorName');
+  if (!raidArmorMeta) raidArmorMeta = document.getElementById('raidArmorMeta');
+}
+
+function getWeaponHudElements(): void {
+  if (!weaponHud) weaponHud = document.getElementById('weaponHud');
+  if (!weaponHudName) weaponHudName = document.getElementById('weaponHudName');
+  if (!weaponHudAmmo) weaponHudAmmo = document.getElementById('weaponHudAmmo');
+  if (!weaponHudMag) weaponHudMag = document.getElementById('weaponHudMag');
+  if (!weaponHudState) weaponHudState = document.getElementById('weaponHudState');
+  if (!weaponHudReload) weaponHudReload = document.getElementById('weaponHudReload');
+  if (!weaponHudReloadFill) weaponHudReloadFill = document.getElementById('weaponHudReloadFill');
+}
+
+function getHealthHudElements(): void {
+  if (!healthHud) healthHud = document.getElementById('healthHud');
+  if (!healthHudValue) healthHudValue = document.getElementById('healthHudValue');
+  if (!healthHudFill) healthHudFill = document.getElementById('healthHudFill');
+}
+
 // 修复: 客户端预测相关状态（必须在 updatePhaseUI 之前定义）
 let predictedLocalPlayer: PLAYER_STATE | null = null; // 预测的本地玩家状态
 let renderLocalPlayer: PLAYER_STATE | null = null; // 渲染平滑 - 每帧平滑追向预测位置，避免 20Hz 步进卡顿
+let raidLocalPlayer: PLAYER_STATE | null = null; // 局内装备 HUD 使用
+let raidBagExpanded = false;
+let lastRaidBagSignature = '';
+let lastRaidBagExpanded = false;
 
 // 新增: 更新 phase UI（显示/隐藏 modal，控制世界渲染等）
 function updatePhaseUI(): void {
   // 确保 DOM 元素已获取
   getModalElements();
   getHideoutElements();
+  getRaidElements();
   
   // 修复: 如果关键 DOM 元素未准备好，延迟到 DOMContentLoaded
   if (!nameModal || !hideoutUI) {
@@ -328,6 +397,9 @@ function updatePhaseUI(): void {
     if (hideoutUI) {
       hideoutUI.style.display = 'none';
     }
+    if (raidEquipment) {
+      raidEquipment.style.display = 'none';
+    }
     // 非 RAID 时清理预测/子弹轨迹并停止渲染世界
     predictedLocalPlayer = null;
     renderLocalPlayer = null;
@@ -345,6 +417,9 @@ function updatePhaseUI(): void {
         updateHideoutUI();
       }, 0);
     }
+    if (raidEquipment) {
+      raidEquipment.style.display = 'none';
+    }
     // 非 RAID 时清理预测/子弹轨迹并停止渲染世界
     predictedLocalPlayer = null;
     renderLocalPlayer = null;
@@ -361,6 +436,9 @@ function updatePhaseUI(): void {
     } else {
       console.warn('[updatePhaseUI] hideoutUI is null, cannot hide');
     }
+    if (raidEquipment) {
+      raidEquipment.style.display = 'block';
+    }
   } else if (currentPhase === 'RESULT') {
     // 隐藏 NAME modal 和 Hideout UI，显示结果页面
     if (nameModal) {
@@ -368,6 +446,9 @@ function updatePhaseUI(): void {
     }
     if (hideoutUI) {
       hideoutUI.style.display = 'none';
+    }
+    if (raidEquipment) {
+      raidEquipment.style.display = 'none';
     }
     // 结果页面会在 onRaidResult 回调中显示
     updateResultUI();
@@ -378,6 +459,9 @@ function updatePhaseUI(): void {
     }
     if (hideoutUI) {
       hideoutUI.style.display = 'none';
+    }
+    if (raidEquipment) {
+      raidEquipment.style.display = 'none';
     }
     getResultElements();
     if (resultUI) {
@@ -716,6 +800,68 @@ function showEquipSelectModal(slot: 'weapon' | 'bag' | 'armor'): void {
   equipSelectModal.classList.add('active');
 }
 
+// 新增: 判断是否为武器类型
+function isWeaponTypeId(typeId: string): boolean {
+  try {
+    getWeaponDef(typeId);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// 新增: 显示局内武器切换列表
+function showRaidWeaponSelectModal(): void {
+  getHideoutElements();
+
+  if (!equipSelectModal || !equipSelectList || !equipSelectTitle) {
+    return;
+  }
+
+  equipSelectTitle.textContent = '选择要切换的武器';
+  equipSelectList.innerHTML = '';
+
+  const localPlayer = raidLocalPlayer;
+  const inventoryItems = localPlayer?.inventory?.items ?? [];
+  const currentWeaponTypeId = localPlayer?.weaponRuntime?.weaponTypeId ?? 'w_fists';
+
+  const weaponItems = inventoryItems.filter(item => isWeaponTypeId(item.typeId));
+  const availableItems = weaponItems.filter(item => currentWeaponTypeId === 'w_fists' || item.typeId !== currentWeaponTypeId);
+
+  if (availableItems.length === 0) {
+    equipSelectList.innerHTML = '<div style="color: #666; padding: 20px; text-align: center;">背包里没有可切换的武器</div>';
+  } else {
+    for (const item of availableItems) {
+      const itemType = getItemType(item.typeId);
+      const itemEl = document.createElement('div');
+      itemEl.className = 'equip-select-item';
+
+      let metaText = '';
+      try {
+        const weaponDef = getWeaponDef(item.typeId);
+        metaText = `弹匣: ${weaponDef.magSize} | 伤害: ${weaponDef.damage}`;
+      } catch {}
+
+      itemEl.innerHTML = `
+        <div class="equip-select-item-info">
+          <div class="equip-select-item-name">${itemType.name}</div>
+          <div class="equip-select-item-meta">${metaText}</div>
+        </div>
+      `;
+
+      itemEl.onclick = () => {
+        network.sendRaidEquip('weapon', item.iid);
+        hud.addEvent(`切换武器: ${itemType.name}`);
+        closeEquipSelectModal();
+      };
+
+      equipSelectList.appendChild(itemEl);
+    }
+  }
+
+  equipSelectModal.classList.add('active');
+}
+
 // 新增: 关闭装备选择弹窗
 function closeEquipSelectModal(): void {
   getHideoutElements();
@@ -881,6 +1027,234 @@ function updateEquipmentSlots(): void {
   }
 }
 
+// 新增: 更新局内装备 HUD
+function updateRaidEquipmentUI(localPlayer: PLAYER_STATE | null): void {
+  getRaidElements();
+
+  if (!raidEquipment) {
+    return;
+  }
+
+  if (currentPhase !== 'RAID') {
+    raidEquipment.style.display = 'none';
+    if (raidBagList) {
+      raidBagList.classList.remove('expanded');
+      raidBagList.innerHTML = '';
+    }
+    lastRaidBagSignature = '';
+    lastRaidBagExpanded = false;
+    return;
+  }
+
+  raidEquipment.style.display = 'block';
+
+  if (!localPlayer || localPlayer.status !== 'ALIVE') {
+    if (raidWeaponName) raidWeaponName.textContent = '未就绪';
+    if (raidWeaponMeta) raidWeaponMeta.textContent = '-';
+    if (raidBagName) raidBagName.textContent = '-';
+    if (raidBagMeta) raidBagMeta.textContent = '-';
+    if (raidArmorName) raidArmorName.textContent = '-';
+    if (raidArmorMeta) raidArmorMeta.textContent = '-';
+    if (raidWeaponSwap) raidWeaponSwap.disabled = true;
+    if (raidWeaponUnequip) raidWeaponUnequip.disabled = true;
+    if (raidBagList) {
+      raidBagList.classList.remove('expanded');
+      raidBagList.innerHTML = '';
+    }
+    lastRaidBagSignature = '';
+    lastRaidBagExpanded = false;
+    return;
+  }
+
+  const weaponTypeId = localPlayer.weaponRuntime?.weaponTypeId ?? 'w_fists';
+  let weaponName = weaponTypeId;
+  let weaponMeta = '-';
+  try {
+    const weaponDef = getWeaponDef(weaponTypeId);
+    weaponName = weaponDef.name;
+    if (weaponDef.magSize > 0 && localPlayer.weaponRuntime) {
+      weaponMeta = `弹匣 ${localPlayer.weaponRuntime.ammoInMag}/${weaponDef.magSize} | 伤害 ${weaponDef.damage}`;
+    } else {
+      weaponMeta = `伤害 ${weaponDef.damage}`;
+    }
+  } catch {}
+
+  if (raidWeaponName) raidWeaponName.textContent = weaponName;
+  if (raidWeaponMeta) raidWeaponMeta.textContent = weaponMeta;
+
+  const inventoryItems = localPlayer.inventory?.items ?? [];
+  const bagCap = localPlayer.inventory?.bagCap ?? 0;
+  const bagUsed = inventoryItems.length;
+  const totalQty = inventoryItems.reduce((sum, entry) => sum + entry.qty, 0);
+  const equippedWeaponIid = localPlayer.raidEquipment?.weaponIid ?? null;
+  const equippedBagIid = localPlayer.raidEquipment?.bagIid ?? null;
+  const equippedArmorIid = localPlayer.raidEquipment?.armorIid ?? null;
+  const bagTypeId = localPlayer.raidEquipment?.bagTypeId ?? null;
+  let bagName = bagTypeId ? bagTypeId : '基础背包';
+  if (bagTypeId) {
+    try {
+      bagName = getBagDef(bagTypeId).name;
+    } catch {}
+  }
+  if (raidBagName) raidBagName.textContent = bagName;
+  if (raidBagMeta) raidBagMeta.textContent = `容量 ${bagUsed}/${bagCap} | 总数 ${totalQty}`;
+
+  const armorTypeId = localPlayer.raidEquipment?.armorTypeId ?? null;
+  let armorName = armorTypeId ? armorTypeId : '无防具';
+  let armorMeta = '减伤 0%';
+  if (armorTypeId) {
+    try {
+      const armorDef = getArmorDef(armorTypeId);
+      armorName = armorDef.name;
+      armorMeta = `减伤 ${Math.floor(armorDef.damageReduction * 100)}%`;
+    } catch {}
+  }
+  if (raidArmorName) raidArmorName.textContent = armorName;
+  if (raidArmorMeta) raidArmorMeta.textContent = armorMeta;
+
+  const weaponItems = inventoryItems.filter(item => isWeaponTypeId(item.typeId));
+  const canSwap =
+    weaponTypeId === 'w_fists'
+      ? weaponItems.length > 0
+      : weaponItems.some(item => item.typeId !== weaponTypeId);
+
+  if (raidWeaponSwap) raidWeaponSwap.disabled = !canSwap;
+  if (raidWeaponUnequip) {
+    const canUnequip = weaponTypeId !== 'w_fists' && inventoryItems.length < bagCap;
+    raidWeaponUnequip.disabled = !canUnequip;
+  }
+
+  if (raidBagToggle) {
+    raidBagToggle.textContent = raidBagExpanded ? '收起' : '展开';
+  }
+
+  if (raidBagList) {
+    if (!raidBagExpanded) {
+      raidBagList.classList.remove('expanded');
+      raidBagList.innerHTML = '';
+      lastRaidBagSignature = '';
+      lastRaidBagExpanded = false;
+    } else {
+      const bagSignature = [
+        bagCap,
+        equippedWeaponIid ?? '',
+        equippedBagIid ?? '',
+        equippedArmorIid ?? '',
+        inventoryItems.map((item) => `${item.iid}:${item.typeId}:${item.qty}`).join(','),
+      ].join('|');
+      const needsRebuild = !lastRaidBagExpanded || bagSignature !== lastRaidBagSignature;
+      if (needsRebuild) {
+        raidBagList.classList.add('expanded');
+        if (inventoryItems.length === 0) {
+          raidBagList.innerHTML = '<div class="raid-bag-empty">空</div>';
+        } else {
+          raidBagList.innerHTML = '';
+          for (const item of inventoryItems) {
+            let itemName = item.typeId;
+            try {
+              itemName = getItemType(item.typeId).name;
+            } catch {}
+            const isEquipped =
+              item.iid === equippedWeaponIid ||
+              item.iid === equippedBagIid ||
+              item.iid === equippedArmorIid;
+
+            const row = document.createElement('div');
+            row.className = 'raid-bag-item';
+            row.innerHTML = `
+              <div>
+                <div class="raid-bag-item-name">${itemName}</div>
+                <div class="raid-bag-item-meta">x${item.qty}${isEquipped ? ' | 已装备' : ''}</div>
+              </div>
+              <button class="item-btn raid-bag-drop" data-iid="${item.iid}" data-qty="${item.qty}" ${isEquipped ? 'disabled' : ''}>丢弃</button>
+            `;
+            raidBagList.appendChild(row);
+          }
+        }
+      }
+      lastRaidBagSignature = bagSignature;
+      lastRaidBagExpanded = true;
+    }
+  }
+}
+
+function updateWeaponHud(localPlayer: PLAYER_STATE | null): void {
+  getWeaponHudElements();
+
+  if (!weaponHud) {
+    return;
+  }
+
+  if (currentPhase !== 'RAID' || !localPlayer || localPlayer.status !== 'ALIVE' || !localPlayer.weaponRuntime) {
+    weaponHud.style.display = 'none';
+    if (weaponHudState) weaponHudState.textContent = '';
+    return;
+  }
+
+  let weaponName = localPlayer.weaponRuntime.weaponTypeId;
+  let ammoInMag = localPlayer.weaponRuntime.ammoInMag;
+  let magSize = 0;
+  let reloadMs = 0;
+  try {
+    const weaponDef = getWeaponDef(localPlayer.weaponRuntime.weaponTypeId);
+    weaponName = weaponDef.name;
+    magSize = weaponDef.magSize;
+    reloadMs = weaponDef.reloadMs;
+  } catch {}
+
+  const currentTick = network.getConnectionState().lastServerTick;
+  const reloading =
+    localPlayer.weaponRuntime.reloadingUntilTick > 0 &&
+    currentTick < localPlayer.weaponRuntime.reloadingUntilTick;
+  const reloadTicks = msToTicks(reloadMs);
+  const reloadProgress = reloading && reloadTicks > 0
+    ? Math.min(1, (currentTick - (localPlayer.weaponRuntime.reloadingUntilTick - reloadTicks)) / reloadTicks)
+    : 0;
+
+  weaponHud.style.display = 'block';
+  if (weaponHudName) weaponHudName.textContent = weaponName;
+  if (weaponHudAmmo) weaponHudAmmo.textContent = magSize > 0 ? String(ammoInMag) : '-';
+  if (weaponHudMag) weaponHudMag.textContent = magSize > 0 ? String(magSize) : '-';
+  if (weaponHudState) weaponHudState.textContent = reloading ? '换弹中' : '';
+  if (weaponHudReload) {
+    weaponHudReload.style.display = reloading ? 'block' : 'none';
+  }
+  if (weaponHudReloadFill) {
+    weaponHudReloadFill.style.width = `${Math.floor(reloadProgress * 100)}%`;
+  }
+}
+
+function updateHealthHud(localPlayer: PLAYER_STATE | null): void {
+  getHealthHudElements();
+
+  if (!healthHud) {
+    return;
+  }
+
+  if (currentPhase !== 'RAID' || !localPlayer || localPlayer.status !== 'ALIVE') {
+    healthHud.style.display = 'none';
+    return;
+  }
+
+  const hp = Math.max(0, Math.min(100, localPlayer.hp));
+  const hpPercent = Math.round(hp);
+  const fillPercent = Math.max(0, Math.min(100, hp));
+  let fillColor = '#57d957';
+  if (hp <= 25) {
+    fillColor = '#ff5b5b';
+  } else if (hp <= 60) {
+    fillColor = '#f5c542';
+  }
+
+  healthHud.style.display = 'block';
+  if (healthHudValue) healthHudValue.textContent = `${hpPercent}/100`;
+  if (healthHudFill) {
+    healthHudFill.style.width = `${fillPercent}%`;
+    healthHudFill.style.background = fillColor;
+    healthHudFill.style.boxShadow = `0 0 10px ${fillColor}80`;
+  }
+}
+
 // 新增: 检查物品是否已装备
 function isItemEquipped(item: ItemInstance): boolean {
   if (!playerProfile) return false;
@@ -895,12 +1269,12 @@ function updateItemLists(): void {
   if (!playerProfile) return;
   
   // 更新整备区列表（过滤已装备的物品）
-  if (prepList && playerProfile.prep) {
-    prepList.innerHTML = '';
-    const availablePrepItems = playerProfile.prep.filter(item => !isItemEquipped(item));
-    if (availablePrepItems.length === 0) {
-      prepList.innerHTML = '<div style="color: #666; padding: 20px; text-align: center;">整备区为空</div>';
-    } else {
+    if (prepList && playerProfile.prep) {
+      prepList.innerHTML = '';
+      const availablePrepItems = sortItemInstances(playerProfile.prep.filter(item => !isItemEquipped(item)));
+      if (availablePrepItems.length === 0) {
+        prepList.innerHTML = '<div style="color: #666; padding: 20px; text-align: center;">整备区为空</div>';
+      } else {
       for (const item of availablePrepItems) {
         const itemType = getItemType(item.typeId);
         const row = createItemRow(item, itemType, 'prep');
@@ -910,12 +1284,12 @@ function updateItemLists(): void {
   }
   
   // 更新仓库列表（过滤已装备的物品）
-  if (stashList && playerProfile.stash) {
-    stashList.innerHTML = '';
-    const availableStashItems = playerProfile.stash.filter(item => !isItemEquipped(item));
-    if (availableStashItems.length === 0) {
-      stashList.innerHTML = '<div style="color: #666; padding: 20px; text-align: center;">仓库为空</div>';
-    } else {
+    if (stashList && playerProfile.stash) {
+      stashList.innerHTML = '';
+      const availableStashItems = sortItemInstances(playerProfile.stash.filter(item => !isItemEquipped(item)));
+      if (availableStashItems.length === 0) {
+        stashList.innerHTML = '<div style="color: #666; padding: 20px; text-align: center;">仓库为空</div>';
+      } else {
       for (const item of availableStashItems) {
         const itemType = getItemType(item.typeId);
         const row = createItemRow(item, itemType, 'stash');
@@ -925,15 +1299,87 @@ function updateItemLists(): void {
   }
   
   // 更新商店列表
-  if (shopList) {
-    shopList.innerHTML = '';
-    const allItemTypes = getAllItemTypes();
-    for (const itemType of allItemTypes) {
-      const row = createShopRow(itemType);
-      shopList.appendChild(row);
+    if (shopList) {
+      shopList.innerHTML = '';
+      const allItemTypes = sortItemTypes(getAllItemTypes());
+      for (const itemType of allItemTypes) {
+        const row = createShopRow(itemType);
+        shopList.appendChild(row);
+      }
     }
   }
-}
+
+  function getItemCategoryOrder(typeId: string): number {
+    try {
+      getWeaponDef(typeId);
+      return 0;
+    } catch {}
+    try {
+      getArmorDef(typeId);
+      return 1;
+    } catch {}
+    try {
+      getBagDef(typeId);
+      return 2;
+    } catch {}
+    return 3;
+  }
+
+  function getRarityOrder(rarity?: string): number {
+    if (rarity === 'COMMON') return 0;
+    if (rarity === 'RARE') return 1;
+    if (rarity === 'QUEST') return 2;
+    return 3;
+  }
+
+  function sortItemInstances(items: ItemInstance[]): ItemInstance[] {
+    return [...items].sort((a, b) => {
+      const aCategory = getItemCategoryOrder(a.typeId);
+      const bCategory = getItemCategoryOrder(b.typeId);
+      if (aCategory !== bCategory) return aCategory - bCategory;
+
+      const aType = safeGetItemType(a.typeId);
+      const bType = safeGetItemType(b.typeId);
+      const aRarity = getRarityOrder(aType?.rarity);
+      const bRarity = getRarityOrder(bType?.rarity);
+      if (aRarity !== bRarity) return aRarity - bRarity;
+
+      const aName = aType?.name ?? a.typeId;
+      const bName = bType?.name ?? b.typeId;
+      if (aName !== bName) return aName.localeCompare(bName);
+
+      const aStackable = (aType?.stackMax ?? 1) > 1;
+      const bStackable = (bType?.stackMax ?? 1) > 1;
+      if (aStackable && bStackable && a.qty !== b.qty) {
+        return b.qty - a.qty;
+      }
+      return a.typeId.localeCompare(b.typeId);
+    });
+  }
+
+  function sortItemTypes(items: Array<{ id: string; rarity?: string; name?: string; stackMax?: number }>): Array<{ id: string; rarity?: string; name?: string; stackMax?: number }> {
+    return [...items].sort((a, b) => {
+      const aCategory = getItemCategoryOrder(a.id);
+      const bCategory = getItemCategoryOrder(b.id);
+      if (aCategory !== bCategory) return aCategory - bCategory;
+
+      const aRarity = getRarityOrder(a.rarity);
+      const bRarity = getRarityOrder(b.rarity);
+      if (aRarity !== bRarity) return aRarity - bRarity;
+
+      const aName = a.name ?? a.id;
+      const bName = b.name ?? b.id;
+      return aName.localeCompare(bName);
+    });
+  }
+
+  function safeGetItemType(typeId: string) {
+    try {
+      return getItemType(typeId);
+    } catch {
+      return null;
+    }
+  }
 
 // 新增: 检查物品类型（武器/背包/防具）
 function getItemSlot(typeId: string): 'weapon' | 'bag' | 'armor' | null {
@@ -1198,6 +1644,87 @@ function initHideoutUI(): void {
       }
     };
   }
+
+  // 背包丢弃（HUD）
+  const inventoryEl = document.getElementById('hud-inventory');
+  if (inventoryEl) {
+    inventoryEl.addEventListener('click', (e) => {
+      const target = e.target as HTMLElement;
+      if (!target.classList.contains('hud-drop-btn')) {
+        return;
+      }
+      if (currentPhase !== 'RAID' || !raidLocalPlayer || raidLocalPlayer.status !== 'ALIVE') {
+        hud.addEvent('当前无法丢弃物品');
+        return;
+      }
+      const iid = target.getAttribute('data-iid');
+      const qtyRaw = target.getAttribute('data-qty');
+      if (!iid || !qtyRaw) {
+        return;
+      }
+      const qty = Number(qtyRaw);
+      if (!Number.isFinite(qty) || qty <= 0) {
+        return;
+      }
+      if (network.sendDropItem(iid, qty)) {
+        hud.addEvent('已丢弃物品');
+      } else {
+        hud.addEvent('丢弃失败：连接未就绪');
+      }
+    });
+  }
+}
+
+// 新增: 初始化 RAID UI
+function initRaidUI(): void {
+  getRaidElements();
+  getHideoutElements(); // 复用装备选择弹窗
+
+  if (raidWeaponSwap) {
+    raidWeaponSwap.onclick = () => {
+      showRaidWeaponSelectModal();
+    };
+  }
+
+  if (raidWeaponUnequip) {
+    raidWeaponUnequip.onclick = () => {
+      network.sendRaidEquip('weapon', null);
+    };
+  }
+
+  if (raidBagToggle) {
+    raidBagToggle.onclick = () => {
+      raidBagExpanded = !raidBagExpanded;
+      updateRaidEquipmentUI(raidLocalPlayer);
+    };
+  }
+
+  if (raidBagList) {
+    raidBagList.addEventListener('click', (e) => {
+      const target = e.target as HTMLElement;
+      if (!target.classList.contains('raid-bag-drop')) {
+        return;
+      }
+      if (!raidLocalPlayer || raidLocalPlayer.status !== 'ALIVE') {
+        hud.addEvent('当前无法丢弃物品');
+        return;
+      }
+      const iid = target.getAttribute('data-iid');
+      const qtyRaw = target.getAttribute('data-qty');
+      if (!iid || !qtyRaw) {
+        return;
+      }
+      const qty = Number(qtyRaw);
+      if (!Number.isFinite(qty) || qty <= 0) {
+        return;
+      }
+      if (network.sendDropItem(iid, qty)) {
+        hud.addEvent('已丢弃物品');
+      } else {
+        hud.addEvent('丢弃失败：连接未就绪');
+      }
+    });
+  }
 }
 
 // 新增: NAME Modal 交互逻辑（延迟初始化，确保 DOM 已加载）
@@ -1233,11 +1760,13 @@ if (document.readyState === 'loading') {
   document.addEventListener('DOMContentLoaded', () => {
     initNameModal();
     initHideoutUI();
+    initRaidUI();
     updatePhaseUI(); // ✅ 启动时先把 NAME/Hideout UI 挂出来
   });
 } else {
   initNameModal();
   initHideoutUI();
+  initRaidUI();
   updatePhaseUI(); // ✅ 同上
 }
 
@@ -1472,9 +2001,7 @@ const network = new Network(getWebSocketUrl(), 'local', {
     if (snapshot.players.length > 0) {
       snapshot.players.forEach(p => {
         if (p.name) {
-          console.log('[Snapshot] Player with name:', p.id, 'name:', p.name);
         } else {
-          console.log('[Snapshot] Player without name:', p.id);
         }
       });
     }
@@ -1569,6 +2096,19 @@ const network = new Network(getWebSocketUrl(), 'local', {
   },
   // 游戏化增强: 接收服务端事件并显示在 HUD
   onEvent: (message: string) => {
+    if (message.startsWith('AUTO_EQUIP|')) {
+      const parts = message.split('|');
+      const targetId = parts[1] ?? '';
+      const text = parts.slice(2).join('|') || message;
+
+      if (localPlayerId && targetId === localPlayerId) {
+        uiOverlay.showText(text);
+        hud.addEvent(text);
+      } else {
+        hud.addEvent(`${targetId}: ${text}`);
+      }
+      return;
+    }
     hud.addEvent(message);
   },
   onWorldInit: (world) => {
@@ -1662,6 +2202,25 @@ const network = new Network(getWebSocketUrl(), 'local', {
       arcRad: event.arcRad,
       spawnTimeMs: performance.now(),
     });
+  },
+  onExplosion: (event) => {
+    explosionEffects.push({
+      x: event.x,
+      y: event.y,
+      radius: event.radius,
+      spawnTimeMs: performance.now(),
+    });
+
+    if (currentPhase === 'RAID') {
+      const localPlayer = renderLocalPlayer ?? predictedLocalPlayer;
+      if (localPlayer && localPlayer.status === 'ALIVE') {
+        const dist = Math.hypot(localPlayer.x - event.x, localPlayer.y - event.y);
+        if (dist <= event.radius) {
+          const intensity = Math.max(0, 1 - dist / event.radius);
+          renderer.triggerShake(intensity, 220);
+        }
+      }
+    }
   },
 }, isDebug);
 
@@ -1759,6 +2318,8 @@ function renderLoop(): void {
         renderLocalPlayer.lastInputTick = predictedLocalPlayer.lastInputTick;
         renderLocalPlayer.extractProgress = predictedLocalPlayer.extractProgress;
         renderLocalPlayer.weaponRuntime = predictedLocalPlayer.weaponRuntime; // 修复: 更新武器运行时状态（包括弹药数）
+        renderLocalPlayer.inventory = predictedLocalPlayer.inventory;
+        renderLocalPlayer.raidEquipment = predictedLocalPlayer.raidEquipment;
       }
       
       // 使用平滑后的 renderLocalPlayer 渲染本地玩家
@@ -1791,6 +2352,18 @@ function renderLoop(): void {
           }))
           .filter((swing) => swing.age >= 0 && swing.age <= 1);
         meleeSwings = meleeSwings.filter((swing) => nowPerf2 - swing.spawnTimeMs <= MELEE_SWING_TTL_MS);
+
+        const explosionsToRender = explosionEffects
+          .map((explosion) => ({
+            x: explosion.x,
+            y: explosion.y,
+            radius: explosion.radius,
+            age: (nowPerf2 - explosion.spawnTimeMs) / EXPLOSION_EFFECT_TTL_MS,
+          }))
+          .filter((explosion) => explosion.age >= 0 && explosion.age <= 1);
+        explosionEffects = explosionEffects.filter(
+          (explosion) => nowPerf2 - explosion.spawnTimeMs <= EXPLOSION_EFFECT_TTL_MS
+        );
         
         renderer.render(
           playersToRender,
@@ -1804,6 +2377,7 @@ function renderLoop(): void {
           state.lootBags, // 新增: 掉落包
           meleeSwingsToRender,
           bulletTracks.getHitEffects(), // 命中特效
+          explosionsToRender,
           network.getConnectionState().lastServerTick // 新增: 当前服务器 tick（用于计算换弹进度）
         );
       } else {
@@ -1829,46 +2403,18 @@ function renderLoop(): void {
         uiOverlay.updateState({ extractProgress: { enabled: false, progress: 0 } });
       }
       
-      // 武器状态（只在有本地玩家时更新）
+      // 武器状态（左下角 HUD）
       if (localPlayerId) {
         const localPlayer = renderLocalPlayer ?? predictedLocalPlayer ?? state.players.find((p) => p.id === localPlayerId);
-        if (localPlayer) {
-          
-          // 武器状态
-          if (localPlayer.weaponRuntime) {
-            try {
-              const weaponDef = getWeaponDef(localPlayer.weaponRuntime.weaponTypeId);
-              const currentTick = network.getConnectionState().lastServerTick;
-              const reloading = localPlayer.weaponRuntime.reloadingUntilTick > 0 && currentTick < localPlayer.weaponRuntime.reloadingUntilTick;
-              const reloadTicks = msToTicks(weaponDef.reloadMs);
-              const reloadProgress = reloading
-                ? Math.min(1, (currentTick - (localPlayer.weaponRuntime.reloadingUntilTick - reloadTicks)) / reloadTicks)
-                : 0;
-              
-              uiOverlay.updateState({
-                weaponStatus: {
-                  enabled: true,
-                  weaponName: weaponDef.name,
-                  ammoInMag: localPlayer.weaponRuntime.ammoInMag,
-                  magSize: weaponDef.magSize,
-                  reloading,
-                  reloadProgress,
-                },
-              });
-            } catch {
-              // 无效武器类型，隐藏武器状态
-              uiOverlay.updateState({
-                weaponStatus: { enabled: false, weaponName: '', ammoInMag: 0, magSize: 0, reloading: false, reloadProgress: 0 },
-              });
-            }
-          } else {
-            // 没有武器，隐藏武器状态
-            uiOverlay.updateState({
-              weaponStatus: { enabled: false, weaponName: '', ammoInMag: 0, magSize: 0, reloading: false, reloadProgress: 0 },
-            });
-          }
-        }
+        updateWeaponHud(localPlayer ?? null);
+        updateHealthHud(localPlayer ?? null);
+      } else {
+        updateWeaponHud(null);
+        updateHealthHud(null);
       }
+      uiOverlay.updateState({
+        weaponStatus: { enabled: false, weaponName: '', ammoInMag: 0, magSize: 0, reloading: false, reloadProgress: 0 },
+      });
       
       // 绘制 UI 覆盖层（准星、受伤红边、撤离进度等）
       uiOverlay.draw();
@@ -2017,23 +2563,18 @@ function renderLoop(): void {
                 }
               }
             } else if (nowPerf2 - lastLocalFireMs >= fireCooldownMs) {
-              // ????????snapshot?????????
               const canShoot = localPlayer && localPlayer.weaponRuntime &&
                 localPlayer.weaponRuntime.ammoInMag > 0 &&
                 !(localPlayer.weaponRuntime.reloadingUntilTick > 0 && network.getConnectionState().lastServerTick < localPlayer.weaponRuntime.reloadingUntilTick);
           
               if (canShoot) {
-                // ??: ?????????????? lastLocalFireMs??????????????
-                // ?????????????????? tick??? tick ?????????????
                 lastLocalFireMs = nowPerf2;
           
                 localShotIdCounter++;
                 shotIdToSend = localShotIdCounter;
           
-                // ???????????????????????????
                 const localP = renderLocalPlayer ?? predictedLocalPlayer ?? localPlayer;
                 if (localP && localP.weaponRuntime) {
-                  console.log(`[main.ts] ??????????: weaponTypeId=${localP.weaponRuntime.weaponTypeId}, shotId=${shotIdToSend}`);
                   bulletTracks.spawnLocalPrediction(
                     shotIdToSend,
                     localP.x,
@@ -2043,10 +2584,8 @@ function renderLoop(): void {
                     localP.weaponRuntime.weaponTypeId
                   );
                 } else {
-                  console.warn(`[main.ts] ??????????: localP=${!!localP}, weaponRuntime=${!!localP?.weaponRuntime}`);
                 }
               } else {
-                // ?????????????????
                 uiOverlay.showText('NO AMMO'); // dry fire feedback
               }
             }
@@ -2121,13 +2660,7 @@ const sent = network.sendInput(nextSeq, tickKeys, tickAim, tickShoot, tickReload
 
   // P0-2 修复: Debug日志使用 performance.now()（仅在显示给用户时才用 Date.now()）
   if (isDebug) {
-    const nowPerf = performance.now();
-    if (nowPerf - lastLogTime >= 200) {
-      const connState = network.getConnectionState();
-      const currentKeys = inputManager.getKeys();
-      console.log(`[CLIENT] seq=${inputSeq} tick=${connState.lastServerTick} pendingInputs=${pendingInputs.length} keys=${JSON.stringify(currentKeys)}`);
-      lastLogTime = nowPerf;
-    }
+    // Debug per-tick logs removed to keep console quiet.
   }
 
   // 修复: HUD 更新节流（10Hz，避免每帧重建表格导致性能问题）
@@ -2149,6 +2682,7 @@ const sent = network.sendInput(nextSeq, tickKeys, tickAim, tickShoot, tickReload
     // 游戏化增强: 获取本地玩家的撤离进度
     // ✅ 关键：HUD 的撤离进度别读"插值 state"（它天生落后/可能停在最后一帧）
     let localPlayerExtractProgress: number | undefined = undefined;
+    let hudLocalPlayer: PLAYER_STATE | null = null;
     if (currentPhase === 'RAID' && localPlayerId) {
       const localPlayer =
         renderLocalPlayer ??
@@ -2157,13 +2691,17 @@ const sent = network.sendInput(nextSeq, tickKeys, tickAim, tickShoot, tickReload
 
       if (localPlayer && localPlayer.extractProgress !== undefined) {
         localPlayerExtractProgress = localPlayer.extractProgress;
+        hudLocalPlayer = localPlayer;
       }
     }
     
     // 新增: 计算最近可交互目标
     let nearbyInteractable: { type: 'worldItem' | 'lootBag' | 'extractZone'; name: string; distance: number } | null = null;
     if (localPlayerId) {
-      const localPlayer = renderLocalPlayer ?? predictedLocalPlayer ?? state.players.find((p) => p.id === localPlayerId);
+      const localPlayer = hudLocalPlayer ?? renderLocalPlayer ?? predictedLocalPlayer ?? state.players.find((p) => p.id === localPlayerId);
+      if (localPlayer) {
+        hudLocalPlayer = localPlayer;
+      }
       if (localPlayer && localPlayer.status === 'ALIVE') {
         const mapConfig = serverMapConfig ?? fallbackMapConfig;
         nearbyInteractable = findNearestInteractable(
@@ -2176,6 +2714,10 @@ const sent = network.sendInput(nextSeq, tickKeys, tickAim, tickShoot, tickReload
       }
     }
     
+    const stateLocalPlayer = localPlayerId
+      ? state.players.find((p) => p.id === localPlayerId)
+      : null;
+
     hud.update({
       connection: {
         status: connectionStatus,
@@ -2199,12 +2741,16 @@ const sent = network.sendInput(nextSeq, tickKeys, tickAim, tickShoot, tickReload
       selectedEntity: selectedEntity,
       events: [], // events由HUD内部管理
       // P1-1 新增: 物品系统数据（从 Profile 获取）
-      inventory: localPlayerId ? (state.players.find(p => p.id === localPlayerId)?.inventory) : undefined,
+      inventory: stateLocalPlayer?.inventory,
       stash: playerProfile?.stash, // 从 Profile 获取
       money: playerProfile?.money, // 从 Profile 获取
       // 新增: 局内交互提示
       nearbyInteractable,
+      localPlayer: hudLocalPlayer,
     });
+
+    raidLocalPlayer = stateLocalPlayer ?? hudLocalPlayer ?? null;
+    updateRaidEquipmentUI(raidLocalPlayer);
   }
 
   rafId = requestAnimationFrame(renderLoop);

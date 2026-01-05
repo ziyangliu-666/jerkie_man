@@ -107,7 +107,6 @@ export class BulletTrackManager {
   ): void {
     const nowMs = Date.now();
     
-    console.log(`[BulletTracks] spawnLocalPrediction 调用: weaponTypeId=${weaponTypeId}`);
     
     // 获取武器定义（用于检查是否有pelletCount）
     let weaponDef: ReturnType<typeof getWeaponDef> | null = null;
@@ -121,18 +120,14 @@ export class BulletTrackManager {
         bulletLifeMs = weaponDef.bulletLifeMs;
         pelletCount = weaponDef.pelletCount ?? 1;
         spreadDeg = weaponDef.spreadDeg;
-        console.log(`[BulletTracks] 武器定义获取成功: typeId=${weaponTypeId}, pelletCount=${pelletCount}, hasPelletCount=${'pelletCount' in weaponDef}`);
       } catch (err) {
         // 无效武器类型，使用默认值
-        console.warn(`[BulletTracks] 获取武器定义失败: ${weaponTypeId}`, err);
       }
     } else {
-      console.warn(`[BulletTracks] weaponTypeId 为 undefined`);
     }
     
     // 霰弹枪：一次发射多颗弹丸
     if (pelletCount > 1) {
-      console.log(`[BulletTracks] 生成 ${pelletCount} 颗弹丸，武器: ${weaponTypeId}`);
       const spreadRad = (spreadDeg * Math.PI) / 180; // 总散布角度（弧度）
       
       for (let i = 0; i < pelletCount; i++) {
@@ -277,7 +272,6 @@ export class BulletTrackManager {
     }
     
     // 第二遍：处理所有服务端子弹（包括多弹丸的其他子弹）
-    console.log(`[BulletTracks] 收到 ${snapshot.bullets.length} 颗服务端子弹`);
     for (const b of snapshot.bullets) {
       // 如果这个子弹已被本地销毁或已处理，跳过
       if (this.locallyDestroyedIds.has(b.id) || this.bullets.has(b.id)) {
@@ -437,7 +431,6 @@ export class BulletTrackManager {
     if (Math.random() < 0.1) { // 10%概率打印，避免日志过多
       const localCount = Array.from(this.bullets.values()).filter(b => b.isLocalPrediction).length;
       const serverCount = Array.from(this.bullets.values()).filter(b => !b.isLocalPrediction).length;
-      console.log(`[BulletTracks] 当前子弹: 本地预测=${localCount}, 服务端=${serverCount}, 总计=${this.bullets.size}, 渲染=${this.renderList.length}`);
     }
   }
 

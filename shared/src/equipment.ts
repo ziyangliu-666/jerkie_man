@@ -23,6 +23,8 @@ export interface WeaponDef {
   pelletCount?: number; // 弹丸数量（霰弹枪使用，例如8表示一次发射8颗子弹）
   meleeRange?: number; // 近战攻击范围（像素）
   meleeArcDeg?: number; // 近战攻击扇形角度（度）
+  explosionRadius?: number; // 榴弹/炸弹爆炸半径（像素）
+  explosionDamage?: number; // 爆炸伤害（高于普通伤害）
 }
 
 // 投射物定义（为手雷/火箭弹预留，当前仅作为类型定义）
@@ -121,6 +123,31 @@ export const WEAPONS: Record<string, WeaponDef> = {
     damage: 20, // 单颗弹丸伤害（降低，因为一次发射多颗）
     bulletLifeMs: 500, // 0.5秒（短射程）
     pelletCount: 8, // 一次发射8颗弹丸
+  },
+  w_sniper: {
+    typeId: 'w_sniper',
+    name: '狙击步枪',
+    magSize: 5,
+    reloadMs: 3800,
+    fireIntervalMs: 900,
+    spreadDeg: 0.6,
+    bulletSpeed: 1600,
+    damage: 90,
+    bulletLifeMs: 2200,
+  },
+  w_grenade_launcher: {
+    typeId: 'w_grenade_launcher',
+    name: '榴弹炮',
+    weaponKind: 'launcher',
+    magSize: 1,
+    reloadMs: 3000,
+    fireIntervalMs: 1100,
+    spreadDeg: 2,
+    bulletSpeed: 520,
+    damage: 12,
+    bulletLifeMs: 1400,
+    explosionRadius: 120,
+    explosionDamage: 70,
   },
 };
 

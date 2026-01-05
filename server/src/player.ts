@@ -16,6 +16,11 @@ export class Player {
   public weaponRuntime: WeaponRuntime | undefined; // 新增: 武器运行时状态（局内状态）
   public lastShoot: boolean = false; // track previous shoot state for burst gating
   public armorReduction: number = 0; // 新增: 护甲减伤（0-1，例如0.25表示减少25%伤害）
+  public equippedBagTypeId: string | null = null; // 新增: 局内装备背包
+  public equippedArmorTypeId: string | null = null; // 新增: 局内装备护甲
+  public equippedWeaponItem: ItemInstance | null = null; // 新增: 局内装备武器实例
+  public equippedBagItem: ItemInstance | null = null; // 新增: 局内装备背包实例
+  public equippedArmorItem: ItemInstance | null = null; // 新增: 局内装备护甲实例
   public killedBy: string | undefined; // 新增: 击杀者玩家ID
   public killedByWeaponName: string | undefined; // 新增: 击杀使用的武器名称
   public positionHistory: PositionHistory; // 延迟补偿: 位置历史记录
@@ -111,23 +116,34 @@ export class Player {
     
     // 2. 如果还有剩余，创建新堆叠（每个不超过 stackMax）
     while (remaining > 0) {
-    if (this.inventory.items.length >= this.inventory.bagCap) {
+      if (this.inventory.items.length >= this.inventory.bagCap) {
         // 背包满了，返回部分成功（如果有添加过）
         return { success: totalAdded > 0, added: totalAdded };
-  }
+      }
 
       // 每个新堆叠最多 stackMax
       const stackQty = Math.min(remaining, itemType.stackMax);
-        this.inventory.items.push({
-          iid: this.generateIid(),
-          typeId,
+      this.inventory.items.push({
+        iid: this.generateIid(),
+        typeId,
         qty: stackQty,
-        });
+      });
       remaining -= stackQty;
       totalAdded += stackQty;
-      }
+    }
     
     return { success: true, added: totalAdded };
+  }
+
+  /**
+   * 创建物品实例（不自动放入背包）
+   */
+  createItemInstance(typeId: string, qty: number): ItemInstance {
+    return {
+      iid: this.generateIid(),
+      typeId,
+      qty,
+    };
   }
 
   /**
@@ -177,6 +193,13 @@ export class Player {
       inventory: this.inventory, // 新增: 包含背包
       name: this.name, // 新增: 包含玩家昵称
       weaponRuntime: this.weaponRuntime, // 新增: 包含武器运行时状态
+      raidEquipment: {
+        weaponIid: this.equippedWeaponItem?.iid ?? null,
+        bagIid: this.equippedBagItem?.iid ?? null,
+        armorIid: this.equippedArmorItem?.iid ?? null,
+        bagTypeId: this.equippedBagTypeId,
+        armorTypeId: this.equippedArmorTypeId,
+      },
       killedBy: this.killedBy, // 新增: 击杀者名字
       killedByWeaponName: this.killedByWeaponName, // 新增: 击杀使用的武器名称
     };
