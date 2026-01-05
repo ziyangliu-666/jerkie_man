@@ -103,6 +103,56 @@ function getLocalFireCooldownMs(): number {
 }
 
 /**
+ * 计算玩家的速度倍数（基于局内装备 buff）
+ * 用于客户端预测移动
+ */
+function getLocalSpeedMultiplier(): number {
+  if (!raidLocalPlayer) {
+    return 1.0;
+  }
+  
+  let multiplier = 1.0;
+  
+  // 检查武器 buff
+  if (raidLocalPlayer.weaponRuntime?.weaponTypeId) {
+    try {
+      const weaponDef = getWeaponDef(raidLocalPlayer.weaponRuntime.weaponTypeId);
+      if (weaponDef.buffs?.speedMultiplier) {
+        multiplier *= weaponDef.buffs.speedMultiplier;
+      }
+    } catch {
+      // 忽略无效武器类型
+    }
+  }
+  
+  // 检查防具 buff
+  if (raidLocalPlayer.raidEquipment?.armorTypeId) {
+    try {
+      const armorDef = getArmorDef(raidLocalPlayer.raidEquipment.armorTypeId);
+      if (armorDef.buffs?.speedMultiplier) {
+        multiplier *= armorDef.buffs.speedMultiplier;
+      }
+    } catch {
+      // 忽略无效防具类型
+    }
+  }
+  
+  // 检查背包 buff
+  if (raidLocalPlayer.raidEquipment?.bagTypeId) {
+    try {
+      const bagDef = getBagDef(raidLocalPlayer.raidEquipment.bagTypeId);
+      if (bagDef.buffs?.speedMultiplier) {
+        multiplier *= bagDef.buffs.speedMultiplier;
+      }
+    } catch {
+      // 忽略无效背包类型
+    }
+  }
+  
+  return multiplier;
+}
+
+/**
  * 获取本地子弹速度（px/s）
  * 使用shared层的单一数据源，不再有默认值回退
  */
@@ -2417,6 +2467,9 @@ const network = new Network(getWebSocketUrl(), 'local', {
         let predictedPos = { x: serverPlayer.x, y: serverPlayer.y };
         const mapConfig = serverMapConfig ?? fallbackMapConfig;
         
+        // 计算速度倍数（基于局内装备 buff）
+        const speedMultiplier = getLocalSpeedMultiplier();
+        
         for (const input of pendingInputs) {
           predictedPos = simulatePlayerMove(
             predictedPos,
@@ -2424,7 +2477,8 @@ const network = new Network(getWebSocketUrl(), 'local', {
             input.deltaTime,
             mapConfig.width,
             mapConfig.height,
-            cachedObstacles
+            cachedObstacles,
+            speedMultiplier
           );
         }
         
@@ -3238,13 +3292,17 @@ function renderLoop(): void {
         const beforeX = predictedLocalPlayer.x;
         const beforeY = predictedLocalPlayer.y;
         
+        // 计算速度倍数（基于局内装备 buff）
+        const speedMultiplier = getLocalSpeedMultiplier();
+        
         const newPredictedPos = simulatePlayerMove(
           { x: beforeX, y: beforeY },
           commitKeys,
           0.05, // 固定为 server tick 间隔
           mapConfig.width,
           mapConfig.height,
-          cachedObstacles
+          cachedObstacles,
+          speedMultiplier
         );
         
         // 检测撞墙/被阻挡：触发短时间"快速收敛"，不瞬移

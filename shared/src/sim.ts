@@ -21,6 +21,7 @@ const PLAYER_RADIUS = 10;
  * @param mapWidth 地图宽度
  * @param mapHeight 地图高度
  * @param obstacles 障碍物列表
+ * @param speedMultiplier 速度倍数（可选，用于装备 buff，默认为 1.0）
  * @returns 新位置 { x, y }
  */
 export function simulatePlayerMove(
@@ -29,7 +30,8 @@ export function simulatePlayerMove(
   deltaTime: number,
   mapWidth: number,
   mapHeight: number,
-  obstacles: OBSTACLE_STATE[] = []
+  obstacles: OBSTACLE_STATE[] = [],
+  speedMultiplier: number = 1.0
 ): { x: number; y: number } {
   // 计算移动向量
   let dx = 0;
@@ -47,9 +49,10 @@ export function simulatePlayerMove(
     dy = dy / len;
   }
   
-  // 计算移动距离
-  const moveX = dx * PLAYER_SPEED * deltaTime;
-  const moveY = dy * PLAYER_SPEED * deltaTime;
+  // 计算移动距离（应用速度倍数）
+  const effectiveSpeed = PLAYER_SPEED * speedMultiplier;
+  const moveX = dx * effectiveSpeed * deltaTime;
+  const moveY = dy * effectiveSpeed * deltaTime;
   
   // 新位置（未检查碰撞）
   let newX = pos.x + moveX;

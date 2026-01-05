@@ -6,6 +6,17 @@
 // 武器种类（为手雷/火箭筒预留）
 export type WeaponKind = 'gun' | 'throwable' | 'launcher' | 'melee';
 
+// 装备 Buff 系统
+// 用于定义装备对玩家的增益/减益效果
+export interface EquipmentBuffs {
+  speedMultiplier?: number; // 速度倍数（例如 0.8 表示降低 20% 速度，1.2 表示增加 20% 速度）
+  // 预留其他 buff 空间
+  // healthBonus?: number; // 生命值加成
+  // damageMultiplier?: number; // 伤害倍数
+  // reloadSpeedMultiplier?: number; // 换弹速度倍数
+  // accuracyBonus?: number; // 精度加成
+}
+
 // 武器定义
 export interface WeaponDef {
   typeId: string;
@@ -25,6 +36,7 @@ export interface WeaponDef {
   meleeArcDeg?: number; // 近战攻击扇形角度（度）
   explosionRadius?: number; // 榴弹/炸弹爆炸半径（像素）
   explosionDamage?: number; // 爆炸伤害（高于普通伤害）
+  buffs?: EquipmentBuffs; // 装备 Buff 效果
 }
 
 // 投射物定义（为手雷/火箭弹预留，当前仅作为类型定义）
@@ -41,6 +53,7 @@ export interface BagDef {
   typeId: string;
   name: string;
   bagCap: number; // 背包容量
+  buffs?: EquipmentBuffs; // 装备 Buff 效果
 }
 
 // 防具定义
@@ -48,6 +61,7 @@ export interface ArmorDef {
   typeId: string;
   name: string;
   damageReduction: number; // 伤害减免（0-1，例如 0.3 表示减少 30% 伤害）
+  buffs?: EquipmentBuffs; // 装备 Buff 效果
 }
 
 // 武器配置
@@ -159,6 +173,9 @@ export const WEAPONS: Record<string, WeaponDef> = {
     bulletSpeed: 1000,
     damage: 18,          // 单发伤害较低，但射速快
     bulletLifeMs: 1200,
+    buffs: {
+      speedMultiplier: 0.75, // 降低 25% 移动速度（重型武器）
+    },
   },
   w_anti_material: {
     typeId: 'w_anti_material',
@@ -307,11 +324,17 @@ export const ARMORS: Record<string, ArmorDef> = {
     typeId: 'armor_heavy',
     name: '重甲',
     damageReduction: 0.5, // 减少 50% 伤害
+    buffs: {
+      speedMultiplier: 0.8, // 降低 20% 移动速度（重型护甲）
+    },
   },
   armor_exo: {
     typeId: 'armor_exo',
     name: '外骨骼装甲',
     damageReduction: 0.65, // 减少 65% 伤害（最强护甲）
+    buffs: {
+      speedMultiplier: 1.25, // 增加 25% 移动速度（外骨骼助力）
+    },
   },
 };
 

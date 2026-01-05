@@ -1,5 +1,5 @@
 import type { PLAYER_STATE, OBSTACLE_STATE, PlayerInventory, ItemInstance, WeaponRuntime } from '@jerkie-man/shared';
-import { simulatePlayerMove, getItemType, getWeaponDef, PositionHistory } from '@jerkie-man/shared';
+import { simulatePlayerMove, getItemType, getWeaponDef, getArmorDef, getBagDef, PositionHistory } from '@jerkie-man/shared';
 
 export class Player {
   public id: string;
@@ -51,10 +51,54 @@ export class Player {
     this.positionHistory = new PositionHistory(50); // 延迟补偿: 保留50帧（2.5秒@20Hz）
   }
 
+  // 新增: 计算玩家的速度倍数（基于装备 buff）
+  getSpeedMultiplier(): number {
+    let multiplier = 1.0;
+    
+    // 检查武器 buff
+    if (this.equippedWeaponItem) {
+      try {
+        const weaponDef = getWeaponDef(this.equippedWeaponItem.typeId);
+        if (weaponDef.buffs?.speedMultiplier) {
+          multiplier *= weaponDef.buffs.speedMultiplier;
+        }
+      } catch {
+        // 忽略无效武器类型
+      }
+    }
+    
+    // 检查防具 buff
+    if (this.equippedArmorItem) {
+      try {
+        const armorDef = getArmorDef(this.equippedArmorItem.typeId);
+        if (armorDef.buffs?.speedMultiplier) {
+          multiplier *= armorDef.buffs.speedMultiplier;
+        }
+      } catch {
+        // 忽略无效防具类型
+      }
+    }
+    
+    // 检查背包 buff
+    if (this.equippedBagItem) {
+      try {
+        const bagDef = getBagDef(this.equippedBagItem.typeId);
+        if (bagDef.buffs?.speedMultiplier) {
+          multiplier *= bagDef.buffs.speedMultiplier;
+        }
+      } catch {
+        // 忽略无效背包类型
+      }
+    }
+    
+    return multiplier;
+  }
+
   // 处理输入，更新位置
   // Day2: 如果玩家已死亡，不允许移动
   // Day3: EXTRACTED 玩家也不能移动
   // Day4-2: 添加碰撞检测（世界边界 + obstacles）
+  // 新增: 考虑装备 buff 对速度的影响
   processInput(
     keys: { up: boolean; down: boolean; left: boolean; right: boolean },
     deltaTime: number, // 秒
@@ -67,6 +111,9 @@ export class Player {
       return;
     }
 
+    // 计算速度倍数（基于装备 buff）
+    const speedMultiplier = this.getSpeedMultiplier();
+
     // 修复: 使用 shared 的 simulatePlayerMove，确保 client/server 逻辑一致
     const newPos = simulatePlayerMove(
       { x: this.x, y: this.y },
@@ -74,7 +121,8 @@ export class Player {
       deltaTime,
       mapWidth,
       mapHeight,
-      obstacles
+      obstacles,
+      speedMultiplier
     );
     
     // 更新位置
