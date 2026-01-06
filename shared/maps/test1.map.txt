@@ -1,0 +1,145 @@
+# MAPTEXT v1
+# 精美小图：运河破碎区（中轴运河 + 双桥 + 多区块建筑群 + 货场迷宫）
+# 玩法关键词：两条主线转移路线（北桥/中桥），多个侧翼小巷，视野长短交替，掩体密度分层
+
+@meta id=canal_splinter name="Canal Splinter" desc="中轴运河切开城区；双桥强控点；市场/公寓/货场三大资源区；撤离在东南船坞。"
+@map width=1800 height=1400 seed=160106
+
+# 撤离区：东南船坞（靠近高风险但可控）
+@extract x=1540 y=1120 w=220 h=220
+
+# === 出生点（环形分布 + 两侧中点，便于开局分流） ===
+@spawn x=120 y=120
+@spawn x=1680 y=140
+@spawn x=140 y=1260
+@spawn x=1700 y=1260
+@spawn x=80 y=700
+@spawn x=1720 y=720
+
+# === 水域（运河：上下两段 + 北桥 / 中桥两处实际可通行的“桥面”） ===
+# 上游水域（在北桥位置留出一段可通行带：y ∈ [420, 500]）
+@obstacle x=830 y=0 w=160 h=420 type=water
+@obstacle x=830 y=500 w=160 h=20 type=water
+
+# 下游水域（保持中桥区域 y ∈ [520, 720] 为陆地，用护栏引导而不是完全封死）
+@obstacle x=830 y=720 w=160 h=680 type=water
+
+# 西北沼泽洼地（绕行惩罚，适合埋伏）
+@obstacle x=120 y=40 w=220 h=140 type=water
+@obstacle x=90 y=210 w=260 h=120 type=bush
+
+# === 桥与运河护栏（制造两个硬拐点/卡口） ===
+# 中桥护栏（可穿插但不能直冲）——中段各留一处桥口，保证 y≈610 方向可从两岸走上桥
+@obstacle 820 540 10 60 type=wall   # 左侧上段护栏
+@obstacle 820 640 10 60 type=wall   # 左侧下段护栏（中间 40px 缺口）
+@obstacle 980 540 10 60 type=wall   # 右侧上段护栏
+@obstacle 980 640 10 60 type=wall   # 右侧下段护栏
+@obstacle 830 540 150 10 type=wall
+@obstacle 830 690 150 10 type=wall
+
+# 北桥（更宽、更“快”，但暴露）——在中段打出“桥口”供玩家真正过河
+@obstacle 820 380 10 40 type=wall   # 左侧上段桥柱
+@obstacle 820 460 10 40 type=wall   # 左侧下段桥柱（中间留 40px 走廊）
+@obstacle 980 380 10 40 type=wall   # 右侧上段桥柱
+@obstacle 980 460 10 40 type=wall   # 右侧下段桥柱
+
+# === 中桥两侧检查站（强掩体，必争点） ===
+@obstacle x=580 y=560 w=180 h=120 type=wall
+@obstacle x=1040 y=560 w=180 h=120 type=wall
+@obstacle x=750 y=585 w=60 h=60 type=crate
+@obstacle x=990 y=585 w=60 h=60 type=crate
+
+@poi x=640 y=610 id=west_checkpoint type=building name="West Checkpoint" desc="西侧检查站：掩体强，适合卡中桥。"
+@poi x=1100 y=610 id=east_checkpoint type=building name="East Checkpoint" desc="东侧检查站：能反控中桥，常见交火点。"
+
+# === 西北：旧市场（多房间 + 小巷） ===
+@obstacle x=180 y=180 w=320 h=220 type=wall
+# 市场内隔断（形成三条走廊）
+@obstacle 200 240 280 18 type=wall
+@obstacle 200 300 280 18 type=wall
+@obstacle 330 198 18 190 type=wall
+# 摊位与箱堆（可破坏）
+@obstacle x=210 y=410 w=70 h=70 type=crate
+@obstacle x=310 y=420 w=70 h=70 type=crate
+@obstacle x=410 y=410 w=70 h=70 type=crate
+@obstacle x=520 y=260 w=80 h=120 type=bush
+
+@poi x=260 y=230 id=old_market type=building name="Old Market" desc="旧市场：走廊多、转角多，近距离优势明显。"
+@zone x=120 y=140 w=520 h=420 id=market_quarter type=loot name="Market Quarter" desc="高密度小房间与箱堆，资源多但很容易被夹。"
+
+# === 东北：公寓带（长走廊 + 后巷绕行） ===
+# 主公寓楼（分两栋留出中间巷）
+@obstacle x=1160 y=160 w=190 h=260 type=wall
+@obstacle x=1390 y=160 w=190 h=260 type=wall
+# 连接楼道（把战斗拉成“长直线”）
+@obstacle 1160 290 420 18 type=wall
+# 后巷围墙（逼迫拐点）
+@obstacle 1120 120 520 20 type=wall
+@obstacle 1120 440 520 20 type=wall
+
+# 小型庭院草丛（提供“软掩体”）
+@obstacle x=1260 y=460 w=220 h=120 type=bush
+
+@poi x=1280 y=220 id=apartment_a type=building name="Apartment A" desc="公寓A：长走廊，适合中远距离压制。"
+@poi x=1510 y=220 id=apartment_b type=building name="Apartment B" desc="公寓B：侧翼入口多，容易被绕。"
+@zone x=1100 y=120 w=640 h=520 id=apartment_block type=loot name="Apartment Block" desc="公寓区：长线对枪+后巷绕行并存，节奏变化大。"
+
+# === 西南：货场迷宫（围墙 + 入口缺口 + 箱阵） ===
+# 货场外围墙（留两个缺口：北口/东口）
+@obstacle 120 860 520 22 type=wall     # 上墙
+@obstacle 120 1220 520 22 type=wall    # 下墙
+@obstacle 120 860 22 382 type=wall     # 左墙
+@obstacle 618 860 22 250 type=wall     # 右墙上半（下方留口）
+
+# 货场内部箱阵（可破坏，形成“网格战斗”）
+@obstacle x=200 y=940 w=70 h=70 type=crate
+@obstacle x=300 y=940 w=70 h=70 type=crate
+@obstacle x=400 y=940 w=70 h=70 type=crate
+@obstacle x=200 y=1040 w=70 h=70 type=crate
+@obstacle x=320 y=1060 w=70 h=70 type=crate
+@obstacle x=460 y=1040 w=70 h=70 type=crate
+@obstacle x=240 y=1140 w=90 h=60 type=crate
+@obstacle x=380 y=1140 w=90 h=60 type=crate
+
+# 货场外侧草带（绕行但不稳）
+@obstacle x=40 y=980 w=70 h=220 type=bush
+
+@poi x=260 y=900 id=cargo_gate type=landmark name="Cargo Gate" desc="货场入口：常见蹲点，打进去/打出来都很难。"
+@poi x=430 y=1080 id=cargo_stacks type=landmark name="Cargo Stacks" desc="箱阵核心：近中距离交火最密集。"
+@zone x=60 y=820 w=700 h=520 id=cargo_yard type=pvp name="Cargo Yard" desc="货场迷宫：短线掩体多，适合推进与反推。"
+
+# === 东南：诊所 + 船坞撤离（可控但会被“桥点”卡） ===
+# 诊所主体（两段墙制造“L形”转角）
+@obstacle x=1120 y=860 w=260 h=160 type=wall
+@obstacle x=1320 y=1020 w=260 h=160 type=wall
+# 诊所外箱堆
+@obstacle x=1100 y=1060 w=60 h=60 type=crate
+@obstacle x=1180 y=1140 w=60 h=60 type=crate
+@obstacle x=1260 y=1060 w=60 h=60 type=crate
+
+# 船坞护栏（引导到撤离区，避免一条直线跑完）
+@obstacle 1460 1080 22 300 type=wall
+@obstacle 1460 1080 180 22 type=wall
+
+@poi x=1200 y=900 id=field_clinic type=building name="Field Clinic" desc="诊所：拐角多，适合清点补给。"
+@poi x=1600 y=1200 id=dock_extract type=landmark name="Dock Extraction" desc="船坞撤离：撤离区附近更安全，但来路通常会被桥点压。"
+@zone x=1080 y=820 w=680 h=560 id=clinic_dock type=loot name="Clinic & Dock" desc="诊所+船坞：资源不错，撤离在此，常有终局交火。"
+
+# === 运河两岸：中距离对枪带（视野长） ===
+# 两岸零散掩体（压迫“直线过河”）
+@obstacle x=700 y=420 w=90 h=60 type=crate
+@obstacle x=620 y=720 w=90 h=60 type=crate
+@obstacle x=1020 y=420 w=90 h=60 type=crate
+@obstacle x=1100 y=720 w=90 h=60 type=crate
+@obstacle x=720 y=260 w=110 h=90 type=bush
+@obstacle x=980 y=260 w=110 h=90 type=bush
+
+@poi x=900 y=460 id=north_bridge type=landmark name="North Bridge" desc="北桥：更快的过河线，但很空旷。"
+@poi x=900 y=610 id=mid_bridge type=landmark name="Mid Bridge" desc="中桥：更慢但更可控，掩体多。"
+@zone x=520 y=300 w=760 h=560 id=canal_crossing type=pvp name="Canal Crossing" desc="双桥+检查站：全图节奏的“时钟源”。"
+
+# === 撤离安全区（与 @extract 呼应）===
+@zone x=1520 y=1100 w=260 h=260 id=extract_safe type=safe name="Dock Safe Zone" desc="撤离区外圈：敌人较少，但入口容易被卡。"
+
+@note "可在 cargo_yard 或 canal_crossing 增加 Boss/事件点；也可加第二撤离点（同语法扩展后再做）。"
+@comment 建议：北桥更适合“快速转点”，中桥更适合“稳推进”；让两条路线都有人玩。

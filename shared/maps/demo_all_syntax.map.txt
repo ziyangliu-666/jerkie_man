@@ -1,0 +1,83 @@
+# MAPTEXT v1
+# 示例地图：演示所有支持的指令和写法
+# 支持指令: @meta, @map, @extract, @obstacle, @spawn, @poi, @zone, @note, @comment
+
+@meta id=demo_all_syntax name="Demo: All Syntax" desc="示例地图，包含所有当前支持的地图语法"
+
+# 地图尺寸与随机种子
+@map width=2000 height=1500 seed=424242
+
+# 撤离区（左上角）
+@extract x=100 y=100 w=200 h=200
+
+# === 障碍物示例（支持 key=value 与位置参数两种写法） ===
+
+# 1) 主建筑，key=value 写法（默认 type=wall）
+@obstacle x=800 y=600 w=300 h=240
+
+# 2) 木箱掩体，指定 type=crate
+@obstacle x=650 y=650 w=60 h=60 type=crate
+@obstacle x=1150 y=650 w=60 h=60 type=crate
+
+# 3) 草丛掩蔽区，type=bush
+@obstacle x=400 y=900 w=120 h=80 type=bush
+@obstacle x=1450 y=950 w=140 h=100 type=bush
+
+# 4) 水域障碍，type=water
+@obstacle x=300 y=300 w=200 h=160 type=water
+@obstacle x=1600 y=350 w=220 h=180 type=water
+
+# 5) 使用位置参数写法的围墙（x y w h）
+@obstacle 600 500 800 30 type=wall     # 上墙
+@obstacle 600 1000 800 30 type=wall    # 下墙
+@obstacle 600 500 30 530 type=wall     # 左墙
+@obstacle 1370 500 30 530 type=wall    # 右墙
+
+# === 出生点 ===
+@spawn x=200 y=1400
+@spawn x=1800 y=1400
+@spawn x=1800 y=200
+@spawn x=200 y=200
+@spawn x=1000 y=750
+
+# === 关键点（POI） ===
+
+# 指挥中心（主楼）
+@poi x=950 y=720 id=cmd_center type=building name="Command Center" desc="中心建筑，高价值资源"
+
+# 西侧木箱堆
+@poi x=650 y=680 id=west_crates type=landmark name="West Crates" desc="可破坏木箱堆，附近常刷低级战利品"
+
+# 东侧补给棚
+@poi x=1250 y=680 id=east_shed type=building name="East Supply Shed" desc="小型补给建筑"
+
+# 北部草丛伏击区
+@poi x=400 y=930 id=north_bush type=landmark name="North Bush Line" desc="草丛掩蔽带，适合埋伏"
+
+# 撤离直升机停机坪（与 extract 区域呼应）
+@poi x=200 y=200 id=extract_helipad type=landmark name="Extraction Helipad" desc="直升机撤离点"
+
+# === 功能区域（Zones） ===
+
+# 主基地 PvP 区（包含主楼 + 围墙）
+@zone x=580 y=480 w=850 h=580 id=main_compound type=pvp name="Main Compound" desc="核心交火区，高风险高收益"
+
+# 森林战利品区（中部大范围）
+@zone x=300 y=400 w=1400 h=800 id=forest_loot type=loot name="Forest Loot Area" desc="森林区域，有分散的资源点"
+
+# 撤离安全区（和 @extract 大致重合）
+@zone x=80 y=80 w=260 h=260 id=extract_safe type=safe name="Extraction Safe Zone" desc="撤离安全区，敌人较少"
+
+# 远离主战场的静默水域区
+@zone x=260 y=260 w=320 h=260 id=water_block type=generic name="Wetlands" desc="水域与沼泽地形，阻挡移动"
+
+# === 备注与注释（不会影响解析） ===
+
+@note "这里预留给以后增加 Boss 或特殊事件触发点"
+@comment 未来可在 main_compound 区域中央添加高价值空投箱
+
+# 也可以使用普通注释行：
+# - 可以自由写设计说明
+# - 也可以标记后续 TODO
+
+

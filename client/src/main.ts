@@ -3241,6 +3241,14 @@ function renderLoop(): void {
         // 修复: 使用 snapshot 中的障碍物（可破坏，需要实时同步）
         // 如果 snapshot 中没有 obstacles，则使用缓存的（向后兼容）
         const obstaclesForRender = state.obstacles ?? cachedObstacles;
+
+        // 同步最新障碍物到缓存与子弹轨迹管理器：
+        // - cachedObstacles：用于本地移动预测的 simulatePlayerMove
+        // - bulletTracks：用于本地子弹 vs 障碍物碰撞（避免“看不见的旧木箱”）
+        if (state.obstacles && state.obstacles.length > 0) {
+          cachedObstacles = state.obstacles;
+          bulletTracks.setObstacles(state.obstacles);
+        }
         
         // 调试：检查障碍物数量
         if (obstaclesForRender.length === 0 && cachedObstacles.length > 0) {

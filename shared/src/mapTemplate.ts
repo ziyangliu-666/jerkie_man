@@ -234,10 +234,19 @@ export function parseMapTemplateText(text: string): MapTemplate {
         w: 'obstacle.w',
         h: 'obstacle.h',
       });
-      template.obstacles.push({
+      const type = kv.type || 'wall';
+      const obstacle: any = {
         ...rect,
-        type: kv.type || 'wall', // 支持 type 参数，默认为 wall
-      });
+        type, // 支持 type 参数，默认为 wall
+      };
+
+      // 对可破坏的木箱（crate）在导入时补齐 hp/maxHp，和随机生成逻辑保持一致
+      if (type === 'crate') {
+        obstacle.hp = 100;
+        obstacle.maxHp = 100;
+      }
+
+      template.obstacles.push(obstacle);
     } else if (directive === '@spawn') {
       template.spawns.push(parsePoint(tokens, lineNumber));
     } else if (directive === '@poi') {
