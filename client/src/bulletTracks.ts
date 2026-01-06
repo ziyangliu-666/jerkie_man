@@ -148,8 +148,8 @@ export class BulletTrackManager {
     const nowMs = Date.now();
     const tempId = `local_grenade_${this.tempIdCounter++}`;
 
-    // 计算飞行速度（1秒到达目标）
-    const flightTime = 1.0;
+    // 计算飞行速度（速度3倍）
+    const flightTime = 1.0 / 3; // 飞行时间缩短为1/3，速度提升3倍
     const dx = targetX - playerX;
     const dy = targetY - playerY;
     const vx = dx / flightTime;
@@ -164,7 +164,7 @@ export class BulletTrackManager {
       vy,
       spawnTimeMs: nowMs,
       isLocalPrediction: true,
-      bulletLifeMs: 3000, // 3秒引信
+      bulletLifeMs: 750, // 0.75秒引信
       weaponTypeId,
       isGrenade: true,
       targetX,

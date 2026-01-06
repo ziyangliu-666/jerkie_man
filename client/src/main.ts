@@ -161,6 +161,15 @@ function getLocalSpeedMultiplier(): number {
       // 忽略无效背包类型
     }
   }
+
+  // 新增: 叠加局内短效 Buff（例如战斗兴奋剂）
+  if (raidLocalPlayer.buffs && Array.isArray(raidLocalPlayer.buffs)) {
+    for (const buff of raidLocalPlayer.buffs) {
+      if (buff.kind === 'speed' && typeof buff.speedMultiplier === 'number') {
+        multiplier *= buff.speedMultiplier;
+      }
+    }
+  }
   
   return multiplier;
 }
@@ -411,6 +420,9 @@ let staminaHud: HTMLElement | null = null;
 let staminaHudValue: HTMLElement | null = null;
 let staminaHudFill: HTMLElement | null = null;
 let staminaHudState: HTMLElement | null = null;
+// 新增: Buff HUD 元素
+let buffHud: HTMLElement | null = null;
+let buffHudList: HTMLElement | null = null;
 
 // 新增: 快捷栏 HUD 元素
 let hotbarHud: HTMLElement | null = null;
@@ -486,6 +498,11 @@ function getStaminaHudElements(): void {
   if (!staminaHudValue) staminaHudValue = document.getElementById('staminaHudValue');
   if (!staminaHudFill) staminaHudFill = document.getElementById('staminaHudFill');
   if (!staminaHudState) staminaHudState = document.getElementById('staminaHudState');
+}
+
+function getBuffHudElements(): void {
+  if (!buffHud) buffHud = document.getElementById('buffHud');
+  if (!buffHudList) buffHudList = document.getElementById('buffHudList');
 }
 
 // 修复: 客户端预测相关状态（必须在 updatePhaseUI 之前定义）
@@ -1205,9 +1222,14 @@ function updateHotbarHud(localPlayer: PLAYER_STATE | null): void {
   
   hotbarHud.style.display = 'flex';
   
-  // 获取可使用的物品（医疗包和手雷）
+  // 获取可使用的物品（医疗包、战斗兴奋剂、再生血清和手雷）
   const usableItems = localPlayer.inventory?.items?.filter(item => {
-    return item.typeId === 'medkit' || item.typeId === 'frag_grenade';
+    return (
+      item.typeId === 'medkit' ||
+      item.typeId === 'combat_stim' ||
+      item.typeId === 'regeneration_serum' ||
+      item.typeId === 'frag_grenade'
+    );
   }) || [];
   
   // 更新每个槽位
@@ -1226,6 +1248,12 @@ function updateHotbarHud(localPlayer: PLAYER_STATE | null): void {
       if (item.typeId === 'medkit') {
         slot.classList.add('medkit');
         iconEl.textContent = '医疗';
+      } else if (item.typeId === 'combat_stim') {
+        slot.classList.add('stim');
+        iconEl.textContent = '兴奋';
+      } else if (item.typeId === 'regeneration_serum') {
+        slot.classList.add('regen');
+        iconEl.textContent = '再生';
       } else if (item.typeId === 'frag_grenade') {
         slot.classList.add('grenade');
         iconEl.textContent = '手雷';
@@ -1606,6 +1634,76 @@ function updateStaminaHud(localPlayer: PLAYER_STATE | null): void {
   }
 }
 
+// 新增: 更新左下角 Buff HUD
+function updateBuffHud(localPlayer: PLAYER_STATE | null): void {
+  getBuffHudElements();
+
+  if (!buffHud) {
+    return;
+  }
+
+  if (currentPhase !== 'RAID' || !localPlayer || localPlayer.status !== 'ALIVE') {
+    buffHud.style.display = 'none';
+    return;
+  }
+
+  const buffs = Array.isArray(localPlayer.buffs) ? localPlayer.buffs : [];
+  if (buffs.length === 0) {
+    buffHud.style.display = 'none';
+    return;
+  }
+
+  buffHud.style.display = 'block';
+
+  if (buffHudList) {
+    // 只展示 4 个以内的 Buff，避免列表过长
+    const topBuffs = buffs.slice(0, 4);
+    const rows = topBuffs
+      .map((buff) => {
+        const remainingMs = Math.max(0, buff.remainingMs ?? 0);
+        const totalMs = Math.max(1, buff.totalMs ?? 1);
+        const progress = Math.min(1, Math.max(0, remainingMs / totalMs));
+        const progressPercent = Math.round(progress * 100);
+        
+        const remainSec = remainingMs / 1000;
+        const remainText = remainSec >= 1 ? `${remainSec.toFixed(1)}s` : `${Math.round(remainingMs)}ms`;
+        
+        // 根据剩余时间百分比设置进度条颜色
+        let progressClass = '';
+        if (progress < 0.2) {
+          progressClass = 'danger'; // 红色：剩余 < 20%
+        } else if (progress < 0.5) {
+          progressClass = 'warning'; // 橙色：剩余 < 50%
+        }
+        
+        // 生成效果描述文本
+        let effectText = '';
+        if (buff.kind === 'speed' && buff.speedMultiplier) {
+          const percent = Math.round((buff.speedMultiplier - 1) * 100);
+          effectText = `速度+${percent}%`;
+        } else if (buff.kind === 'damage_reduction' && buff.damageReductionBonus) {
+          const percent = Math.round(buff.damageReductionBonus * 100);
+          effectText = `减伤+${percent}%`;
+        } else if (buff.kind === 'regeneration' && buff.hpPerSecond) {
+          effectText = `回血+${buff.hpPerSecond}/s`;
+        }
+        
+        return `<div class="buff-row">
+          <div class="buff-row-header">
+            <span class="buff-name">${escapeHtml(buff.name)}</span>
+            <span class="buff-remaining">${escapeHtml(remainText)}</span>
+          </div>
+          ${effectText ? `<div class="buff-effect">${escapeHtml(effectText)}</div>` : ''}
+          <div class="buff-progress-bar">
+            <div class="buff-progress-fill ${progressClass}" style="width: ${progressPercent}%"></div>
+          </div>
+        </div>`;
+      })
+      .join('');
+    buffHudList.innerHTML = rows;
+  }
+}
+
 // 新增: 检查物品是否已装备
 function isItemEquipped(item: ItemInstance): boolean {
   if (!playerProfile) return false;
@@ -1892,7 +1990,7 @@ function getItemCategory(typeId: string): string {
     // 判断是否为消耗品
     if (typeId === 'ammo' || typeId === 'medkit' || typeId === 'advanced_medkit' || 
         typeId === 'frag_grenade' || typeId === 'flash_grenade' || typeId === 'smoke_grenade' ||
-        typeId === 'armor_plate_item' || typeId === 'combat_stim') {
+        typeId === 'armor_plate_item' || typeId === 'combat_stim' || typeId === 'regeneration_serum') {
       return 'consumable';
     }
     
@@ -3364,17 +3462,24 @@ function renderLoop(): void {
         uiOverlay.updateState({ extractProgress: { enabled: false, progress: 0 } });
       }
       
-      // 武器状态（左下角 HUD）
+      // 武器状态 / Buff（左下角 HUD）
       if (localPlayerId) {
-        const localPlayer = renderLocalPlayer ?? predictedLocalPlayer ?? state.players.find((p) => p.id === localPlayerId);
+        // authoritative: 来自服务端 snapshot 的玩家（一定包含 buffs）
+        const snapshotPlayer = state.players.find((p) => p.id === localPlayerId) ?? null;
+        // 用于移动/渲染的本地玩家（预测/平滑优先）
+        const localPlayer = renderLocalPlayer ?? predictedLocalPlayer ?? snapshotPlayer;
+
+        // 大部分 HUD 用本地平滑状态，Buff HUD 用 snapshot（带 buffs）
         updateWeaponHud(localPlayer ?? null);
         updateHealthHud(localPlayer ?? null);
         updateStaminaHud(localPlayer ?? null); // 新增: 更新耐力HUD
+        updateBuffHud(snapshotPlayer ?? localPlayer ?? null); // 使用包含 buffs 的状态
         updateCanvasUI(localPlayer ?? null); // 新增: 更新Canvas UI状态
       } else {
         updateWeaponHud(null);
         updateHealthHud(null);
         updateStaminaHud(null); // 新增: 清空耐力HUD
+        updateBuffHud(null); // 新增: 清空 Buff HUD
         updateCanvasUI(null); // 新增: 清空Canvas UI状态
       }
       

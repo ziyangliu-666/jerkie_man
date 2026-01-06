@@ -1,5 +1,21 @@
-import type { PLAYER_STATE, OBSTACLE_STATE, PlayerInventory, ItemInstance, WeaponRuntime } from '@jerkie-man/shared';
-import { simulatePlayerMove, getItemType, getWeaponDef, getArmorDef, getBagDef, PositionHistory, calculateStaminaChange, canSprint, getSprintSpeedMultiplier } from '@jerkie-man/shared';
+import type { PLAYER_STATE, OBSTACLE_STATE, PlayerInventory, ItemInstance, WeaponRuntime, PLAYER_BUFF } from '@jerkie-man/shared';
+import { simulatePlayerMove, getItemType, getWeaponDef, getArmorDef, getBagDef, PositionHistory, calculateStaminaChange, canSprint, getSprintSpeedMultiplier, msToTicks, ticksToMs } from '@jerkie-man/shared';
+
+// 内部 Buff 运行时类型（仅服务端使用）
+type InternalBuffKind = 'speed' | 'damage_reduction' | 'regeneration';
+
+type InternalBuff = {
+  id: string;
+  name: string;
+  kind: InternalBuffKind;
+  // 数值效果（服务端权威）
+  speedMultiplier?: number;
+  damageReductionBonus?: number;
+  hpPerSecond?: number; // 新增: 每秒回复生命值（用于 regeneration buff）
+  // 时间轴（基于 tick）
+  startedAtTick: number;
+  durationTicks: number;
+};
 
 export class Player {
   public id: string;
@@ -29,6 +45,8 @@ export class Player {
   public positionHistory: PositionHistory; // 延迟补偿: 位置历史记录
   public lastShotOriginX?: number;
   public lastShotOriginY?: number;
+  // 新增: 短效 Buff 列表（仅服务端运行时使用）
+  private activeBuffs: InternalBuff[] = [];
 
   // 修复: 移动速度已移至 shared/sim.ts，这里不再需要（保留注释用于文档）
   // SPEED = 200 (在 shared/sim.ts 中定义)
@@ -93,6 +111,13 @@ export class Player {
         }
       } catch {
         // 忽略无效背包类型
+      }
+    }
+
+    // 检查短效 Buff（例如战斗兴奋剂）
+    for (const buff of this.activeBuffs) {
+      if (buff.kind === 'speed' && buff.speedMultiplier && buff.durationTicks > 0) {
+        multiplier *= buff.speedMultiplier;
       }
     }
     
@@ -272,6 +297,83 @@ export class Player {
     return `i${Date.now()}_${Math.random().toString(36).substring(2, 11)}`;
   }
 
+  /**
+   * 新增: 添加/刷新短效 Buff
+   * 如果同 id 的 Buff 已存在，则刷新持续时间
+   */
+  addOrRefreshBuff(params: {
+    id: string;
+    name: string;
+    kind: InternalBuffKind;
+    durationMs: number;
+    speedMultiplier?: number;
+    damageReductionBonus?: number;
+    hpPerSecond?: number;
+  }, currentTick: number): void {
+    const durationTicks = msToTicks(params.durationMs);
+    const existingIndex = this.activeBuffs.findIndex(b => b.id === params.id);
+    const base: InternalBuff = {
+      id: params.id,
+      name: params.name,
+      kind: params.kind,
+      speedMultiplier: params.speedMultiplier,
+      damageReductionBonus: params.damageReductionBonus,
+      hpPerSecond: params.hpPerSecond,
+      startedAtTick: currentTick,
+      durationTicks,
+    };
+    if (existingIndex >= 0) {
+      this.activeBuffs[existingIndex] = base;
+    } else {
+      this.activeBuffs.push(base);
+    }
+  }
+
+  /**
+   * 新增: 每 tick 更新 Buff（移除已过期 Buff，并处理持续效果如回血）
+   */
+  updateBuffs(currentTick: number): void {
+    // 处理持续回血 Buff
+    for (const buff of this.activeBuffs) {
+      if (buff.kind === 'regeneration' && buff.hpPerSecond && this.status === 'ALIVE') {
+        // 每 tick 回复 (hpPerSecond / 20) 点 HP（因为 20Hz = 每秒 20 tick）
+        const hpPerTick = buff.hpPerSecond / 20;
+        const oldHp = this.hp;
+        this.hp = Math.min(100, this.hp + hpPerTick);
+        // 如果回血了，记录日志（可选，避免日志过多）
+        // if (this.hp > oldHp) {
+        //   log('REGENERATION_TICK', { player: this.id, oldHp, newHp: this.hp, hpPerTick });
+        // }
+      }
+    }
+    
+    // 移除已过期的 Buff
+    this.activeBuffs = this.activeBuffs.filter((buff) => {
+      return currentTick <= buff.startedAtTick + buff.durationTicks;
+    });
+  }
+
+  /**
+   * 新增: 将内部 Buff 转换为协议层可见的 PLAYER_BUFF
+   */
+  private getPublicBuffs(currentTick: number): PLAYER_BUFF[] {
+    return this.activeBuffs.map<PLAYER_BUFF>((buff) => {
+      const totalMs = ticksToMs(buff.durationTicks);
+      const remainingTicks = Math.max(0, buff.startedAtTick + buff.durationTicks - currentTick);
+      const remainingMs = ticksToMs(remainingTicks);
+      return {
+        id: buff.id,
+        name: buff.name,
+        kind: buff.kind,
+        remainingMs,
+        totalMs,
+        speedMultiplier: buff.speedMultiplier,
+        damageReductionBonus: buff.damageReductionBonus,
+        hpPerSecond: buff.hpPerSecond,
+      };
+    });
+  }
+
   toState(currentTick: number): PLAYER_STATE {
     const weaponRuntime = this.weaponRuntime
       ? { ...this.weaponRuntime, fireCredit: this.getFireCredit(currentTick) }
@@ -283,11 +385,14 @@ export class Player {
       items: this.inventory.items.filter(item => item.qty > 0)
     };
     
+    // 确保 hp 始终为整数并在 0-100 之间，避免 Zod 验证错误
+    const safeHp = Math.min(100, Math.max(0, Math.round(this.hp)));
+
     return {
       id: this.id,
       x: this.x,
       y: this.y,
-      hp: this.hp,
+      hp: safeHp,
       stamina: Math.round(this.stamina), // 新增: 耐力值（四舍五入到整数）
       maxStamina: this.maxStamina, // 新增: 最大耐力值
       isSprinting: this.isSprinting, // 新增: 冲刺状态
@@ -309,6 +414,7 @@ export class Player {
       },
       killedBy: this.killedBy, // 新增: 击杀者名字
       killedByWeaponName: this.killedByWeaponName, // 新增: 击杀使用的武器名称
+      buffs: this.getPublicBuffs(currentTick), // 新增: 短效 Buff 列表
     };
   }
 

@@ -1297,6 +1297,11 @@ ws.on('message', (data: Buffer) => {
 setInterval(() => {
   room.tick++;
 
+  // 更新所有玩家的短效 Buff（基于当前 tick）
+  for (const player of room.players.values()) {
+    player.updateBuffs(room.tick);
+  }
+
   // Day2: 先处理输入（可能生成子弹）
   // 修复: 按序处理最多 N 条，避免队列为空时不移动（解决 err=10 问题）
   const MAX_STEPS = 4; // 每 tick 最多追 4 步，避免被恶意灌爆

@@ -82,6 +82,13 @@ export const ITEM_CATALOG: Record<string, ItemType> = {
     value: 200,
     stackMax: 3,
   },
+  regeneration_serum: {
+    id: 'regeneration_serum',
+    name: '再生血清',
+    rarity: 'EPIC',
+    value: 250,
+    stackMax: 2,
+  },
   
   // 武器
   w_pistol: {

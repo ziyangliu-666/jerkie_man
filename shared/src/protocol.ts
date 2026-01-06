@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { MAP_CONFIG_SCHEMA } from './content.js';
+import type { PlayerBuff } from './types.js';
 
 // C2S (Client to Server) 消息
 export const C2S_HELLO_SCHEMA = z.object({
@@ -217,6 +218,18 @@ export const WEAPON_RUNTIME_SCHEMA = z.object({
   fireCredit: z.number().int().nonnegative().optional(),
 });
 
+// 短效 Buff（局内状态）—— 只包含给客户端展示所需的信息
+export const PLAYER_BUFF_SCHEMA = z.object({
+  id: z.string(),
+  name: z.string(),
+  kind: z.enum(['speed', 'damage_reduction', 'regeneration']),
+  remainingMs: z.number().int().nonnegative(),
+  totalMs: z.number().int().positive(),
+  speedMultiplier: z.number().positive().optional(),
+  damageReductionBonus: z.number().min(0).max(1).optional(),
+  hpPerSecond: z.number().positive().optional(),
+});
+
 export const PLAYER_STATE_SCHEMA = z.object({
   id: z.string(),
   x: z.number(),
@@ -237,6 +250,7 @@ export const PLAYER_STATE_SCHEMA = z.object({
   raidEquipment: PLAYER_RAID_EQUIPMENT_SCHEMA.optional(), // 新增: 局内装备状态
   killedBy: z.string().optional(), // 新增: 击杀者名字
   killedByWeaponName: z.string().optional(), // 新增: 击杀使用的武器名称
+  buffs: z.array(PLAYER_BUFF_SCHEMA).optional(), // 新增: 局内短效 Buff 列表
 });
 
 export const BULLET_STATE_SCHEMA = z.object({
@@ -420,6 +434,7 @@ export type C2S_MESSAGE = z.infer<typeof C2S_MESSAGE_SCHEMA>;
 export type C2S_LOCAL_BULLET_HIT = z.infer<typeof C2S_LOCAL_BULLET_HIT_SCHEMA>;
 
 export type PLAYER_STATE = z.infer<typeof PLAYER_STATE_SCHEMA>;
+export type PLAYER_BUFF = PlayerBuff;
 export type BULLET_STATE = z.infer<typeof BULLET_STATE_SCHEMA>;
 export type ITEM_STATE = z.infer<typeof ITEM_STATE_SCHEMA>;
 export type OBSTACLE_STATE = z.infer<typeof OBSTACLE_STATE_SCHEMA>; // Day4-2: 障碍物类型

@@ -1,5 +1,5 @@
 import type { PLAYER_STATE, BULLET_STATE, ITEM_STATE, OBSTACLE_STATE, WorldItem, LootBag } from '@jerkie-man/shared';
-import { getItemType, getWeaponDef, msToTicks } from '@jerkie-man/shared';
+import { getItemType, getWeaponDef, msToTicks, PLAYER_SPEED } from '@jerkie-man/shared';
 
 export class Renderer {
   private canvas: HTMLCanvasElement;
@@ -28,6 +28,14 @@ export class Renderer {
   private shakeStartAt = 0;
   private shakeIntensity = 0;
   private shakeDurationMs = 0;
+
+  // 新增: 玩家拖影轨迹（世界坐标 + alpha）
+  // key: playerId -> 最近若干帧的位置和透明度
+  private playerTrails: Map<string, Array<{ x: number; y: number; alpha: number }>> = new Map();
+  // 新增: 拖影强度（0-1，用于控制开启/结束的过渡）
+  private playerTrailStrength: Map<string, number> = new Map();
+  // 新增: 速度采样（基于世界位置 + 时间），用于判断当前“视觉速度”
+  private playerLastSample: Map<string, { x: number; y: number; t: number }> = new Map();
 
   constructor(canvas: HTMLCanvasElement) {
     this.canvas = canvas;
@@ -223,6 +231,109 @@ export class Renderer {
         }
       }
     }
+  }
+
+  /**
+   * 新增: 更新玩家拖影轨迹（基于世界坐标）
+   * 使用 trailStrength 实现“开启/结束”时的渐入/渐出过渡
+   */
+  private updatePlayerTrail(player: PLAYER_STATE, isFast: boolean): void {
+    const id = player.id;
+    let trail = this.playerTrails.get(id) ?? [];
+
+    // 读取并更新当前的拖影强度（0~1）
+    const prevStrength = this.playerTrailStrength.get(id) ?? 0;
+    const upSpeed = 0.15;   // 每帧开启时增加量（降低，让开启更平滑）
+    const downSpeed = 0.12; // 每帧关闭时减少量（降低，让关闭更平滑）
+    let strength = prevStrength;
+    if (isFast) {
+      strength = Math.min(1, strength + upSpeed);
+    } else {
+      strength = Math.max(0, strength - downSpeed);
+    }
+    this.playerTrailStrength.set(id, strength);
+
+    // 根据强度判断是否需要添加新的拖影点（即使 strength 较低也添加，但 alpha 会很低）
+    // 这样可以让开启/关闭过渡更无缝
+    if (strength > 0.01) {
+      const baseAlpha = 0.65;
+      // 即使 isFast 为 false，只要 strength > 0，也继续添加点（但 alpha 会很低）
+      // 这样关闭时拖影会自然缩短，而不是突然消失
+      const effectiveAlpha = isFast ? baseAlpha * strength : baseAlpha * strength * 0.3;
+      trail.push({ x: player.x, y: player.y, alpha: effectiveAlpha });
+    }
+
+    // 对全部拖影点做 alpha 衰减，并过滤掉几乎不可见的点
+    // 降低衰减速度（0.88 替代 0.82），让拖影保留更久
+    trail = trail
+      .map((p) => ({ ...p, alpha: p.alpha * 0.88 }))
+      .filter((p) => p.alpha > 0.02); // 降低过滤阈值，让更淡的点也能显示
+
+    if (trail.length === 0 && strength === 0) {
+      this.playerTrails.delete(id);
+      this.playerTrailStrength.delete(id);
+    } else {
+      // 限制最大长度，增加点数让拖影更长
+      const MAX_POINTS = 15; // 从 8 增加到 15，让拖影更长
+      if (trail.length > MAX_POINTS) {
+        trail = trail.slice(trail.length - MAX_POINTS);
+      }
+      this.playerTrails.set(id, trail);
+    }
+  }
+
+  /**
+   * 新增: 绘制玩家拖影（使用屏幕坐标）
+   * 颜色与玩家主体颜色保持一致，但更透明
+   */
+  private drawPlayerTrail(playerId: string, isLocal: boolean): void {
+    const trail = this.playerTrails.get(playerId);
+    if (!trail || trail.length === 0) return;
+
+    const size = 20;
+    const baseColor = isLocal ? { r: 0, g: 170, b: 255 } : { r: 255, g: 68, b: 68 };
+
+    for (const point of trail) {
+      const screenX = Math.round(point.x - this.camX);
+      const screenY = Math.round(point.y - this.camY);
+
+      this.ctx.fillStyle = `rgba(${baseColor.r}, ${baseColor.g}, ${baseColor.b}, ${point.alpha})`;
+      this.ctx.fillRect(screenX - size / 2, screenY - size / 2, size, size);
+    }
+  }
+
+  /**
+   * 新增: 判断玩家当前是否“高速移动”
+   * 完全基于本地可见的位置变化，不依赖服务端的 isSprinting 或 buff 字段
+   */
+  private isPlayerFast(player: PLAYER_STATE): boolean {
+    const id = player.id;
+    const now = performance.now();
+    const last = this.playerLastSample.get(id);
+
+    if (!last) {
+      this.playerLastSample.set(id, { x: player.x, y: player.y, t: now });
+      return false;
+    }
+
+    const dtMs = now - last.t;
+    // 间隔异常（时间倒流），直接更新采样点并认为不高速
+    if (dtMs <= 0) {
+      this.playerLastSample.set(id, { x: player.x, y: player.y, t: now });
+      return false;
+    }
+
+    const dist = Math.hypot(player.x - last.x, player.y - last.y);
+    const dtSec = dtMs / 1000;
+    const speed = dist / dtSec; // px/s
+
+    this.playerLastSample.set(id, { x: player.x, y: player.y, t: now });
+
+    // 阈值：略高于基础速度，避免微小抖动就触发拖影
+    const threshold = PLAYER_SPEED * 1.05;
+    const isFast = speed > threshold;
+
+    return isFast;
   }
 
   // 新增: 绘制屏幕外玩家的箭头指引
@@ -1016,6 +1127,20 @@ export class Renderer {
     // 新增: 草丛视野遮挡 - 只有在草丛内的玩家才能看到其他在草丛内的玩家
     const localInBush = isLocalPlayerInBush; // 使用客户端本地计算的值
 
+    // 清理已离场玩家的拖影（不在 snapshot 里的玩家）
+    const activeIds = new Set(players.map((p) => p.id));
+    for (const id of this.playerTrails.keys()) {
+      if (!activeIds.has(id)) {
+        this.playerTrails.delete(id);
+        this.playerTrailStrength.delete(id);
+      }
+    }
+    for (const id of this.playerLastSample.keys()) {
+      if (!activeIds.has(id)) {
+        this.playerLastSample.delete(id);
+      }
+    }
+
     for (const player of players) {
       const isLocal = player.id === localPlayerId;
       const playerInBush = player.inBush ?? false;
@@ -1027,7 +1152,18 @@ export class Renderer {
       const isVisible = isLocal || !playerInBush || (playerInBush && localInBush);
 
       if (isVisible) {
-        this.drawPlayer(player, isLocal, currentServerTick);
+        // 使用“真正被画出来的位置”来判定速度：
+        // - 对本地玩家，优先使用预测/平滑后的 localPlayer
+        // - 其他玩家使用 snapshot/interpolated 的 player
+        const visualPlayer = isLocal && localPlayer ? localPlayer : player;
+
+        // 判断该视觉位置下是否处于“高速”状态（>100% 基础速度）
+        const isFast = this.isPlayerFast(visualPlayer);
+
+        // 先更新拖影轨迹（基于视觉位置），再绘制拖影和主体
+        this.updatePlayerTrail(visualPlayer, isFast);
+        this.drawPlayerTrail(visualPlayer.id, isLocal);
+        this.drawPlayer(visualPlayer, isLocal, currentServerTick);
       }
     }
     

@@ -639,6 +639,98 @@
       animation: staminaPulse 0.8s ease-in-out infinite alternate;
     }
 
+    /* 左下角 Buff HUD */
+    #buffHud {
+      position: absolute;
+      left: 20px;
+      bottom: 260px;
+      width: 220px;
+      padding: 10px 12px;
+      border-radius: 10px;
+      border: 1px solid #323232;
+      background: rgba(12, 12, 12, 0.85);
+      box-shadow: 0 6px 16px rgba(0, 0, 0, 0.45);
+      pointer-events: none;
+      display: none;
+    }
+
+    #buffHud .buff-hud-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 4px;
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+    }
+
+    #buffHud .buff-hud-title {
+      color: #0ff;
+    }
+
+    #buffHud .buff-hud-list {
+      font-size: 11px;
+      color: #f2f2f2;
+    }
+
+    #buffHud .buff-row {
+      margin-bottom: 6px;
+    }
+
+    #buffHud .buff-row-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 3px;
+    }
+
+    #buffHud .buff-name {
+      max-width: 140px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-size: 11px;
+    }
+
+    #buffHud .buff-remaining {
+      color: #f3c26a;
+      font-variant-numeric: tabular-nums;
+      margin-left: 8px;
+      font-size: 10px;
+    }
+
+    #buffHud .buff-effect {
+      font-size: 9px;
+      color: #4CAF50;
+      margin-top: 2px;
+      margin-bottom: 2px;
+    }
+
+    #buffHud .buff-progress-bar {
+      height: 4px;
+      border-radius: 2px;
+      background: rgba(255, 255, 255, 0.08);
+      overflow: hidden;
+      margin-top: 2px;
+    }
+
+    #buffHud .buff-progress-fill {
+      height: 100%;
+      background: #4CAF50;
+      box-shadow: 0 0 8px rgba(76, 175, 80, 0.5);
+      transition: width 0.1s linear;
+    }
+
+    #buffHud .buff-progress-fill.warning {
+      background: #FF9800;
+      box-shadow: 0 0 8px rgba(255, 152, 0, 0.5);
+    }
+
+    #buffHud .buff-progress-fill.danger {
+      background: #f44336;
+      box-shadow: 0 0 8px rgba(244, 67, 54, 0.5);
+    }
+
     @keyframes staminaPulse {
       from { opacity: 0.7; }
       to { opacity: 1.0; }
@@ -1852,6 +1944,14 @@
           <span class="weapon-hud-ammo-sep">/</span>
           <span class="weapon-hud-ammo-max" id="weaponHudMag">0</span>
         </div>
+      </div>
+
+      <!-- 左下角 Buff HUD -->
+      <div id="buffHud">
+        <div class="buff-hud-header">
+          <div class="buff-hud-title">状态</div>
+        </div>
+        <div class="buff-hud-list" id="buffHudList"></div>
       </div>
 
       <!-- NAME Phase: 昵称输入 Modal -->

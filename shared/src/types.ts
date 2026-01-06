@@ -47,6 +47,46 @@ export type PlayerEquipment = {
   armorIid: string | null;
 };
 
+/**
+ * 短效 Buff 类型（用于局内战斗状态）
+ * 只描述对客户端 UI 有用的公开信息，真正的过期/数值计算由服务端权威处理
+ */
+export type BuffKind = 'speed' | 'damage_reduction' | 'regeneration';
+
+export type PlayerBuff = {
+  /** Buff 唯一 ID，比如 'combat_stim' */
+  id: string;
+  /** 显示名称，比如 '战斗兴奋剂' */
+  name: string;
+  /** 效果大类：移动速度、减伤等 */
+  kind: BuffKind;
+  /**
+   * 剩余持续时间（毫秒）
+   * 用于 HUD 显示倒计时，不参与服务端数值判定
+   */
+  remainingMs: number;
+  /**
+   * 总持续时间（毫秒）
+   * 方便在 HUD 中显示进度百分比
+   */
+  totalMs: number;
+  /**
+   * 可选：对移动速度的倍数提示（例如 2 表示 +100% 速度）
+   * 仅用于客户端展示，服务端有自己的数值计算
+   */
+  speedMultiplier?: number;
+  /**
+   * 可选：额外减伤比例提示（0-1，例如 0.3 表示额外减少 30% 伤害）
+   * 仅用于客户端展示
+   */
+  damageReductionBonus?: number;
+  /**
+   * 可选：每秒回复生命值提示（例如 5 表示每秒回复 5 点 HP）
+   * 仅用于客户端展示
+   */
+  hpPerSecond?: number;
+};
+
 export type WeaponRuntime = {
   weaponTypeId: string;   // 装备的武器 typeId（不是 iid，方便客户端查 def）
   ammoInMag: number;

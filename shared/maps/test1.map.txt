@@ -2,11 +2,11 @@
 # 精美小图：运河破碎区（中轴运河 + 双桥 + 多区块建筑群 + 货场迷宫）
 # 玩法关键词：两条主线转移路线（北桥/中桥），多个侧翼小巷，视野长短交替，掩体密度分层
 
-@meta id=canal_splinter name="Canal Splinter" desc="中轴运河切开城区；双桥强控点；市场/公寓/货场三大资源区；撤离在东南船坞。"
+@meta id=canal_splinter name="Canal Splinter" desc="中轴运河切开城区；双桥强控点；市场/公寓/货场三大资源区；撤离在地图中心。"
 @map width=1800 height=1400 seed=160106
 
-# 撤离区：东南船坞（靠近高风险但可控）
-@extract x=1540 y=1120 w=220 h=220
+# 撤离区：地图中心（中桥区域，高风险高回报）
+@extract x=790 y=590 w=220 h=220
 
 # === 出生点（环形分布 + 两侧中点，便于开局分流） ===
 @spawn x=120 y=120
@@ -122,8 +122,8 @@
 @obstacle 1460 1080 180 22 type=wall
 
 @poi x=1200 y=900 id=field_clinic type=building name="Field Clinic" desc="诊所：拐角多，适合清点补给。"
-@poi x=1600 y=1200 id=dock_extract type=landmark name="Dock Extraction" desc="船坞撤离：撤离区附近更安全，但来路通常会被桥点压。"
-@zone x=1080 y=820 w=680 h=560 id=clinic_dock type=loot name="Clinic & Dock" desc="诊所+船坞：资源不错，撤离在此，常有终局交火。"
+@poi x=900 y=700 id=center_extract type=landmark name="Center Extraction" desc="中心撤离：位于地图中心，所有路线汇聚于此，高风险高回报。"
+@zone x=1080 y=820 w=680 h=560 id=clinic_dock type=loot name="Clinic & Dock" desc="诊所+船坞：资源不错，适合补给。"
 
 # === 运河两岸：中距离对枪带（视野长） ===
 # 两岸零散掩体（压迫“直线过河”）
@@ -139,7 +139,7 @@
 @zone x=520 y=300 w=760 h=560 id=canal_crossing type=pvp name="Canal Crossing" desc="双桥+检查站：全图节奏的“时钟源”。"
 
 # === 撤离安全区（与 @extract 呼应）===
-@zone x=1520 y=1100 w=260 h=260 id=extract_safe type=safe name="Dock Safe Zone" desc="撤离区外圈：敌人较少，但入口容易被卡。"
+@zone x=770 y=570 w=260 h=260 id=extract_safe type=safe name="Center Safe Zone" desc="中心撤离区：位于地图核心，所有方向都可能来敌，需要团队配合。"
 
 @note "可在 cargo_yard 或 canal_crossing 增加 Boss/事件点；也可加第二撤离点（同语法扩展后再做）。"
 @comment 建议：北桥更适合“快速转点”，中桥更适合“稳推进”；让两条路线都有人玩。

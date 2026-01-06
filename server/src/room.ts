@@ -1765,7 +1765,7 @@ export class Room {
   }
 
   // 新增: 创建手雷爆炸（不依赖武器定义）
-  private createExplosion(x: number, y: number, radius: number, damage: number = 80, ownerId?: string): void {
+  private createExplosion(x: number, y: number, radius: number, damage: number = 500, ownerId?: string): void {
     // 添加视觉效果
     this.explosions.push({ x, y, radius });
 
@@ -1895,7 +1895,7 @@ export class Room {
         // 检查是否到达爆炸时间
         if (this.tick >= (bullet.explodeTick ?? 0)) {
           // 爆炸！
-          this.createExplosion(bullet.x, bullet.y, 100, 80, bullet.ownerId); // 100像素爆炸半径，80伤害
+          this.createExplosion(bullet.x, bullet.y, 100, 500, bullet.ownerId); // 100像素爆炸半径，500伤害
           bulletsToRemove.add(bullet.id);
           continue;
         }
@@ -1933,7 +1933,7 @@ export class Room {
         // 边界检查（手雷碰到边界就爆炸）
         if (bullet.x < 0 || bullet.x > this.mapConfig.width ||
             bullet.y < 0 || bullet.y > this.mapConfig.height) {
-          this.createExplosion(bullet.x, bullet.y, 100, 80, bullet.ownerId);
+          this.createExplosion(bullet.x, bullet.y, 100, 500, bullet.ownerId);
           bulletsToRemove.add(bullet.id);
           continue;
         }
@@ -2878,11 +2878,11 @@ export class Room {
       return { success: false, message: 'Player not alive' };
     }
 
-    // 获取可使用的物品列表（医疗包和投掷物）
+    // 获取可使用的物品列表（医疗包、战斗兴奋剂、再生血清和投掷物占位）
     const usableItems = player.inventory.items.filter(item => {
       try {
         const itemType = getItemType(item.typeId);
-        return item.typeId === 'medkit' || item.typeId === 'frag_grenade';
+        return item.typeId === 'medkit' || item.typeId === 'frag_grenade' || item.typeId === 'combat_stim' || item.typeId === 'regeneration_serum';
       } catch {
         return false;
       }
@@ -2926,6 +2926,78 @@ export class Room {
         });
         
         return { success: true, itemType: 'medkit' };
+        
+      } else if (item.typeId === 'combat_stim') {
+        // 战斗兴奋剂：在一段时间内提升移动速度
+        const DURATION_MS = 15000; // 15 秒
+        const SPEED_MULTIPLIER = 2.0; // 速度 x2
+
+        // 添加/刷新 Buff
+        player.addOrRefreshBuff(
+          {
+            id: 'combat_stim',
+            name: '战斗兴奋剂',
+            kind: 'speed',
+            durationMs: DURATION_MS,
+            speedMultiplier: SPEED_MULTIPLIER,
+          },
+          this.tick
+        );
+
+        // 消耗一个战斗兴奋剂
+        const removed = player.removeItem(item.iid, 1);
+        if (!removed) {
+          return { success: false, message: 'Failed to consume item' };
+        }
+
+        player.cleanupInventory();
+
+        this.pushEvent(`Player ${playerId} used combat stim (+100% speed for 15s)`);
+        log('USE_COMBAT_STIM', {
+          room: this.id,
+          player: playerId,
+          durationMs: DURATION_MS,
+          speedMultiplier: SPEED_MULTIPLIER,
+          tick: this.tick,
+        });
+
+        return { success: true, itemType: 'combat_stim' };
+        
+      } else if (item.typeId === 'regeneration_serum') {
+        // 再生血清：在一段时间内持续回复生命值
+        const DURATION_MS = 20000; // 20 秒
+        const HP_PER_SECOND = 5; // 每秒回复 5 点 HP
+
+        // 添加/刷新 Buff
+        player.addOrRefreshBuff(
+          {
+            id: 'regeneration_serum',
+            name: '再生血清',
+            kind: 'regeneration',
+            durationMs: DURATION_MS,
+            hpPerSecond: HP_PER_SECOND,
+          },
+          this.tick
+        );
+
+        // 消耗一个再生血清
+        const removed = player.removeItem(item.iid, 1);
+        if (!removed) {
+          return { success: false, message: 'Failed to consume item' };
+        }
+
+        player.cleanupInventory();
+
+        this.pushEvent(`Player ${playerId} used regeneration serum (+${HP_PER_SECOND} HP/s for ${DURATION_MS / 1000}s)`);
+        log('USE_REGENERATION_SERUM', {
+          room: this.id,
+          player: playerId,
+          durationMs: DURATION_MS,
+          hpPerSecond: HP_PER_SECOND,
+          tick: this.tick,
+        });
+
+        return { success: true, itemType: 'regeneration_serum' };
         
       } else if (item.typeId === 'frag_grenade') {
         // 手雷不能通过快捷栏直接使用，需要通过投掷系统
@@ -2972,8 +3044,8 @@ export class Room {
     // 创建投掷物轨迹（类似子弹，但有抛物线轨迹和延时爆炸）
     const grenadeId = `grenade_${this.tick}_${Math.random().toString(36).substr(2, 9)}`;
     
-    // 计算投掷速度（基于距离和重力，确保1秒后到达目标）
-    const flightTime = 1.0; // 1秒飞行时间
+    // 计算投掷速度（基于距离和重力，速度3倍）
+    const flightTime = 1.0 / 3; // 飞行时间缩短为1/3，速度提升3倍
     const vx = dx / flightTime;
     const vy = dy / flightTime;
     
@@ -2986,11 +3058,11 @@ export class Room {
       vy: vy,
       ownerId: playerId,
       spawnAt: Date.now(),
-      damage: 80, // 手雷基础伤害
-      bulletLifeMs: 3000, // 3秒后爆炸
+      damage: 500, // 手雷基础伤害
+      bulletLifeMs: 750, // 0.75秒后爆炸
       weaponTypeId: 'frag_grenade', // 用于客户端渲染识别
       isGrenade: true, // 标记为手雷
-      explodeTick: this.tick + msToTicks(3000), // 3秒后爆炸
+      explodeTick: this.tick + msToTicks(750), // 0.75秒后爆炸
       targetX: targetX,
       targetY: targetY,
       spawnX: player.x,
