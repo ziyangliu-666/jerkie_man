@@ -1038,12 +1038,17 @@ ws.on('message', (data: Buffer) => {
           });
         } else {
           // 玩家已存在且是ALIVE（首次进入对局，phase不是RAID）
+          // 关键：清空inventory，避免重复物品
+          const existingItemCount = player.inventory.items.length;
+          player.clearInventory();
+
           log('ENTER_RAID_FIRST_TIME', {
             room: room.id,
             player: playerId,
             accountId: accountId,
             currentPhase: profile.phase,
             playerStatus: player.status,
+            existingItemCount,
             tick: room.tick,
           });
         }
@@ -1074,6 +1079,7 @@ ws.on('message', (data: Buffer) => {
           room: room.id,
           player: playerId,
           accountId,
+          inventoryItemsBefore: player.inventory.items.length,
           prepItemsTotal: profile.prep.length,
           prepItemsToLoad: prepItems.length,
           equippedCount: equippedIids.size,
@@ -1082,6 +1088,15 @@ ws.on('message', (data: Buffer) => {
 
         for (const prepItem of prepItems) {
           const result = player.addItem(prepItem.typeId, prepItem.qty);
+
+          log('ADD_PREP_ITEM', {
+            room: room.id,
+            player: playerId,
+            typeId: prepItem.typeId,
+            requested: prepItem.qty,
+            added: result.added,
+            tick: room.tick,
+          });
 
           if (result.added < prepItem.qty) {
             // 部分或全部未添加，保留在 prep 中（避免物品丢失）
