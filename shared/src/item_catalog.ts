@@ -340,7 +340,7 @@ export const ITEM_CATALOG: Record<string, ItemType> = {
     id: 'armor_heavy',
     name: '重甲',
     rarity: 'EPIC',
-    value: 1600,
+    value: 3000,
     stackMax: 1,
   },
   armor_exo: {

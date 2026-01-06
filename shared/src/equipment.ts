@@ -323,7 +323,7 @@ export const ARMORS: Record<string, ArmorDef> = {
   armor_heavy: {
     typeId: 'armor_heavy',
     name: '重甲',
-    damageReduction: 0.5, // 减少 50% 伤害
+    damageReduction: 0.7, // 减少 70% 伤害
     buffs: {
       speedMultiplier: 0.8, // 降低 20% 移动速度（重型护甲）
     },
@@ -331,7 +331,7 @@ export const ARMORS: Record<string, ArmorDef> = {
   armor_exo: {
     typeId: 'armor_exo',
     name: '外骨骼装甲',
-    damageReduction: 0.65, // 减少 65% 伤害（最强护甲）
+    damageReduction: 0.55, // 减少 55% 伤害
     buffs: {
       speedMultiplier: 1.25, // 增加 25% 移动速度（外骨骼助力）
     },

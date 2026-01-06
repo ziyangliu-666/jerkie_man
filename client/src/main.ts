@@ -2147,9 +2147,13 @@ function createItemRow(mergedItem: MergedItem, itemType: any, source: 'prep' | '
     ? `${itemType.name} x${mergedItem.totalQty}`
     : itemType.name;
   
+  // 价格显示在标题后面，带金币图标
+  const priceHtml = `<span style="color: #ffd700; margin-left: 8px;">💰 ${itemType.value}</span>`;
+  const description = getItemDescription(itemType);
+  
   info.innerHTML = `
-    <div class="item-name">${displayName}</div>
-    <div class="item-meta">价值: ${itemType.value}</div>
+    <div class="item-name">${displayName}${priceHtml}</div>
+    ${description ? `<div class="item-meta" style="margin-top: 4px; color: #aaa; font-size: 12px;">${description}</div>` : ''}
   `;
   
   const actions = document.createElement('div');
@@ -2251,6 +2255,79 @@ function createItemRow(mergedItem: MergedItem, itemType: any, source: 'prep' | '
   return row;
 }
 
+// 新增: 获取物品简短描述
+function getItemDescription(itemType: any): string {
+  const typeId = itemType.id || itemType.typeId;
+  
+  // 武器
+  try {
+    const weaponDef = getWeaponDef(typeId);
+    const desc = [];
+    desc.push(`伤害: ${weaponDef.damage}`);
+    if (weaponDef.pelletCount && weaponDef.pelletCount > 1) {
+      desc.push(`${weaponDef.pelletCount}弹丸`);
+    }
+    desc.push(`弹匣: ${weaponDef.magSize}`);
+    return desc.join(' | ');
+  } catch {}
+  
+  // 防具
+  try {
+    const armorDef = getArmorDef(typeId);
+    const desc = [];
+    desc.push(`减伤: ${Math.floor(armorDef.damageReduction * 100)}%`);
+    if (armorDef.buffs?.speedMultiplier) {
+      const speedChange = Math.floor((armorDef.buffs.speedMultiplier - 1) * 100);
+      if (speedChange > 0) {
+        desc.push(`速度: +${speedChange}%`);
+      } else if (speedChange < 0) {
+        desc.push(`速度: ${speedChange}%`);
+      }
+    }
+    return desc.join(' | ');
+  } catch {}
+  
+  // 背包
+  try {
+    const bagDef = getBagDef(typeId);
+    return `容量: ${bagDef.bagCap}`;
+  } catch {}
+  
+  // 消耗品
+  if (itemType.consumableProps) {
+    const props = itemType.consumableProps;
+    const desc = [];
+    if (props.healAmount) {
+      desc.push(`恢复: ${props.healAmount}HP`);
+    }
+    if (props.explosionRadius && props.damage) {
+      desc.push(`爆炸: ${props.damage}伤害`);
+    }
+    if (props.flashRadius && props.flashDurationMs) {
+      desc.push(`致盲: ${Math.floor(props.flashDurationMs / 1000)}秒`);
+    }
+    if (props.smokeRadius && props.smokeDurationMs) {
+      desc.push(`烟雾: ${Math.floor(props.smokeDurationMs / 1000)}秒`);
+    }
+    if (props.speedMultiplier) {
+      desc.push(`速度: +${Math.floor((props.speedMultiplier - 1) * 100)}%`);
+    }
+    if (props.hpPerSecond) {
+      desc.push(`持续回复: ${props.hpPerSecond}HP/秒`);
+    }
+    if (desc.length > 0) {
+      return desc.join(' | ');
+    }
+  }
+  
+  // 材料或其他 - 显示堆叠上限
+  if (itemType.stackMax && itemType.stackMax > 1) {
+    return `堆叠: ${itemType.stackMax}`;
+  }
+  
+  return '';
+}
+
 // 新增: 创建商店物品行
 function createShopRow(itemType: any): HTMLElement {
   const row = document.createElement('div');
@@ -2258,9 +2335,14 @@ function createShopRow(itemType: any): HTMLElement {
   
   const info = document.createElement('div');
   info.className = 'item-info';
+  
+  // 价格显示在标题后面，带金币图标
+  const priceHtml = `<span style="color: #ffd700; margin-left: 8px;">💰 ${itemType.value}</span>`;
+  const description = getItemDescription(itemType);
+  
   info.innerHTML = `
-    <div class="item-name">${itemType.name}</div>
-    <div class="item-meta">价格: ${itemType.value} | 堆叠上限: ${itemType.stackMax}</div>
+    <div class="item-name">${itemType.name}${priceHtml}</div>
+    ${description ? `<div class="item-meta" style="margin-top: 4px; color: #aaa; font-size: 12px;">${description}</div>` : ''}
   `;
   
   const actions = document.createElement('div');
@@ -2305,18 +2387,14 @@ function createShopRow(itemType: any): HTMLElement {
     const totalCost = itemType.value * newCount;
     
     if (playerProfile && playerProfile.money >= totalCost) {
-      buyBtn.classList.add('loading');
       network.sendBuy(itemType.id, 1);
       hud.addEvent(`购买: ${itemType.name} x${newCount}`);
       
       // 更新购买计数
       shopBuyCounts.set(itemType.id, newCount);
       
-      // 延迟反馈，等待服务器响应
-      setTimeout(() => {
-        buyBtn.classList.remove('loading');
-        updateButtonText(newCount, true); // 播放成功动画
-      }, 300);
+      // 立即更新按钮状态
+      updateButtonText(newCount, true); // 播放成功动画
     } else {
       // 立即显示错误反馈
       addButtonFeedback(buyBtn, false, '金钱不足');

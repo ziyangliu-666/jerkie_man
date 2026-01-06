@@ -1,7 +1,7 @@
 {
   "c1e21557-a3fe-45f9-b5f5-04d022b1714a": {
     "displayName": "Rufus",
-    "money": 36190873,
+    "money": 36167113,
     "stash": [
       {
         "iid": "i1767670175656_vzgrbwpz6",
@@ -44,6 +44,206 @@
         "qty": 1
       },
       {
+        "iid": "i1767717165810_e28qu0fdv",
+        "typeId": "w_pistol",
+        "qty": 1
+      },
+      {
+        "iid": "i1767717206791_fsp8hq4dk",
+        "typeId": "w_pistol",
+        "qty": 1
+      },
+      {
+        "iid": "i1767717212044_k3bll8d1k",
+        "typeId": "w_pistol",
+        "qty": 1
+      },
+      {
+        "iid": "i1767717212204_xrxuy3rgg",
+        "typeId": "w_pistol",
+        "qty": 1
+      },
+      {
+        "iid": "i1767717212358_807uh7ny5",
+        "typeId": "w_pistol",
+        "qty": 1
+      },
+      {
+        "iid": "i1767717212480_y94bydvxw",
+        "typeId": "w_pistol",
+        "qty": 1
+      },
+      {
+        "iid": "i1767717212626_s3qqvg301",
+        "typeId": "w_pistol",
+        "qty": 1
+      },
+      {
+        "iid": "i1767717212769_kd7xmzvoo",
+        "typeId": "w_pistol",
+        "qty": 1
+      },
+      {
+        "iid": "i1767717212905_5vqfti040",
+        "typeId": "w_pistol",
+        "qty": 1
+      },
+      {
+        "iid": "i1767717213043_58smjwi3c",
+        "typeId": "w_pistol",
+        "qty": 1
+      },
+      {
+        "iid": "i1767717213173_aghpcv6uu",
+        "typeId": "w_pistol",
+        "qty": 1
+      },
+      {
+        "iid": "i1767717213326_m7qckghqd",
+        "typeId": "w_pistol",
+        "qty": 1
+      },
+      {
+        "iid": "i1767717213469_9n5hivyna",
+        "typeId": "w_pistol",
+        "qty": 1
+      },
+      {
+        "iid": "i1767717213611_su35iiczp",
+        "typeId": "w_pistol",
+        "qty": 1
+      },
+      {
+        "iid": "i1767717213744_obadj51wb",
+        "typeId": "w_pistol",
+        "qty": 1
+      },
+      {
+        "iid": "i1767717213907_j9g2rqyiq",
+        "typeId": "w_pistol",
+        "qty": 1
+      },
+      {
+        "iid": "i1767717214057_6cko5e2sn",
+        "typeId": "w_pistol",
+        "qty": 1
+      },
+      {
+        "iid": "i1767717214189_efbzxkuer",
+        "typeId": "w_pistol",
+        "qty": 1
+      },
+      {
+        "iid": "i1767717214340_peadjd6jj",
+        "typeId": "w_pistol",
+        "qty": 1
+      },
+      {
+        "iid": "i1767717214510_i8ytnj3ha",
+        "typeId": "w_pistol",
+        "qty": 1
+      },
+      {
+        "iid": "i1767717214650_m0y1wt4a8",
+        "typeId": "w_pistol",
+        "qty": 1
+      },
+      {
+        "iid": "i1767717214800_dc6d7w9bl",
+        "typeId": "w_pistol",
+        "qty": 1
+      },
+      {
+        "iid": "i1767717214949_4yfbteqag",
+        "typeId": "w_pistol",
+        "qty": 1
+      },
+      {
+        "iid": "i1767717215105_8j6ecfrp1",
+        "typeId": "w_pistol",
+        "qty": 1
+      },
+      {
+        "iid": "i1767717215271_fui76qqwg",
+        "typeId": "w_pistol",
+        "qty": 1
+      },
+      {
+        "iid": "i1767717215397_8x3yiftkr",
+        "typeId": "w_pistol",
+        "qty": 1
+      },
+      {
+        "iid": "i1767717215591_1gjthaxeu",
+        "typeId": "w_pistol",
+        "qty": 1
+      },
+      {
+        "iid": "i1767717215737_5sjs032gm",
+        "typeId": "w_pistol",
+        "qty": 1
+      },
+      {
+        "iid": "i1767717215888_x72s9uatp",
+        "typeId": "w_pistol",
+        "qty": 1
+      },
+      {
+        "iid": "i1767717216037_fvzwnxgq8",
+        "typeId": "w_pistol",
+        "qty": 1
+      },
+      {
+        "iid": "i1767717216187_4ajwdlf2c",
+        "typeId": "w_pistol",
+        "qty": 1
+      },
+      {
+        "iid": "i1767717216315_j2voh2c1a",
+        "typeId": "w_pistol",
+        "qty": 1
+      },
+      {
+        "iid": "i1767717224987_g8gab1pep",
+        "typeId": "w_pistol",
+        "qty": 1
+      },
+      {
+        "iid": "i1767717225144_4ncom990k",
+        "typeId": "w_pistol",
+        "qty": 1
+      },
+      {
+        "iid": "i1767717225302_0rfrf03y6",
+        "typeId": "w_pistol",
+        "qty": 1
+      },
+      {
+        "iid": "i1767717225452_tzijlcjg5",
+        "typeId": "w_pistol",
+        "qty": 1
+      },
+      {
+        "iid": "i1767717225588_c9zjjwywv",
+        "typeId": "w_pistol",
+        "qty": 1
+      },
+      {
+        "iid": "i1767717225733_4m72gp6z5",
+        "typeId": "w_pistol",
+        "qty": 1
+      },
+      {
+        "iid": "i1767717225876_u0yswgwvc",
+        "typeId": "w_pistol",
+        "qty": 1
+      },
+      {
+        "iid": "i1767717226009_u1viohw70",
+        "typeId": "w_pistol",
+        "qty": 1
+      },
+      {
         "iid": "i1767631225693_dqwlpzqrq",
         "typeId": "w_burst",
         "qty": 1
@@ -75,6 +275,46 @@
       },
       {
         "iid": "i1767687473889_gea44jpwb",
+        "typeId": "w_burst",
+        "qty": 1
+      },
+      {
+        "iid": "i1767717207921_m5n9uovyv",
+        "typeId": "w_burst",
+        "qty": 1
+      },
+      {
+        "iid": "i1767717208261_wxzxqv09o",
+        "typeId": "w_burst",
+        "qty": 1
+      },
+      {
+        "iid": "i1767717208674_3lmzzrjku",
+        "typeId": "w_burst",
+        "qty": 1
+      },
+      {
+        "iid": "i1767717209029_99j1e43lh",
+        "typeId": "w_burst",
+        "qty": 1
+      },
+      {
+        "iid": "i1767717209302_bxidol93e",
+        "typeId": "w_burst",
+        "qty": 1
+      },
+      {
+        "iid": "i1767717209483_8v3ty4rbc",
+        "typeId": "w_burst",
+        "qty": 1
+      },
+      {
+        "iid": "i1767717209628_ku7wywejq",
+        "typeId": "w_burst",
+        "qty": 1
+      },
+      {
+        "iid": "i1767717209776_7o1at0z7n",
         "typeId": "w_burst",
         "qty": 1
       },
@@ -124,112 +364,192 @@
         "qty": 1
       },
       {
-        "iid": "i1767716557424_kozon2dg3",
+        "iid": "i1767718123921_6sfdrv3s3",
         "typeId": "armor_plate_item",
         "qty": 2
       },
       {
-        "iid": "i1767716557424_1vsrqq8vw",
+        "iid": "i1767718123921_bk63v0wf5",
         "typeId": "cloth",
         "qty": 30
       },
       {
-        "iid": "i1767716557424_jrmd7mi3k",
+        "iid": "i1767718123921_anta9hn3c",
         "typeId": "cloth",
         "qty": 9
       },
       {
-        "iid": "i1767716557424_mdu9jlg6x",
+        "iid": "i1767718123921_l2dxgqx9a",
         "typeId": "scrap_metal",
         "qty": 20
       },
       {
-        "iid": "i1767716557424_n802jtfg7",
+        "iid": "i1767718123921_9t62yio84",
         "typeId": "scrap_metal",
         "qty": 20
       },
       {
-        "iid": "i1767716557424_1fw9p273o",
+        "iid": "i1767718123921_5pgyqjna2",
         "typeId": "scrap_metal",
         "qty": 3
       },
       {
-        "iid": "i1767716557424_tzivv8318",
+        "iid": "i1767718123921_62x9nur9y",
         "typeId": "ammo",
         "qty": 19
       },
       {
-        "iid": "i1767716557424_6likklvtq",
+        "iid": "i1767718123921_59zrcjm5f",
         "typeId": "medkit",
         "qty": 5
       },
       {
-        "iid": "i1767716557424_z5demrnb1",
+        "iid": "i1767718123921_fkwbk01z6",
         "typeId": "medkit",
         "qty": 5
       },
       {
-        "iid": "i1767716557424_wf1wr4c6i",
+        "iid": "i1767718123921_xi0k72ncv",
         "typeId": "medkit",
         "qty": 4
       },
       {
-        "iid": "i1767716557424_u6qc9ihte",
+        "iid": "i1767718123921_8vs0dmm84",
         "typeId": "frag_grenade",
         "qty": 5
       },
       {
-        "iid": "i1767716557424_ewc69178o",
+        "iid": "i1767718123921_mefw255b5",
         "typeId": "medical_supplies",
         "qty": 5
       },
       {
-        "iid": "i1767716557424_bnykuqoj7",
+        "iid": "i1767718123921_5ojspaolu",
         "typeId": "weapon_parts",
         "qty": 3
       },
       {
-        "iid": "i1767716557424_uqblx398e",
+        "iid": "i1767718123921_4m0u76pw6",
         "typeId": "smoke_grenade",
         "qty": 3
       },
       {
-        "iid": "i1767716557424_tkcyvjfo6",
+        "iid": "i1767718123921_tx856mwph",
+        "typeId": "smoke_grenade",
+        "qty": 3
+      },
+      {
+        "iid": "i1767718123921_nyk4wfz7x",
+        "typeId": "smoke_grenade",
+        "qty": 3
+      },
+      {
+        "iid": "i1767718123921_ym7u4zfbe",
+        "typeId": "smoke_grenade",
+        "qty": 3
+      },
+      {
+        "iid": "i1767718123921_bmj3l85qd",
+        "typeId": "smoke_grenade",
+        "qty": 3
+      },
+      {
+        "iid": "i1767718123921_ez6yijl6h",
+        "typeId": "smoke_grenade",
+        "qty": 3
+      },
+      {
+        "iid": "i1767718123921_0k3kfcb1k",
+        "typeId": "smoke_grenade",
+        "qty": 3
+      },
+      {
+        "iid": "i1767718123921_alpndx3ad",
+        "typeId": "smoke_grenade",
+        "qty": 3
+      },
+      {
+        "iid": "i1767718123921_nj0ui7e6o",
         "typeId": "smoke_grenade",
         "qty": 1
       },
       {
-        "iid": "i1767716557424_4jekvvw6j",
+        "iid": "i1767718123921_gy7526csg",
         "typeId": "electronics",
         "qty": 5
       },
       {
-        "iid": "i1767716557424_3b81g9j94",
+        "iid": "i1767718123921_fdxv90qyj",
         "typeId": "flash_grenade",
-        "qty": 2
+        "qty": 3
       },
       {
-        "iid": "i1767716557424_49h0d8fv4",
+        "iid": "i1767718123921_35prf9o6q",
+        "typeId": "flash_grenade",
+        "qty": 3
+      },
+      {
+        "iid": "i1767718123921_jfn02jetc",
+        "typeId": "flash_grenade",
+        "qty": 3
+      },
+      {
+        "iid": "i1767718123921_b6yve9k0v",
+        "typeId": "flash_grenade",
+        "qty": 3
+      },
+      {
+        "iid": "i1767718123921_8kg9o1a6m",
+        "typeId": "flash_grenade",
+        "qty": 3
+      },
+      {
+        "iid": "i1767718123921_6oj89nmzw",
+        "typeId": "flash_grenade",
+        "qty": 3
+      },
+      {
+        "iid": "i1767718123921_fnj8mq8gs",
+        "typeId": "flash_grenade",
+        "qty": 3
+      },
+      {
+        "iid": "i1767718123921_k6w1h7506",
+        "typeId": "flash_grenade",
+        "qty": 3
+      },
+      {
+        "iid": "i1767718123921_iynfqaap2",
+        "typeId": "flash_grenade",
+        "qty": 3
+      },
+      {
+        "iid": "i1767718123921_usq3mae92",
+        "typeId": "flash_grenade",
+        "qty": 1
+      },
+      {
+        "iid": "i1767718123921_94jp2i2em",
         "typeId": "regeneration_serum",
         "qty": 1
       },
       {
-        "iid": "i1767716557424_0tnd5c3xo",
+        "iid": "i1767718123921_rlxn4xn53",
         "typeId": "advanced_medkit",
         "qty": 3
       },
       {
-        "iid": "i1767716557424_6ajy04poy",
+        "iid": "i1767718123921_7ft2edp1f",
         "typeId": "advanced_circuit",
         "qty": 3
       },
       {
-        "iid": "i1767716557424_u7796yg10",
+        "iid": "i1767718123921_nobd4g1r7",
         "typeId": "advanced_circuit",
         "qty": 3
       },
       {
-        "iid": "i1767716557424_nidjg0gg7",
+        "iid": "i1767718123921_oezfh2xcv",
         "typeId": "advanced_circuit",
         "qty": 1
       },
@@ -242,7 +562,7 @@
     "prep": [],
     "bagCap": 4,
     "equipment": {
-      "weaponIid": null,
+      "weaponIid": "i1767670175656_vzgrbwpz6",
       "bagIid": null,
       "armorIid": null
     },
