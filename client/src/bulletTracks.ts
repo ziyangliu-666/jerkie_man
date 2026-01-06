@@ -514,13 +514,6 @@ export class BulletTrackManager {
     const grenadesBeforeUpdate = Array.from(this.bullets.values()).filter(b =>
       b.weaponTypeId === 'frag_grenade' || b.weaponTypeId === 'w_grenade_launcher'
     );
-    if (grenadesBeforeUpdate.length > 0) {
-      console.log('[BulletTracks] update开始，当前手雷数量:', grenadesBeforeUpdate.length, grenadesBeforeUpdate.map(b => ({
-        id: b.id,
-        age: nowMs - b.spawnTimeMs,
-        bulletLifeMs: b.bulletLifeMs
-      })));
-    }
 
     for (const [id, bullet] of this.bullets) {
       // 手雷特殊物理模拟
@@ -660,10 +653,6 @@ export class BulletTrackManager {
     }
 
     // 日志：记录渲染列表中的手雷
-    const grenadeCount = this.renderList.filter(b => b.weaponTypeId === 'frag_grenade' || b.weaponTypeId === 'w_grenade_launcher').length;
-    if (grenadeCount > 0) {
-      console.log('[BulletTracks] 渲染列表包含手雷:', grenadeCount, '总子弹数:', this.renderList.length);
-    }
     
     // 调试日志：每10帧打印一次子弹数量
     if (Math.random() < 0.1) { // 10%概率打印，避免日志过多

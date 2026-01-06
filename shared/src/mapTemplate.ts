@@ -7,16 +7,43 @@ export const SPAWN_POINT_SCHEMA = z.object({
   y: z.number().nonnegative(),
 });
 
+// 新增: POI (Point of Interest) 定义
+export const POI_SCHEMA = z.object({
+  id: z.string().min(1),
+  name: z.string().optional(),
+  x: z.number().nonnegative(),
+  y: z.number().nonnegative(),
+  type: z.string().default('generic'), // 类型：building, resource, landmark 等
+  description: z.string().optional(),
+});
+
+// 新增: 区域定义（用于标记不同功能区域）
+export const ZONE_SCHEMA = z.object({
+  id: z.string().min(1),
+  name: z.string().optional(),
+  x: z.number().nonnegative(),
+  y: z.number().nonnegative(),
+  w: z.number().positive(),
+  h: z.number().positive(),
+  type: z.string().default('generic'), // 类型：safe, danger, loot, pvp 等
+  description: z.string().optional(),
+});
+
 export const MAP_TEMPLATE_SCHEMA = z.object({
   id: z.string().min(1),
   name: z.string().optional(),
+  description: z.string().optional(), // 新增: 地图描述
   mapConfig: MAP_CONFIG_SCHEMA,
   obstacles: z.array(OBSTACLE_STATE_SCHEMA),
   spawns: z.array(SPAWN_POINT_SCHEMA).default([]),
+  pois: z.array(POI_SCHEMA).default([]), // 新增: POI 列表
+  zones: z.array(ZONE_SCHEMA).default([]), // 新增: 区域列表
 });
 
 export type MapTemplate = z.infer<typeof MAP_TEMPLATE_SCHEMA>;
 export type SpawnPoint = z.infer<typeof SPAWN_POINT_SCHEMA>;
+export type POI = z.infer<typeof POI_SCHEMA>;
+export type Zone = z.infer<typeof ZONE_SCHEMA>;
 
 type TokenizedLine = {
   directive: string;
@@ -146,6 +173,8 @@ export function createDefaultMapTemplate(id: string = 'default'): MapTemplate {
     mapConfig: { ...DEFAULT_MAP_CONFIG },
     obstacles: [],
     spawns: [],
+    pois: [],
+    zones: [],
   };
 }
 
@@ -168,6 +197,9 @@ export function parseMapTemplateText(text: string): MapTemplate {
       }
       if (kv.name) {
         template.name = kv.name;
+      }
+      if (kv.description || kv.desc) {
+        template.description = kv.description || kv.desc;
       }
     } else if (directive === '@map') {
       const { kv, positionals } = parseKeyValues(tokens);
@@ -199,6 +231,35 @@ export function parseMapTemplateText(text: string): MapTemplate {
       template.obstacles.push(rect);
     } else if (directive === '@spawn') {
       template.spawns.push(parsePoint(tokens, lineNumber));
+    } else if (directive === '@poi') {
+      // 新增: 解析 POI
+      const { kv, positionals } = parseKeyValues(tokens);
+      const poi: POI = {
+        id: kv.id || `poi_${template.pois.length + 1}`,
+        x: positionals.length >= 2 ? parseNumber(positionals[0], lineNumber, 'poi.x') : parseNumber(kv.x ?? '', lineNumber, 'poi.x'),
+        y: positionals.length >= 2 ? parseNumber(positionals[1], lineNumber, 'poi.y') : parseNumber(kv.y ?? '', lineNumber, 'poi.y'),
+        type: kv.type || 'generic',
+        name: kv.name,
+        description: kv.description || kv.desc,
+      };
+      template.pois.push(poi);
+    } else if (directive === '@zone') {
+      // 新增: 解析区域
+      const rect = parseRect(tokens, lineNumber, {
+        x: 'zone.x',
+        y: 'zone.y',
+        w: 'zone.w',
+        h: 'zone.h',
+      });
+      const { kv } = parseKeyValues(tokens);
+      const zone: Zone = {
+        ...rect,
+        id: kv.id || `zone_${template.zones.length + 1}`,
+        type: kv.type || 'generic',
+        name: kv.name,
+        description: kv.description || kv.desc,
+      };
+      template.zones.push(zone);
     } else if (directive === '@note' || directive === '@comment') {
       continue;
     } else {
@@ -220,26 +281,67 @@ function quoteIfNeeded(value: string): string {
 export function formatMapTemplateText(template: MapTemplate): string {
   const lines: string[] = [];
   lines.push('# MAPTEXT v1');
-  lines.push(
-    `@meta id=${quoteIfNeeded(template.id)}${template.name ? ` name=${quoteIfNeeded(template.name)}` : ''}`
-  );
+  lines.push('# LLM-Friendly Map Template Format');
+  lines.push('# Directives: @meta, @map, @extract, @obstacle, @spawn, @poi, @zone');
+  lines.push('');
+  
+  // Meta 信息
+  let metaLine = `@meta id=${quoteIfNeeded(template.id)}`;
+  if (template.name) metaLine += ` name=${quoteIfNeeded(template.name)}`;
+  if (template.description) metaLine += ` desc=${quoteIfNeeded(template.description)}`;
+  lines.push(metaLine);
+  
+  // 地图配置
   lines.push(
     `@map width=${template.mapConfig.width} height=${template.mapConfig.height} seed=${template.mapConfig.seed}`
   );
+  
+  // 撤离区
   lines.push(
     `@extract x=${template.mapConfig.extractZone.x} y=${template.mapConfig.extractZone.y} w=${template.mapConfig.extractZone.w} h=${template.mapConfig.extractZone.h}`
   );
+  
+  // 障碍物
   if (template.obstacles.length > 0) {
     lines.push('');
+    lines.push('# Obstacles (walls, buildings, etc.)');
     for (const obstacle of template.obstacles) {
       lines.push(`@obstacle x=${obstacle.x} y=${obstacle.y} w=${obstacle.w} h=${obstacle.h}`);
     }
   }
+  
+  // 出生点
   if (template.spawns.length > 0) {
     lines.push('');
+    lines.push('# Spawn points');
     for (const spawn of template.spawns) {
       lines.push(`@spawn x=${spawn.x} y=${spawn.y}`);
     }
   }
+  
+  // POI
+  if (template.pois.length > 0) {
+    lines.push('');
+    lines.push('# Points of Interest');
+    for (const poi of template.pois) {
+      let poiLine = `@poi x=${poi.x} y=${poi.y} id=${quoteIfNeeded(poi.id)} type=${poi.type}`;
+      if (poi.name) poiLine += ` name=${quoteIfNeeded(poi.name)}`;
+      if (poi.description) poiLine += ` desc=${quoteIfNeeded(poi.description)}`;
+      lines.push(poiLine);
+    }
+  }
+  
+  // 区域
+  if (template.zones.length > 0) {
+    lines.push('');
+    lines.push('# Zones (functional areas)');
+    for (const zone of template.zones) {
+      let zoneLine = `@zone x=${zone.x} y=${zone.y} w=${zone.w} h=${zone.h} id=${quoteIfNeeded(zone.id)} type=${zone.type}`;
+      if (zone.name) zoneLine += ` name=${quoteIfNeeded(zone.name)}`;
+      if (zone.description) zoneLine += ` desc=${quoteIfNeeded(zone.description)}`;
+      lines.push(zoneLine);
+    }
+  }
+  
   return lines.join('\n');
 }

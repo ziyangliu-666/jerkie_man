@@ -169,10 +169,10 @@ export class UIOverlay {
       this.drawExtractProgress(ctx, cx, cy, this.state.extractProgress.progress);
     }
     
-    // 4. 武器状态（左下角）
-    if (this.state.weaponStatus.enabled) {
-      this.drawWeaponStatus(ctx, w, h, this.state.weaponStatus);
-    }
+    // 4. 武器状态（左下角）- 已禁用
+    // if (this.state.weaponStatus.enabled) {
+    //   this.drawWeaponStatus(ctx, w, h, this.state.weaponStatus);
+    // }
     
     // 5. 文本提示（屏幕中央）
     if (this.state.textHint.alpha > 0 && this.state.textHint.text) {

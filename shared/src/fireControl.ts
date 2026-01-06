@@ -30,38 +30,22 @@ export function shouldStartBurst(
 }
 
 export function canFireTick(runtime: WeaponRuntime, currentTick: number): boolean {
-  const burstRemaining = runtime.burstRemaining ?? 0;
-  if (burstRemaining > 0) {
-    return currentTick >= (runtime.burstNextTick ?? 0);
-  }
   return currentTick >= runtime.nextFireTick;
 }
 
-export function advanceBurstAfterShot(
+export function advanceFireCooldown(
   runtime: WeaponRuntime,
   weaponDef: WeaponDef,
-  currentTick: number
+  currentTick: number,
+  burstShotCount: number = 1
 ): void {
   const schedule = getFireSchedule(weaponDef);
-  const burstRemaining = runtime.burstRemaining ?? 0;
-
-  if (burstRemaining > 0) {
-    runtime.burstRemaining = burstRemaining - 1;
-    if ((runtime.burstRemaining ?? 0) > 0) {
-      runtime.burstNextTick = currentTick + msToTicks(schedule.burstIntervalMs);
-    } else {
-      runtime.nextFireTick = currentTick + msToTicks(schedule.fireIntervalMs);
-      runtime.burstRemaining = undefined;
-      runtime.burstNextTick = undefined;
-    }
-    return;
+  
+  // 如果是连发武器，计算总冷却时间（包括连发间隔）
+  if (schedule.burstCount > 1 && burstShotCount > 1) {
+    const burstTotalMs = (burstShotCount - 1) * schedule.burstIntervalMs + schedule.fireIntervalMs;
+    runtime.nextFireTick = currentTick + msToTicks(burstTotalMs);
+  } else {
+    runtime.nextFireTick = currentTick + msToTicks(schedule.fireIntervalMs);
   }
-
-  if (schedule.burstCount > 1) {
-    runtime.burstRemaining = schedule.burstCount - 1;
-    runtime.burstNextTick = currentTick + msToTicks(schedule.burstIntervalMs);
-    return;
-  }
-
-  runtime.nextFireTick = currentTick + msToTicks(schedule.fireIntervalMs);
 }

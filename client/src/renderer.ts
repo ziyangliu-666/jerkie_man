@@ -406,17 +406,6 @@ export class Renderer {
     // 检查是否是手雷/榴弹（包括榴弹炮的子弹和投掷手雷）
     const isGrenade = bullet.weaponTypeId === 'w_grenade_launcher' || bullet.weaponTypeId === 'frag_grenade';
 
-    // 日志：记录手雷子弹渲染
-    if (isGrenade) {
-      console.log('[Renderer] 绘制手雷:', {
-        id: bullet.id,
-        weaponTypeId: bullet.weaponTypeId,
-        x: bullet.x.toFixed(1),
-        y: bullet.y.toFixed(1),
-        screenX: screenX.toFixed(1),
-        screenY: screenY.toFixed(1)
-      });
-    }
 
     if (isGrenade) {
       // 手雷：更大、更明显，使用橙红色渐变
@@ -594,6 +583,109 @@ export class Renderer {
     }
   }
 
+  // 新增: 绘制物品信息提示框（在物品旁边显示内容）
+  drawItemInfoTooltip(
+    worldX: number,
+    worldY: number,
+    itemInfo: { type: 'worldItem' | 'lootBag'; worldItem?: WorldItem; lootBag?: LootBag },
+    localPlayerX: number,
+    localPlayerY: number
+  ): void {
+    const screenX = worldX - this.camX;
+    const screenY = worldY - this.camY;
+    
+    // 只在屏幕内才绘制
+    if (screenX < -100 || screenX > this.cssWidth + 100 || 
+        screenY < -100 || screenY > this.cssHeight + 100) {
+      return;
+    }
+
+    // 计算提示框位置（在物品上方，根据玩家位置调整）
+    const offsetY = -30; // 物品上方30px
+    const tooltipX = screenX;
+    const tooltipY = screenY + offsetY;
+
+    // 收集要显示的信息
+    const lines: string[] = [];
+    
+    if (itemInfo.type === 'worldItem' && itemInfo.worldItem) {
+      try {
+        const itemType = getItemType(itemInfo.worldItem.typeId);
+        lines.push(`${itemType.name} x${itemInfo.worldItem.qty}`);
+        // 可以根据需要添加更多信息，比如稀有度、价值等
+      } catch {
+        lines.push(`${itemInfo.worldItem.typeId} x${itemInfo.worldItem.qty}`);
+      }
+    } else if (itemInfo.type === 'lootBag' && itemInfo.lootBag) {
+      const bag = itemInfo.lootBag;
+      if (bag.items.length === 0) {
+        lines.push('空掉落包');
+      } else {
+        // 显示前几个物品
+        const maxItems = 5; // 最多显示5个物品
+        const itemsToShow = bag.items.slice(0, maxItems);
+        for (const item of itemsToShow) {
+          try {
+            const itemType = getItemType(item.typeId);
+            lines.push(`${itemType.name} x${item.qty}`);
+          } catch {
+            lines.push(`${item.typeId} x${item.qty}`);
+          }
+        }
+        if (bag.items.length > maxItems) {
+          lines.push(`... 还有 ${bag.items.length - maxItems} 个物品`);
+        }
+      }
+    }
+
+    if (lines.length === 0) {
+      return;
+    }
+
+    // 计算文本尺寸
+    this.ctx.save();
+    this.ctx.font = '12px monospace';
+    this.ctx.textAlign = 'left';
+    this.ctx.textBaseline = 'top';
+    
+    const padding = 8;
+    const lineHeight = 16;
+    let maxWidth = 0;
+    for (const line of lines) {
+      const metrics = this.ctx.measureText(line);
+      maxWidth = Math.max(maxWidth, metrics.width);
+    }
+    
+    const boxWidth = maxWidth + padding * 2;
+    const boxHeight = lines.length * lineHeight + padding * 2;
+    
+    // 调整位置，确保不超出屏幕
+    let finalX = tooltipX - boxWidth / 2; // 居中
+    let finalY = tooltipY - boxHeight; // 在物品上方
+    
+    // 边界检查
+    if (finalX < 10) finalX = 10;
+    if (finalX + boxWidth > this.cssWidth - 10) finalX = this.cssWidth - boxWidth - 10;
+    if (finalY < 10) finalY = tooltipY + 20; // 如果上方空间不够，显示在下方
+    
+    // 绘制背景框
+    this.ctx.fillStyle = 'rgba(0, 0, 0, 0.85)';
+    this.ctx.fillRect(finalX, finalY, boxWidth, boxHeight);
+    
+    // 绘制边框
+    this.ctx.strokeStyle = '#4CAF50';
+    this.ctx.lineWidth = 2;
+    this.ctx.strokeRect(finalX, finalY, boxWidth, boxHeight);
+    
+    // 绘制文本
+    this.ctx.fillStyle = '#ffffff';
+    for (let i = 0; i < lines.length; i++) {
+      this.ctx.fillText(lines[i], finalX + padding, finalY + padding + i * lineHeight);
+    }
+    
+    this.ctx.restore();
+  }
+
   // Day3: 绘制撤离区
   drawExtractZone(zone: { x: number; y: number; w: number; h: number }): void {
     const screenX = zone.x - this.camX;
@@ -666,7 +758,9 @@ export class Renderer {
     meleeSwings: Array<{ x: number; y: number; aimRad: number; range: number; arcRad: number; age: number }> = [],
     hitEffects: Array<{ x: number; y: number; age: number; type: 'obstacle' | 'player' }> = [], // 命中特效
     explosionEffects: Array<{ x: number; y: number; radius: number; age: number }> = [],
-    currentServerTick?: number // 新增: 当前服务器 tick（用于计算换弹进度）
+    currentServerTick?: number, // 新增: 当前服务器 tick（用于计算换弹进度）
+    nearbyInteractable?: { type: 'worldItem' | 'lootBag' | 'extractZone'; name: string; distance: number } | null, // 新增: 附近可交互目标
+    localPlayer?: PLAYER_STATE | null // 新增: 本地玩家（用于计算相对位置）
   ): void {
     this.clear();
 
@@ -759,15 +853,61 @@ export class Renderer {
       this.drawHitEffect(effect);
     }
 
+    // 新增: 绘制物品信息提示框（当接近物品时）
+    if (nearbyInteractable && localPlayer) {
+      const INTERACT_DISTANCE = 40;
+      if (nearbyInteractable.type === 'worldItem') {
+        // 找到距离最近的世界物品（在交互范围内）
+        let nearestItem: WorldItem | null = null;
+        let minDist = INTERACT_DISTANCE;
+        for (const item of worldItems) {
+          const dist = Math.hypot(item.x - localPlayer.x, item.y - localPlayer.y);
+          if (dist < minDist) {
+            minDist = dist;
+            nearestItem = item;
+          }
+        }
+        if (nearestItem && Math.abs(minDist - nearbyInteractable.distance) < 2) {
+          this.drawItemInfoTooltip(
+            nearestItem.x,
+            nearestItem.y,
+            { type: 'worldItem', worldItem: nearestItem },
+            localPlayer.x,
+            localPlayer.y
+          );
+        }
+      } else if (nearbyInteractable.type === 'lootBag') {
+        // 找到距离最近的掉落包（在交互范围内）
+        let nearestBag: LootBag | null = null;
+        let minDist = INTERACT_DISTANCE;
+        for (const bag of lootBags) {
+          const dist = Math.hypot(bag.x - localPlayer.x, bag.y - localPlayer.y);
+          if (dist < minDist) {
+            minDist = dist;
+            nearestBag = bag;
+          }
+        }
+        if (nearestBag && Math.abs(minDist - nearbyInteractable.distance) < 2) {
+          this.drawItemInfoTooltip(
+            nearestBag.x,
+            nearestBag.y,
+            { type: 'lootBag', lootBag: nearestBag },
+            localPlayer.x,
+            localPlayer.y
+          );
+        }
+      }
+    }
+
     // Debug模式：显示本地玩家坐标文本（使用屏幕坐标，固定在左上角）
     if (debug && localPlayerId) {
-      const localPlayer = players.find((p) => p.id === localPlayerId);
-      if (localPlayer) {
+      const debugLocalPlayer = players.find((p) => p.id === localPlayerId);
+      if (debugLocalPlayer) {
         this.ctx.fillStyle = '#fff';
         this.ctx.font = '12px monospace';
         // 使用屏幕坐标绘制，固定在左上角（10, 20）
         this.ctx.fillText(
-          `Local: (${localPlayer.x.toFixed(1)}, ${localPlayer.y.toFixed(1)})`,
+          `Local: (${debugLocalPlayer.x.toFixed(1)}, ${debugLocalPlayer.y.toFixed(1)})`,
           10,
           20
         );

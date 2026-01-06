@@ -32,7 +32,25 @@
 npm install
 ```
 
-### 2. 启动开发服务器（并行启动client和server）
+### 2. 启动开发服务器
+
+#### 使用预设地图
+
+```powershell
+# 城市废墟地图（推荐）
+npm run dev:urban
+
+# 森林哨站地图
+npm run dev:forest
+
+# 示例地图
+npm run dev:example
+
+# 随机生成地图（默认）
+npm run dev:server
+```
+
+#### 并行启动（客户端+服务端）
 
 ```powershell
 npm run dev:all
@@ -140,10 +158,15 @@ jerkie_man/
 ## 开发命令
 
 ```powershell
-# 并行启动client和server
+# 并行启动client和server（随机地图）
 npm run dev:all
 
-# 单独启动server
+# 使用预设地图启动server
+npm run dev:urban      # 城市废墟地图
+npm run dev:forest     # 森林哨站地图
+npm run dev:example    # 示例地图
+
+# 单独启动server（随机地图）
 npm run dev:server
 
 # 单独启动client
@@ -154,6 +177,60 @@ npm run build
 
 # 清理node_modules
 npm run clean
+```
+
+## 地图系统
+
+### 使用预设地图
+
+项目包含多个预设地图：
+- **urban_ruins**: 城市废墟，多建筑战术地图
+- **forest_outpost**: 森林哨站，军事基地主题
+- **example**: 简单示例地图
+
+### 创建自定义地图
+
+1. 在 `shared/maps/` 目录创建 `.map.txt` 文件
+2. 参考 `shared/maps/README.md` 了解格式
+3. 使用 `MAP_TEMPLATE=your_map_id npm run dev:server` 加载
+
+### 地图格式示例
+
+```
+# MAPTEXT v1
+@meta id=my_map name="My Map" desc="A custom map"
+@map width=2000 height=2000 seed=12345
+@extract x=1800 y=1800 w=200 h=200
+
+@obstacle x=300 y=300 w=200 h=150
+@spawn x=200 y=200
+@poi x=400 y=375 id=building1 type=building name="Main Building"
+@zone x=250 y=250 w=400 h=400 id=zone1 type=loot name="Loot Zone"
+```
+
+详细文档：`docs/MAP_EDITOR_GUIDE.md`
+
+## 运行时管理
+
+### 服务端管理命令
+
+在服务端控制台输入：
+
+```javascript
+// 列出可用地图
+admin.listMapTemplates()
+
+// 切换地图（会重置房间）
+admin.setMapTemplate('urban_ruins')
+
+// 切换回随机生成
+admin.setMapTemplate(null)
+
+// 重新加载地图文件
+admin.reloadMapTemplates()
+
+// 显示当前房间信息
+admin.showRoom()
 ```
 
 ## 协议说明

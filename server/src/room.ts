@@ -1,7 +1,7 @@
 import { Player } from './player.js';
 import { ProfileManager } from './profile.js';
 import type { PLAYER_STATE, BULLET_STATE, ITEM_STATE, C2S_INPUT, MAP_CONFIG, OBSTACLE_STATE, WorldItem, LootBag, ItemInstance, WeaponRuntime, WeaponDef, MapTemplate, SpawnPoint } from '@jerkie-man/shared';
-import { loadMapConfig, loadItemTypes, circleVsAABB, createRng, rectIntersects, segmentIntersectsCircle, getItemType, getAllItemTypes, getItemTypesByRarity, getWeaponDef, getArmorDef, getBagDef, applySpread, msToTicks, getFireSchedule, shouldStartBurst, canFireTick, advanceBurstAfterShot, PLAYER_HIT_RADIUS } from '@jerkie-man/shared';
+import { loadMapConfig, loadItemTypes, circleVsAABB, createRng, rectIntersects, segmentIntersectsCircle, getItemType, getAllItemTypes, getItemTypesByRarity, getWeaponDef, getArmorDef, getBagDef, applySpread, msToTicks, getFireSchedule, shouldStartBurst, canFireTick, advanceFireCooldown, PLAYER_HIT_RADIUS } from '@jerkie-man/shared';
 import { log } from './logger.js';
 
 // Step4: 内部子弹类型（包含spawnAt、damage和bulletLifeMs用于TTL检查和伤害计算）
@@ -365,11 +365,12 @@ export class Room {
   private setPlayerWeaponRuntime(player: Player, weaponTypeId: string): boolean {
     try {
       const weaponDef = getWeaponDef(weaponTypeId);
+      
       player.weaponRuntime = {
         weaponTypeId,
         ammoInMag: weaponDef.magSize,
         reloadingUntilTick: 0,
-        nextFireTick: this.tick,
+        nextFireTick: this.tick, // 允许立即开火（切换武器后）
       };
       return true;
     } catch {
@@ -1034,16 +1035,19 @@ export class Room {
       }
 
       const oldWeapon = player.equippedWeaponItem;
-      const removed = player.removeItem(weaponItem.iid, weaponItem.qty);
+      // 修复：武器只移除1个，不是全部数量
+      const removed = player.removeItem(weaponItem.iid, 1);
       if (!removed) {
         return { success: false, message: 'Failed to remove item' };
       }
       const ok = this.setPlayerWeaponRuntime(player, weaponItem.typeId);
       if (!ok) {
-        this.addInventoryItemInstance(player, weaponItem);
+        // 回滚：如果设置失败，把武器加回背包
+        this.addInventoryItemInstance(player, { ...weaponItem, qty: 1 });
         return { success: false, message: 'Invalid weapon type' };
       }
-      player.equippedWeaponItem = { ...weaponItem };
+      // 修复：装备的武器数量应该是1
+      player.equippedWeaponItem = { ...weaponItem, qty: 1 };
       if (oldWeapon) {
         if (!this.addInventoryItemInstance(player, oldWeapon)) {
           this.dropItemAtPlayer(player, oldWeapon);
@@ -1070,13 +1074,15 @@ export class Room {
           return { success: false, message: 'Bag capacity too small' };
         }
         const oldBag = player.equippedBagItem;
-        const removed = player.removeItem(bagItem.iid, bagItem.qty);
+        // 修复：背包只移除1个，不是全部数量
+        const removed = player.removeItem(bagItem.iid, 1);
         if (!removed) {
           return { success: false, message: 'Failed to remove item' };
         }
         player.inventory.bagCap = bagDef.bagCap;
         player.equippedBagTypeId = bagDef.typeId;
-        player.equippedBagItem = { ...bagItem };
+        // 修复：装备的背包数量应该是1
+        player.equippedBagItem = { ...bagItem, qty: 1 };
         if (oldBag && !this.addInventoryItemInstance(player, oldBag)) {
           this.dropItemAtPlayer(player, oldBag);
         }
@@ -1088,7 +1094,18 @@ export class Room {
 
     if (slot === 'armor') {
       if (!iid) {
-        return { success: false, message: 'Armor item required' };
+        // 卸下防具
+        if (!player.equippedArmorItem) {
+          return { success: true };
+        }
+        if (player.inventory.items.length >= player.inventory.bagCap) {
+          return { success: false, message: 'Bag is full' };
+        }
+        this.addInventoryItemInstance(player, player.equippedArmorItem);
+        player.equippedArmorItem = null;
+        player.equippedArmorTypeId = null;
+        player.armorReduction = 0;
+        return { success: true };
       }
       const armorItem = player.inventory.items.find(item => item.iid === iid) ??
         (typeId ? player.inventory.items.find(item => item.typeId === typeId) : undefined);
@@ -1098,13 +1115,15 @@ export class Room {
       try {
         const armorDef = getArmorDef(armorItem.typeId);
         const oldArmor = player.equippedArmorItem;
-        const removed = player.removeItem(armorItem.iid, armorItem.qty);
+        // 修复：护甲只移除1个，不是全部数量
+        const removed = player.removeItem(armorItem.iid, 1);
         if (!removed) {
           return { success: false, message: 'Failed to remove item' };
         }
         player.armorReduction = armorDef.damageReduction;
         player.equippedArmorTypeId = armorDef.typeId;
-        player.equippedArmorItem = { ...armorItem };
+        // 修复：装备的护甲数量应该是1
+        player.equippedArmorItem = { ...armorItem, qty: 1 };
         if (oldArmor && !this.addInventoryItemInstance(player, oldArmor)) {
           this.dropItemAtPlayer(player, oldArmor);
         }
@@ -1170,59 +1189,6 @@ export class Room {
   // 节流日志：每200ms打印一次
   private lastProcessLog = new Map<string, number>();
 
-  // 新增: 处理连发自动完成
-  private processBurstFire(playerId: string, player: Player, aimRad: number, originX?: number, originY?: number): void {
-    if (!player.weaponRuntime) return;
-    
-    const wr = player.weaponRuntime;
-    if (wr.burstRemaining === undefined || wr.burstRemaining <= 0) return;
-    
-    try {
-      const weaponDef = getWeaponDef(wr.weaponTypeId);
-      const shotOriginX = originX ?? player.lastShotOriginX ?? player.x;
-      const shotOriginY = originY ?? player.lastShotOriginY ?? player.y;
-      
-      // 检查弹药
-      if (wr.ammoInMag <= 0) {
-        // 弹匣空了，中断连发
-        wr.burstRemaining = 0;
-        wr.burstNextTick = undefined;
-        return;
-      }
-      
-      // 检查是否在换弹
-      if (this.tick < wr.reloadingUntilTick) {
-        // 正在换弹，中断连发
-        wr.burstRemaining = 0;
-        wr.burstNextTick = undefined;
-        return;
-      }
-      
-      // 发射连发中的一发
-      wr.ammoInMag -= 1;
-      advanceBurstAfterShot(wr, weaponDef, this.tick);
-      
-      // 发射子弹
-      const bulletId = this.spawnBullet(playerId, player, aimRad, weaponDef, undefined, shotOriginX, shotOriginY); // 连发不使用shotId
-      
-      log('SPAWN_BULLET_BURST', {
-        room: this.id,
-        player: playerId,
-        tick: this.tick,
-        bullet: bulletId,
-        weapon: wr.weaponTypeId,
-        ammo: wr.ammoInMag,
-        burstRemaining: wr.burstRemaining,
-      });
-    } catch {
-      // 无效武器类型，中断连发
-      if (wr.burstRemaining !== undefined) {
-        wr.burstRemaining = 0;
-        wr.burstNextTick = undefined;
-      }
-    }
-  }
-  
   // 新增: 发射子弹的公共方法（修复：weaponDef使用强类型而非any）
   private spawnBullet(
     playerId: string,
@@ -1368,8 +1334,10 @@ export class Room {
 
     // 更新玩家位置（20Hz tick = 50ms = 0.05s）
     // P0-1 修复: 传入 obstacles 参数，使碰撞检测生效
+    // 新增: 支持冲刺
     const deltaTime = 0.05;
-    player.processInput(input.keys, deltaTime, this.mapConfig.width, this.mapConfig.height, this.obstacles);
+    const wantsSprint = !!input.sprint; // 新增: 获取冲刺输入
+    player.processInput(input.keys, deltaTime, this.mapConfig.width, this.mapConfig.height, this.obstacles, wantsSprint);
 
     // P0-1 修复: 移除旧拾取逻辑（interact 不再触发拾取）
     // 拾取现在只通过 C2S_PICKUP_WORLD_ITEM / C2S_PICKUP_LOOT_BAG 消息处理
@@ -1426,20 +1394,6 @@ export class Room {
       }
     }
     
-    // 新增: 处理连发自动完成（即使玩家没有按下开火键，也要继续完成连发）
-    if (player.weaponRuntime && player.weaponRuntime.burstRemaining !== undefined && player.weaponRuntime.burstRemaining > 0) {
-        if (this.tick >= (player.weaponRuntime.burstNextTick ?? 0)) {
-          // 连发间隔到了，自动发射下一发
-          this.processBurstFire(
-            playerId,
-            player,
-            input.aim,
-            player.lastShotOriginX,
-            player.lastShotOriginY
-          );
-        }
-      }
-    
     // 新增: 处理开火（使用武器参数）
     if (shootNow && player.status === 'ALIVE') {
       // 检查是否有武器
@@ -1463,7 +1417,7 @@ export class Room {
         this.combatEvents.get(playerId)!.push({ kind: 'DRY_FIRE' });
         return;
       }
-      // 检查是否可以开火（考虑连发状态）
+      // 检查是否可以开火
       if (!canFireTick(wr, this.tick)) {
         return;
       }
@@ -1563,17 +1517,15 @@ export class Room {
         }
         
         // 远程武器：检查弹药
-        if (wr.ammoInMag <= 0) {
-          // 弹匣空了，中断连发
-          if (wr.burstRemaining !== undefined) {
-            wr.burstRemaining = 0;
-            wr.burstNextTick = undefined;
-          }
+        const schedule = getFireSchedule(weaponDef);
+        const burstShotCount = input.burstShots ? input.burstShots.length : 1;
+        
+        // 检查弹药是否足够
+        if (wr.ammoInMag < burstShotCount) {
+          // 弹匣空了或弹药不足
           // 触发自动换弹（兜底）
-          // 修复: 只有在未换弹时才能触发自动换弹，避免换弹完成后再次触发
           if (weaponDef.reloadMs > 0 && wr.reloadingUntilTick === 0) {
             wr.reloadingUntilTick = this.tick + msToTicks(weaponDef.reloadMs);
-            // ammoInMag保持0，换弹完成后再回满
           }
           // 发送干火事件
           if (!this.combatEvents.has(playerId)) {
@@ -1583,50 +1535,61 @@ export class Room {
           return;
         }
         
-        // 检查是否在连发中
-        const schedule = getFireSchedule(weaponDef);
-        const canStartBurst = shouldStartBurst(weaponDef, shootNow, wasShooting);
-        
-        if (wr.burstRemaining !== undefined && wr.burstRemaining > 0) {
-          // 发射连发中的一发
-          wr.ammoInMag -= 1;
-          advanceBurstAfterShot(wr, weaponDef, this.tick);
-        } else if (schedule.burstCount > 1) {
-          if (!canStartBurst) {
-            return;
+        // 检查是否是连发武器且客户端发送了连发数据
+        if (input.burstShots && input.burstShots.length > 0) {
+          // 客户端推送的连发模式：发射所有子弹
+          for (const shot of input.burstShots) {
+            if (wr.ammoInMag <= 0) break; // 弹药不足，停止发射
+            
+            wr.ammoInMag -= 1;
+            this.spawnBullet(
+              playerId,
+              player,
+              input.aim,
+              weaponDef,
+              shot.shotId,
+              shot.originX,
+              shot.originY,
+              shot.spreadSeed
+            );
           }
-          // 开始新的连发，立即发射第一发
-          wr.ammoInMag -= 1;
-          advanceBurstAfterShot(wr, weaponDef, this.tick);
+          
+          log('SPAWN_BULLET_BURST', {
+            room: this.id,
+            player: playerId,
+            tick: this.tick,
+            weapon: wr.weaponTypeId,
+            shotCount: input.burstShots.length,
+            ammo: wr.ammoInMag,
+          });
         } else {
-          // 单发模式
+          // 单发模式或第一发
           wr.ammoInMag -= 1;
-          advanceBurstAfterShot(wr, weaponDef, this.tick);
+          const shotOriginX = input.shootOriginX ?? player.x;
+          const shotOriginY = input.shootOriginY ?? player.y;
+          player.lastShotOriginX = shotOriginX;
+          player.lastShotOriginY = shotOriginY;
+          const bulletId = this.spawnBullet(playerId, player, input.aim, weaponDef, input.shotId, shotOriginX, shotOriginY, input.spreadSeed);
+          const pelletCount = weaponDef.pelletCount ?? 1;
+          
+          log('SPAWN_BULLET', {
+            room: this.id,
+            player: playerId,
+            tick: this.tick,
+            bullet: bulletId,
+            weapon: wr.weaponTypeId,
+            ammo: wr.ammoInMag,
+            pos: `(${player.x.toFixed(1)},${player.y.toFixed(1)})`,
+            aim: input.aim.toFixed(2),
+            pelletCount: pelletCount,
+            totalBullets: this.bullets.length,
+          });
         }
         
-        // 发射子弹（提取为公共方法，供连发使用）
-        const shotOriginX = input.shootOriginX ?? player.x;
-        const shotOriginY = input.shootOriginY ?? player.y;
-        player.lastShotOriginX = shotOriginX;
-        player.lastShotOriginY = shotOriginY;
-        const bulletId = this.spawnBullet(playerId, player, input.aim, weaponDef, input.shotId, shotOriginX, shotOriginY, input.spreadSeed);
-        const pelletCount = weaponDef.pelletCount ?? 1;
-        
-        log('SPAWN_BULLET', {
-          room: this.id,
-          player: playerId,
-          tick: this.tick,
-          bullet: bulletId,
-          weapon: wr.weaponTypeId,
-          ammo: wr.ammoInMag,
-          pos: `(${player.x.toFixed(1)},${player.y.toFixed(1)})`,
-          aim: input.aim.toFixed(2),
-          pelletCount: pelletCount, // 记录弹丸数量
-          totalBullets: this.bullets.length, // 记录总子弹数
-        });
+        // 更新射击冷却时间
+        advanceFireCooldown(wr, weaponDef, this.tick, burstShotCount);
         
         // 修复: 开火后立即返回，防止同一 tick 内处理后续输入导致绕过冷却限制
-        // 这确保即使队列中有多个 shoot=true 的输入，每个 tick 最多只开火一次
         return;
       } catch {
         // 无效武器类型，不能开火

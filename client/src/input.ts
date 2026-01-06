@@ -230,4 +230,9 @@ export class InputManager {
     this.useItemFlags[slot - 1] = false;
     return value;
   }
+
+  // 新增: 获取冲刺状态（空格键）
+  getSprintHeld(): boolean {
+    return this.keys.get(' ') ?? false;
+  }
 }

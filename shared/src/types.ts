@@ -52,9 +52,7 @@ export type WeaponRuntime = {
   ammoInMag: number;
   reloadingUntilTick: number; // 0 表示未换弹；否则 tick <= reloadingUntilTick 期间禁止开火
   nextFireTick: number;        // tick < nextFireTick 禁止开火
-  burstRemaining?: number;     // 连发剩余次数（0表示不在连发中）
-  burstNextTick?: number;      // 连发下一发的时间（tick）
-  fireCredit?: number;         // ?????????????
+  fireCredit?: number;         // 射击信用（用于客户端预测）
 };
 
 export type Phase = 'NAME' | 'HIDEOUT' | 'RAID' | 'RESULT';

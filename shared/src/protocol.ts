@@ -24,10 +24,17 @@ export const C2S_INPUT_SCHEMA = z.object({
   interact: z.boolean().optional(), // Day3: 拾取脉冲事件（E键）
   extract: z.boolean().optional(), // Day3: 撤离脉冲事件（F键，已废弃，保留兼容）
   extractHeld: z.boolean().optional(), // 游戏化增强: 撤离持续状态（按住F）
+  sprint: z.boolean().optional(), // 新增: 冲刺状态（空格键）
   shotId: z.number().int().optional(), // 本次发射的唯一ID（用于客户端预测子弹对齐）
   shootOriginX: z.number().optional(), // 客户端渲染时的射击原点X
   shootOriginY: z.number().optional(), // 客户端渲染时的射击原点Y
   spreadSeed: z.number().optional(), // 散布随机种子（客户端生成，服务端使用相同种子保证散布一致）
+  burstShots: z.array(z.object({
+    shotId: z.number().int(),
+    originX: z.number(),
+    originY: z.number(),
+    spreadSeed: z.number(),
+  })).optional(), // 新增: 三连发时客户端推送的所有子弹信息
 });
 
 export const C2S_LOCAL_BULLET_HIT_SCHEMA = z.object({
@@ -146,6 +153,11 @@ export const C2S_ADMIN_SCHEMA = z.object({
   command: z.enum(['show_status', 'reset_world']),
 });
 
+// 新增: 退出结果页面（从 RESULT 阶段返回 HIDEOUT）
+export const C2S_EXIT_RESULT_SCHEMA = z.object({
+  type: z.literal('C2S_EXIT_RESULT'),
+});
+
 export const C2S_MESSAGE_SCHEMA = z.discriminatedUnion('type', [
   C2S_HELLO_SCHEMA,
   C2S_INPUT_SCHEMA,
@@ -165,6 +177,7 @@ export const C2S_MESSAGE_SCHEMA = z.discriminatedUnion('type', [
   C2S_EQUIP_SCHEMA, // 新增: 装备/卸下装备
   C2S_DROP_ITEM_SCHEMA, // 新增: 局内丢弃物品
   C2S_RAID_EQUIP_SCHEMA, // 新增: 局内装备切换
+  C2S_EXIT_RESULT_SCHEMA, // 新增: 退出结果页面
   C2S_LOCAL_BULLET_HIT_SCHEMA,
 ]);
 
@@ -201,8 +214,6 @@ export const WEAPON_RUNTIME_SCHEMA = z.object({
   ammoInMag: z.number().int().nonnegative(),
   reloadingUntilTick: z.number().int().nonnegative(),
   nextFireTick: z.number().int().nonnegative(),
-  burstRemaining: z.number().int().nonnegative().optional(),
-  burstNextTick: z.number().int().nonnegative().optional(),
   fireCredit: z.number().int().nonnegative().optional(),
 });
 
@@ -211,6 +222,9 @@ export const PLAYER_STATE_SCHEMA = z.object({
   x: z.number(),
   y: z.number(),
   hp: z.number().int().min(0).max(100),
+  stamina: z.number().int().min(0).max(100).default(100), // 新增: 当前耐力值
+  maxStamina: z.number().int().min(1).max(150).default(100), // 新增: 最大耐力值（可被装备影响）
+  isSprinting: z.boolean().default(false), // 新增: 是否正在冲刺
   status: z.enum(['ALIVE', 'DEAD', 'EXTRACTED']),
   lastInputSeq: z.number().int(),
   lastInputTick: z.number().int(),

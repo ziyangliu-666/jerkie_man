@@ -566,6 +566,84 @@
       transition: width 0.08s linear, background 0.08s linear;
     }
 
+    /* 左下角耐力 HUD */
+    #staminaHud {
+      position: absolute;
+      left: 20px;
+      bottom: 200px;
+      width: 220px;
+      padding: 12px;
+      border-radius: 10px;
+      border: 1px solid #323232;
+      background: rgba(12, 12, 12, 0.85);
+      box-shadow: 0 6px 16px rgba(0, 0, 0, 0.45);
+      pointer-events: none;
+      display: none;
+    }
+
+    #staminaHud .stamina-hud-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 6px;
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+    }
+
+    #staminaHud .stamina-hud-title {
+      color: #0ff;
+    }
+
+    #staminaHud .stamina-hud-value {
+      font-size: 12px;
+      color: #f2f2f2;
+      font-variant-numeric: tabular-nums;
+    }
+
+    #staminaHud .stamina-hud-state {
+      color: #00BCD4;
+      font-size: 10px;
+      font-weight: bold;
+      margin-left: 8px;
+    }
+
+    #staminaHud .stamina-hud-bar {
+      height: 6px;
+      border-radius: 3px;
+      background: rgba(255, 255, 255, 0.08);
+      overflow: hidden;
+    }
+
+    #staminaHud .stamina-hud-bar-fill {
+      height: 100%;
+      width: 100%;
+      background: #0088ff;
+      box-shadow: 0 0 10px rgba(0, 136, 255, 0.5);
+      transition: width 0.08s linear, background 0.08s linear;
+    }
+
+    /* 耐力条颜色变化 */
+    #staminaHud .stamina-hud-bar-fill.low {
+      background: #FF5722;
+      box-shadow: 0 0 10px rgba(255, 87, 34, 0.5);
+    }
+
+    #staminaHud .stamina-hud-bar-fill.medium {
+      background: #FF9800;
+      box-shadow: 0 0 10px rgba(255, 152, 0, 0.5);
+    }
+
+    /* 冲刺时的闪烁动画 */
+    #staminaHud.sprinting .stamina-hud-bar-fill {
+      animation: staminaPulse 0.8s ease-in-out infinite alternate;
+    }
+
+    @keyframes staminaPulse {
+      from { opacity: 0.7; }
+      to { opacity: 1.0; }
+    }
+
     /* NAME Modal 样式 */
     #nameModal {
       position: fixed;
@@ -1010,9 +1088,19 @@
       grid-template-columns: repeat(auto-fill, minmax(320px, 320px));
     }
     
+    /* 商店的卡片也使用和仓库一样的固定宽度（320px） */
+    #shopList .shop-rarity-items {
+      grid-template-columns: repeat(auto-fill, minmax(320px, 320px)) !important;
+    }
+    
     /* 整备区和仓库的按钮容器禁用换行，确保按钮在一排 */
     #prepList .item-actions,
     #stashList .item-actions {
+      flex-wrap: nowrap;
+    }
+    
+    /* 商店的按钮容器也禁用换行，确保按钮在一排 */
+    #shopList .item-actions {
       flex-wrap: nowrap;
     }
 
@@ -1694,6 +1782,9 @@
           <div class="raid-slot-label">防具</div>
           <div class="raid-slot-name" id="raidArmorName">-</div>
           <div class="raid-slot-meta" id="raidArmorMeta">-</div>
+          <div class="raid-slot-actions">
+            <button id="raidArmorUnequip" class="item-btn">卸下</button>
+          </div>
         </div>
       </div>
 
@@ -1734,6 +1825,18 @@
         </div>
         <div class="health-hud-bar">
           <div class="health-hud-bar-fill" id="healthHudFill"></div>
+        </div>
+      </div>
+
+      <!-- 左下角耐力 HUD -->
+      <div id="staminaHud">
+        <div class="stamina-hud-header">
+          <div class="stamina-hud-title">耐力</div>
+          <div class="stamina-hud-value" id="staminaHudValue">100/100</div>
+          <div class="stamina-hud-state" id="staminaHudState"></div>
+        </div>
+        <div class="stamina-hud-bar">
+          <div class="stamina-hud-bar-fill" id="staminaHudFill"></div>
         </div>
       </div>
 

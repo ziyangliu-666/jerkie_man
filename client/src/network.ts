@@ -14,6 +14,7 @@ import {
   C2S_MOVE_PREP_TO_STASH_SCHEMA, // 新增: 从整备区移动回仓库
   C2S_BUY_SCHEMA, // 新增: 商店购买物品
   C2S_ENTER_RAID_SCHEMA, // 新增: 进入战局
+  C2S_EXIT_RESULT_SCHEMA, // 新增: 退出结果页面
   C2S_EQUIP_SCHEMA, // 新增: 装备/卸下装备
   C2S_DROP_ITEM_SCHEMA, // 新增: 局内丢弃物品
   C2S_RAID_EQUIP_SCHEMA, // 新增: 局内装备切换
@@ -591,6 +592,23 @@ export class Network {
     }
   }
 
+  // 新增: 发送退出结果页面（从 RESULT 阶段返回 HIDEOUT）
+  sendExitResult(): boolean {
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+      return false;
+    }
+    try {
+      const message = C2S_EXIT_RESULT_SCHEMA.parse({
+        type: 'C2S_EXIT_RESULT',
+      });
+      this.ws.send(JSON.stringify(message));
+      return true;
+    } catch (error) {
+      console.error('Failed to send exit result:', error);
+      return false;
+    }
+  }
+
   // 新增: 发送进入战局
   sendEnterRaid(): boolean {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
@@ -618,10 +636,12 @@ export class Network {
     interact: boolean = false,
     extract: boolean = false,
     extractHeld: boolean = false, // 游戏化增强: 撤离持续状态
+    sprint: boolean = false, // 新增: 冲刺状态
     shotId?: number, // 本次发射的唯一ID（用于客户端预测子弹对齐）
     shootOriginX?: number,
     shootOriginY?: number,
-    spreadSeed?: number // 散布随机种子（客户端生成，服务端使用相同种子保证散布一致）
+    spreadSeed?: number, // 散布随机种子（客户端生成，服务端使用相同种子保证散布一致）
+    burstShots?: Array<{ shotId: number; originX: number; originY: number; spreadSeed: number }> // 新增: 三连发时客户端推送的所有子弹信息
   ): boolean {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
       return false; // P0-1: 发送失败，返回 false
@@ -638,10 +658,12 @@ export class Network {
       interact, // Day3: 传递拾取脉冲事件
       extract, // Day3: 传递撤离脉冲事件（已废弃，保留兼容）
       extractHeld, // 游戏化增强: 传递撤离持续状态
+      sprint, // 新增: 传递冲刺状态
       shotId, // 本次发射的唯一ID（用于客户端预测子弹对齐）
       shootOriginX,
       shootOriginY,
       spreadSeed, // 散布随机种子（客户端生成，服务端使用相同种子保证散布一致）
+      burstShots, // 新增: 三连发时客户端推送的所有子弹信息
     });
 
     this.ws.send(JSON.stringify(message));

@@ -33,6 +33,9 @@ import {
   shouldStartBurst,
   DEFAULT_FIRE_INTERVAL_MS,
   DEFAULT_BULLET_SPEED,
+  calculateStaminaChange,
+  canSprint,
+  getSprintSpeedMultiplier,
 } from '@jerkie-man/shared';
 
 // 本地发射 ID 计数器（用于客户端预测子弹对齐）
@@ -40,7 +43,6 @@ let localShotIdCounter = 0;
 // 上次开火冷却时间（与服务端保持一致）
 let lastLocalFireMs = 0;
 let lastLocalShoot = false;
-let localBurstStreamUntil = 0;
 let lastLocalMeleeMs = 0;
 // 本地弹药预测计数（防止快速点击绕过服务端快照延迟）
 let localPredictedAmmo: number | null = null;
@@ -85,9 +87,20 @@ let explosionEffects: ExplosionEffect[] = [];
 
 /**
  * 获取本地开火冷却时间（毫秒）
- * 使用shared层的单一数据源，不再有默认值回退
+ * 优先使用局内武器运行时状态，回退到 playerProfile
  */
 function getLocalFireCooldownMs(): number {
+  // 修复：优先使用局内武器运行时状态
+  if (raidLocalPlayer?.weaponRuntime?.weaponTypeId) {
+    try {
+      const weaponDef = getWeaponDef(raidLocalPlayer.weaponRuntime.weaponTypeId);
+      return weaponDef.fireIntervalMs;
+    } catch (e) {
+      console.warn('[getLocalFireCooldownMs] Failed to get weapon def from runtime:', e);
+    }
+  }
+
+  // 回退到 playerProfile（用于非局内场景）
   if (!playerProfile) {
     console.warn('[getLocalFireCooldownMs] playerProfile is null, using default');
     return DEFAULT_FIRE_INTERVAL_MS;
@@ -154,9 +167,20 @@ function getLocalSpeedMultiplier(): number {
 
 /**
  * 获取本地子弹速度（px/s）
- * 使用shared层的单一数据源，不再有默认值回退
+ * 优先使用局内武器运行时状态，回退到 playerProfile
  */
 function getLocalBulletSpeed(): number {
+  // 修复：优先使用局内武器运行时状态
+  if (raidLocalPlayer?.weaponRuntime?.weaponTypeId) {
+    try {
+      const weaponDef = getWeaponDef(raidLocalPlayer.weaponRuntime.weaponTypeId);
+      return weaponDef.bulletSpeed;
+    } catch (e) {
+      console.warn('[getLocalBulletSpeed] Failed to get weapon def from runtime:', e);
+    }
+  }
+
+  // 回退到 playerProfile（用于非局内场景）
   if (!playerProfile) {
     console.warn('[getLocalBulletSpeed] playerProfile is null, using default');
     return DEFAULT_BULLET_SPEED;
@@ -374,6 +398,7 @@ let raidBagToggle: HTMLButtonElement | null = null;
 let raidBagList: HTMLElement | null = null;
 let raidArmorName: HTMLElement | null = null;
 let raidArmorMeta: HTMLElement | null = null;
+let raidArmorUnequip: HTMLButtonElement | null = null;
 let weaponHud: HTMLElement | null = null;
 let weaponHudName: HTMLElement | null = null;
 let weaponHudAmmo: HTMLElement | null = null;
@@ -382,6 +407,10 @@ let weaponHudState: HTMLElement | null = null;
 let healthHud: HTMLElement | null = null;
 let healthHudValue: HTMLElement | null = null;
 let healthHudFill: HTMLElement | null = null;
+let staminaHud: HTMLElement | null = null;
+let staminaHudValue: HTMLElement | null = null;
+let staminaHudFill: HTMLElement | null = null;
+let staminaHudState: HTMLElement | null = null;
 
 // 新增: 快捷栏 HUD 元素
 let hotbarHud: HTMLElement | null = null;
@@ -426,6 +455,7 @@ function getRaidElements(): void {
   if (!raidBagList) raidBagList = document.getElementById('raidBagList');
   if (!raidArmorName) raidArmorName = document.getElementById('raidArmorName');
   if (!raidArmorMeta) raidArmorMeta = document.getElementById('raidArmorMeta');
+  if (!raidArmorUnequip) raidArmorUnequip = document.getElementById('raidArmorUnequip') as HTMLButtonElement;
   
   // 获取快捷栏元素
   if (!hotbarHud) hotbarHud = document.getElementById('hotbarHud');
@@ -449,6 +479,13 @@ function getHealthHudElements(): void {
   if (!healthHud) healthHud = document.getElementById('healthHud');
   if (!healthHudValue) healthHudValue = document.getElementById('healthHudValue');
   if (!healthHudFill) healthHudFill = document.getElementById('healthHudFill');
+}
+
+function getStaminaHudElements(): void {
+  if (!staminaHud) staminaHud = document.getElementById('staminaHud');
+  if (!staminaHudValue) staminaHudValue = document.getElementById('staminaHudValue');
+  if (!staminaHudFill) staminaHudFill = document.getElementById('staminaHudFill');
+  if (!staminaHudState) staminaHudState = document.getElementById('staminaHudState');
 }
 
 // 修复: 客户端预测相关状态（必须在 updatePhaseUI 之前定义）
@@ -1250,6 +1287,7 @@ function updateRaidEquipmentUI(localPlayer: PLAYER_STATE | null): void {
     if (raidArmorMeta) raidArmorMeta.textContent = '-';
     if (raidWeaponSwap) raidWeaponSwap.disabled = true;
     if (raidWeaponUnequip) raidWeaponUnequip.disabled = true;
+    if (raidArmorUnequip) raidArmorUnequip.disabled = true;
     if (raidBagList) {
       raidBagList.classList.remove('expanded');
       raidBagList.innerHTML = '';
@@ -1315,6 +1353,10 @@ function updateRaidEquipmentUI(localPlayer: PLAYER_STATE | null): void {
   if (raidWeaponUnequip) {
     const canUnequip = weaponTypeId !== 'w_fists' && inventoryItems.length < bagCap;
     raidWeaponUnequip.disabled = !canUnequip;
+  }
+  if (raidArmorUnequip) {
+    const canUnequipArmor = armorTypeId !== null && inventoryItems.length < bagCap;
+    raidArmorUnequip.disabled = !canUnequipArmor;
   }
 
   if (raidBagToggle) {
@@ -1415,6 +1457,59 @@ function updateWeaponHud(localPlayer: PLAYER_STATE | null): void {
   weaponHud.style.setProperty('--reload-progress', reloadProgressPercent);
 }
 
+// 新增: 更新Canvas UI的武器状态（已禁用武器信息显示）
+function updateCanvasUI(localPlayer: PLAYER_STATE | null): void {
+  // 武器状态显示已禁用，不再更新
+  // if (currentPhase !== 'RAID' || !localPlayer || localPlayer.status !== 'ALIVE') {
+  //   // 禁用所有Canvas UI状态
+  //   uiOverlay.updateState({
+  //     weaponStatus: { enabled: false, weaponName: '', ammoInMag: 0, magSize: 0, reloading: false, reloadProgress: 0 },
+  //   });
+  //   return;
+  // }
+
+  // // 更新武器状态
+  // let weaponEnabled = false;
+  // let weaponName = '';
+  // let ammoInMag = 0;
+  // let magSize = 0;
+  // let reloading = false;
+  // let reloadProgress = 0;
+
+  // if (localPlayer.weaponRuntime) {
+  //   weaponEnabled = true;
+  //   weaponName = localPlayer.weaponRuntime.weaponTypeId;
+  //   ammoInMag = localPlayer.weaponRuntime.ammoInMag;
+  //   
+  //   try {
+  //     const weaponDef = getWeaponDef(localPlayer.weaponRuntime.weaponTypeId);
+  //     weaponName = weaponDef.name;
+  //     magSize = weaponDef.magSize;
+  //     
+  //     const currentTick = network.getConnectionState().lastServerTick;
+  //     reloading = localPlayer.weaponRuntime.reloadingUntilTick > 0 && currentTick < localPlayer.weaponRuntime.reloadingUntilTick;
+  //     
+  //     if (reloading) {
+  //       const reloadTicks = msToTicks(weaponDef.reloadMs);
+  //       reloadProgress = reloadTicks > 0
+  //         ? Math.min(1, (currentTick - (localPlayer.weaponRuntime.reloadingUntilTick - reloadTicks)) / reloadTicks)
+  //         : 0;
+  //     }
+  //   } catch {}
+  // }
+
+  // uiOverlay.updateState({
+  //   weaponStatus: {
+  //     enabled: weaponEnabled,
+  //     weaponName,
+  //     ammoInMag,
+  //     magSize,
+  //     reloading,
+  //     reloadProgress,
+  //   },
+  // });
+}
+
 function updateHealthHud(localPlayer: PLAYER_STATE | null): void {
   getHealthHudElements();
 
@@ -1438,11 +1533,61 @@ function updateHealthHud(localPlayer: PLAYER_STATE | null): void {
   }
 
   healthHud.style.display = 'block';
-  if (healthHudValue) healthHudValue.textContent = `${hpPercent}/100`;
+  if (healthHudValue) healthHudValue.textContent = String(hpPercent);
   if (healthHudFill) {
     healthHudFill.style.width = `${fillPercent}%`;
     healthHudFill.style.background = fillColor;
-    healthHudFill.style.boxShadow = `0 0 10px ${fillColor}80`;
+  }
+}
+
+function updateStaminaHud(localPlayer: PLAYER_STATE | null): void {
+  getStaminaHudElements();
+
+  if (!staminaHud) {
+    return;
+  }
+
+  if (currentPhase !== 'RAID' || !localPlayer || localPlayer.status !== 'ALIVE') {
+    staminaHud.style.display = 'none';
+    return;
+  }
+
+  const stamina = Math.max(0, Math.min(localPlayer.maxStamina ?? 100, localPlayer.stamina ?? 100));
+  const maxStamina = localPlayer.maxStamina ?? 100;
+  const isSprinting = localPlayer.isSprinting ?? false;
+  const staminaPercent = (stamina / maxStamina) * 100;
+  
+  // 设置颜色类
+  let colorClass = '';
+  if (staminaPercent < 30) {
+    colorClass = 'low';
+  } else if (staminaPercent < 60) {
+    colorClass = 'medium';
+  }
+
+  staminaHud.style.display = 'block';
+  
+  // 更新数值显示
+  if (staminaHudValue) {
+    staminaHudValue.textContent = `${Math.floor(stamina)}/${maxStamina}`;
+  }
+  
+  // 更新状态显示
+  if (staminaHudState) {
+    staminaHudState.textContent = isSprinting ? 'SPRINTING' : '';
+  }
+  
+  // 更新进度条
+  if (staminaHudFill) {
+    staminaHudFill.style.width = `${staminaPercent}%`;
+    staminaHudFill.className = `stamina-hud-bar-fill ${colorClass}`;
+  }
+  
+  // 添加/移除冲刺动画类
+  if (isSprinting) {
+    staminaHud.classList.add('sprinting');
+  } else {
+    staminaHud.classList.remove('sprinting');
   }
 }
 
@@ -2159,8 +2304,11 @@ function initHideoutUI(): void {
     enterRaidBtn.onclick = () => {
       if (network.sendEnterRaid()) {
         hud.addEvent('正在进入战局...');
-        // 播放装备飞行动画
-        animateEquipmentToRaid();
+        // 直接显示 raid HUD，不播放动画
+        getRaidElements();
+        if (raidEquipment && currentPhase === 'RAID' && raidLocalPlayer) {
+          updateRaidEquipmentUI(raidLocalPlayer);
+        }
       } else {
         hud.addEvent('进入战局失败：连接未就绪');
       }
@@ -2364,6 +2512,18 @@ function initRaidUI(): void {
   if (raidWeaponUnequip) {
     raidWeaponUnequip.onclick = () => {
       network.sendRaidEquip('weapon', null);
+    };
+  }
+
+  if (raidArmorUnequip) {
+    raidArmorUnequip.onclick = () => {
+      console.log('[RAID] 点击卸下防具按钮');
+      const sent = network.sendRaidEquip('armor', null);
+      if (sent) {
+        hud.addEvent('卸下防具');
+      } else {
+        hud.addEvent('卸下防具失败：连接未就绪');
+      }
     };
   }
 
@@ -2669,6 +2829,7 @@ const network = new Network(getWebSocketUrl(), 'local', {
     lastSentAim = NaN;
     lastSentShoot = false;
     lastSentExtractHeld = null; // 游戏化增强: 重置撤离持续状态
+    lastSentSprint = null; // 新增: 重置冲刺状态
     interactUntil = 0; // P2-2: 重置 interact TTL
     // 修复: pendingExtract 不再使用
     // pendingExtract = false;
@@ -2724,6 +2885,7 @@ const network = new Network(getWebSocketUrl(), 'local', {
           lastSentKeys = null;
           lastSentShoot = false;
           lastSentExtractHeld = null;
+          lastSentSprint = null; // 新增: 重置冲刺状态
           return;
         }
         
@@ -2967,6 +3129,7 @@ let lastSentKeys: { up: boolean; down: boolean; left: boolean; right: boolean } 
 let lastSentAim = NaN;
 let lastSentShoot = false; // Day2: 上次发送的开火状态
 let lastSentExtractHeld: boolean | null = null; // 游戏化增强: 上次发送的撤离持续状态
+let lastSentSprint: boolean | null = null; // 新增: 上次发送的冲刺状态
 // P2-2: pendingInteract 改成 TTL 脉冲（不再无限期粘住）
 // interactUntil 是 performance.now() 时间戳，超过这个时间就清零
 let interactUntil = 0;
@@ -3035,6 +3198,9 @@ function renderLoop(): void {
         
         // 其他字段保持最新（别让血量/状态落后一拍）
         renderLocalPlayer.hp = predictedLocalPlayer.hp;
+        renderLocalPlayer.stamina = predictedLocalPlayer.stamina; // 新增: 同步耐力
+        renderLocalPlayer.maxStamina = predictedLocalPlayer.maxStamina; // 新增: 同步最大耐力
+        renderLocalPlayer.isSprinting = predictedLocalPlayer.isSprinting; // 新增: 同步冲刺状态
         renderLocalPlayer.status = predictedLocalPlayer.status;
         renderLocalPlayer.lootCount = predictedLocalPlayer.lootCount;
         renderLocalPlayer.lastInputSeq = predictedLocalPlayer.lastInputSeq;
@@ -3094,6 +3260,23 @@ function renderLoop(): void {
           (explosion) => nowPerf2 - explosion.spawnTimeMs <= EXPLOSION_EFFECT_TTL_MS
         );
         
+        // 获取本地玩家用于显示物品信息提示框
+        const renderLocalPlayerForTooltip = renderLocalPlayer ?? predictedLocalPlayer ?? 
+          (localPlayerId ? state.players.find((p) => p.id === localPlayerId) : null);
+        
+        // 计算最近可交互目标（用于在canvas中显示物品信息提示框）
+        let nearbyInteractableForRender: { type: 'worldItem' | 'lootBag' | 'extractZone'; name: string; distance: number } | null = null;
+        if (renderLocalPlayerForTooltip && renderLocalPlayerForTooltip.status === 'ALIVE') {
+          const mapConfig = serverMapConfig ?? fallbackMapConfig;
+          nearbyInteractableForRender = findNearestInteractable(
+            renderLocalPlayerForTooltip.x,
+            renderLocalPlayerForTooltip.y,
+            state.worldItems,
+            state.lootBags,
+            mapConfig.extractZone
+          );
+        }
+        
         renderer.render(
           playersToRender,
           localPlayerId,
@@ -3107,7 +3290,9 @@ function renderLoop(): void {
           meleeSwingsToRender,
           bulletTracks.getHitEffects(), // 命中特效
           explosionsToRender,
-          network.getConnectionState().lastServerTick // 新增: 当前服务器 tick（用于计算换弹进度）
+          network.getConnectionState().lastServerTick, // 新增: 当前服务器 tick（用于计算换弹进度）
+          nearbyInteractableForRender, // 新增: 附近可交互目标
+          renderLocalPlayerForTooltip // 新增: 本地玩家（用于计算相对位置）
         );
       } else {
         // 非 RAID phase: 只清屏（显示暗背景）
@@ -3137,13 +3322,14 @@ function renderLoop(): void {
         const localPlayer = renderLocalPlayer ?? predictedLocalPlayer ?? state.players.find((p) => p.id === localPlayerId);
         updateWeaponHud(localPlayer ?? null);
         updateHealthHud(localPlayer ?? null);
+        updateStaminaHud(localPlayer ?? null); // 新增: 更新耐力HUD
+        updateCanvasUI(localPlayer ?? null); // 新增: 更新Canvas UI状态
       } else {
         updateWeaponHud(null);
         updateHealthHud(null);
+        updateStaminaHud(null); // 新增: 清空耐力HUD
+        updateCanvasUI(null); // 新增: 清空Canvas UI状态
       }
-      uiOverlay.updateState({
-        weaponStatus: { enabled: false, weaponName: '', ammoInMag: 0, magSize: 0, reloading: false, reloadProgress: 0 },
-      });
       
       // 绘制 UI 覆盖层（准星、受伤红边、撤离进度等）
       uiOverlay.draw();
@@ -3204,12 +3390,9 @@ function renderLoop(): void {
         ? shouldStartBurst(weaponDef, rawShoot, lastLocalShoot)
         : rawShoot;
       const tickShoot = isBurstWeapon ? justPressed : rawShoot;
-      if (isBurstWeapon && justPressed && schedule) {
-        localBurstStreamUntil =
-          performance.now() + (schedule.burstCount - 1) * schedule.burstIntervalMs;
-      }
       lastLocalShoot = rawShoot;
       const tickExtractHeld = canControl ? inputManager.getExtractHeld() : false;
+      const tickSprint = canControl ? inputManager.getSprintHeld() : false; // 新增: 获取冲刺输入
       
       // 本地预测子弹已在发送 input 时由 BulletTrackManager 生成（通过 shotId 对齐）
       
@@ -3232,11 +3415,8 @@ function renderLoop(): void {
         network.getConnectionState().lastServerTick < weaponRuntime.reloadingUntilTick;
       const serverTickEstimate = getEstimatedServerTick();
       const hasAmmoForFire = weaponDef?.weaponKind === 'melee' ? true : ammoInMag > 0;
-      const burstRemaining = weaponRuntime?.burstRemaining ?? 0;
       if (weaponRuntime && localNextFireTick !== null) {
-        if (burstRemaining > 0) {
-          localFireCredit = 0;
-        } else if (!isReloadingNow && hasAmmoForFire && serverTickEstimate >= localNextFireTick) {
+        if (!isReloadingNow && hasAmmoForFire && serverTickEstimate >= localNextFireTick) {
           localFireCredit = 1;
         } else if (isReloadingNow || !hasAmmoForFire) {
           localFireCredit = 0;
@@ -3364,6 +3544,7 @@ function renderLoop(): void {
         let spreadSeedToSend: number | undefined = undefined;
         let shotOriginX: number | undefined;
         let shotOriginY: number | undefined;
+        let burstShotsToSend: Array<{ shotId: number; originX: number; originY: number; spreadSeed: number }> | undefined = undefined;
         let meleeAttackToSend: boolean = false; // 修复: 近战攻击标志（近战武器不需要shotId，但需要发送shoot=true）
         const fireCooldownMs = getLocalFireCooldownMs();
         // 修复: 防止快速连点绕过冷却限制 - 使用严格的时间检查
@@ -3401,36 +3582,69 @@ function renderLoop(): void {
             }
           } else if (canShoot) {
             lastLocalFireMs = nowPerf2;
-            localShotIdCounter++;
-            shotIdToSend = localShotIdCounter;
-            spreadSeedToSend = Math.floor(Math.random() * 1000000);
-
-            if (localP && localP.weaponRuntime) {
-              shotOriginX = localP.x;
-              shotOriginY = localP.y;
-              bulletTracks.spawnLocalPrediction(
-                shotIdToSend,
-                localP.x,
-                localP.y,
-                tickAim,
-                getLocalBulletSpeed(),
-                localP.weaponRuntime.weaponTypeId,
-                spreadSeedToSend
-              );
-
-              if (localPredictedAmmo !== null) {
-                localPredictedAmmo = Math.max(0, localPredictedAmmo - 1);
-              }
-            } else {
-              shotOriginX = undefined;
-              shotOriginY = undefined;
-            }
+            
+            // 检查是否是三连发武器
             if (schedule && schedule.burstCount > 1) {
-              localBurstPendingShots = schedule.burstCount - 1;
-              localBurstIntervalMs = schedule.burstIntervalMs;
-              localBurstNextShotAtMs = nowPerf2 + schedule.burstIntervalMs;
-              localBurstWeaponTypeId = weaponRuntime?.weaponTypeId ?? null;
+              // 三连发模式：立即生成所有子弹信息
+              burstShotsToSend = [];
+              for (let i = 0; i < schedule.burstCount; i++) {
+                localShotIdCounter++;
+                const burstShotId = localShotIdCounter;
+                const burstSpreadSeed = Math.floor(Math.random() * 1000000);
+                
+                if (localP && localP.weaponRuntime) {
+                  burstShotsToSend.push({
+                    shotId: burstShotId,
+                    originX: localP.x,
+                    originY: localP.y,
+                    spreadSeed: burstSpreadSeed,
+                  });
+                  
+                  // 立即生成本地预测子弹
+                  bulletTracks.spawnLocalPrediction(
+                    burstShotId,
+                    localP.x,
+                    localP.y,
+                    tickAim,
+                    getLocalBulletSpeed(),
+                    localP.weaponRuntime.weaponTypeId,
+                    burstSpreadSeed
+                  );
+                }
+              }
+              
+              // 扣除弹药
+              if (localPredictedAmmo !== null) {
+                localPredictedAmmo = Math.max(0, localPredictedAmmo - schedule.burstCount);
+              }
+              
+              resetLocalBurst(); // 清空旧的连发状态
             } else {
+              // 单发模式
+              localShotIdCounter++;
+              shotIdToSend = localShotIdCounter;
+              spreadSeedToSend = Math.floor(Math.random() * 1000000);
+
+              if (localP && localP.weaponRuntime) {
+                shotOriginX = localP.x;
+                shotOriginY = localP.y;
+                bulletTracks.spawnLocalPrediction(
+                  shotIdToSend,
+                  localP.x,
+                  localP.y,
+                  tickAim,
+                  getLocalBulletSpeed(),
+                  localP.weaponRuntime.weaponTypeId,
+                  spreadSeedToSend
+                );
+
+                if (localPredictedAmmo !== null) {
+                  localPredictedAmmo = Math.max(0, localPredictedAmmo - 1);
+                }
+              } else {
+                shotOriginX = undefined;
+                shotOriginY = undefined;
+              }
               resetLocalBurst();
             }
           } else if (!hasAmmo && weaponDef?.weaponKind !== 'melee') {
@@ -3443,9 +3657,10 @@ function renderLoop(): void {
             }
             if (weaponDef) {
               const fireIntervalMs = weaponDef.fireIntervalMs ?? fireCooldownMs;
+              const burstShotCount = burstShotsToSend ? burstShotsToSend.length : 1;
               const burstExtraTicks =
                 schedule && schedule.burstCount > 1
-                  ? msToTicks((schedule.burstCount - 1) * schedule.burstIntervalMs)
+                  ? msToTicks((burstShotCount - 1) * schedule.burstIntervalMs)
                   : 0;
               const baseTick = Math.max(serverTickEstimate, localNextFireTick ?? serverTickEstimate);
               localNextFireTick = baseTick + burstExtraTicks + msToTicks(fireIntervalMs);
@@ -3456,54 +3671,15 @@ function renderLoop(): void {
 
         // 修复: 只在实际射击时发送 shoot=true（边缘触发，防止持续发送导致服务器时机偏差）
         // 注意: 近战武器不需要shotId，但需要通过meleeAttackToSend标志发送shoot=true
-        if (localBurstPendingShots > 0) {
-          const burstRuntime = localPlayer?.weaponRuntime;
-          const currentWeaponId = burstRuntime?.weaponTypeId ?? null;
-          const burstAmmo = localPredictedAmmo ?? burstRuntime?.ammoInMag ?? 0;
-          if (!burstRuntime || !weaponDef || weaponDef.weaponKind === 'melee' ||
-            currentWeaponId !== localBurstWeaponTypeId ||
-            isReloadingNow || burstAmmo <= 0 || localBurstIntervalMs <= 0) {
-            resetLocalBurst();
-          } else {
-            const localP = renderLocalPlayer ?? predictedLocalPlayer ?? localPlayer;
-            while (localBurstPendingShots > 0 && nowPerf2 >= localBurstNextShotAtMs) {
-              if (!localP || !localP.weaponRuntime) {
-                resetLocalBurst();
-                break;
-              }
-              if (localPredictedAmmo !== null && localPredictedAmmo <= 0) {
-                resetLocalBurst();
-                break;
-              }
-              bulletTracks.spawnLocalPrediction(
-                undefined,
-                localP.x,
-                localP.y,
-                tickAim,
-                getLocalBulletSpeed(),
-                localP.weaponRuntime.weaponTypeId,
-                Math.floor(Math.random() * 1000000)
-              );
-              if (localPredictedAmmo !== null) {
-                localPredictedAmmo = Math.max(0, localPredictedAmmo - 1);
-              }
-              localBurstPendingShots--;
-              if (localBurstPendingShots <= 0) {
-                resetLocalBurst();
-                break;
-              }
-              localBurstNextShotAtMs += localBurstIntervalMs;
-            }
-          }
-        }
+        // 移除旧的连发处理逻辑，现在由burstShotsToSend统一处理
+        resetLocalBurst();
 
-        const shootToSend = shotIdToSend !== undefined || meleeAttackToSend;
+        const shootToSend = shotIdToSend !== undefined || meleeAttackToSend || burstShotsToSend !== undefined;
 
-        // 检查是否有持续态输入（移动/撤离）
-        // 注意：射击改为边缘触发，不再持续发送（连发武器由 burstStreaming 处理）
+        // 检查是否有持续态输入（移动/撤离/冲刺）
+        // 注意：射击改为边缘触发，不再持续发送
         const keysAny = tickKeys.up || tickKeys.down || tickKeys.left || tickKeys.right;
-        const burstStreaming = isBurstWeapon && performance.now() < localBurstStreamUntil;
-        const mustStream = keysAny || burstStreaming || tickExtractHeld;
+        const mustStream = keysAny || tickExtractHeld || tickSprint; // 新增: 冲刺也需要持续发送
 
         // 检查变化（用于 idle 时的省包逻辑）
         const keysChanged = !lastSentKeys ||
@@ -3512,15 +3688,17 @@ function renderLoop(): void {
         const aimChanged = isNaN(lastSentAim) || Math.abs(tickAim - lastSentAim) > 0.01;
         const shootChanged = shootToSend !== (lastSentShoot ?? false);
         const extractHeldChanged = tickExtractHeld !== (lastSentExtractHeld ?? false);
+        const sprintChanged = tickSprint !== (lastSentSprint ?? false); // 新增: 检查冲刺状态变化
 
-        // 只要在"持续态"（移动/撤离），或有任何变化，或实际射击，就发送
-        const shouldSend = mustStream || keysChanged || aimChanged || shootChanged || extractHeldChanged || tickReload;
+        // 只要在"持续态"（移动/撤离/冲刺），或有任何变化，或实际射击，就发送
+        const shouldSend = mustStream || keysChanged || aimChanged || shootChanged || extractHeldChanged || sprintChanged || tickReload;
 
         if (shouldSend) {
           const nextSeq = inputSeq + 1;
-          const sent = network.sendInput(nextSeq, tickKeys, tickAim, shootToSend, tickReload, false, false, tickExtractHeld, shotIdToSend, shotOriginX, shotOriginY, spreadSeedToSend);
+          const sent = network.sendInput(nextSeq, tickKeys, tickAim, shootToSend, tickReload, false, false, tickExtractHeld, tickSprint, shotIdToSend, shotOriginX, shotOriginY, spreadSeedToSend, burstShotsToSend);
           shotOriginX = undefined;
           shotOriginY = undefined;
+          burstShotsToSend = undefined;
 
           if (sent) {
             inputSeq = nextSeq;
@@ -3548,6 +3726,7 @@ function renderLoop(): void {
             lastSentAim = tickAim;
             lastSentShoot = shootToSend;
             lastSentExtractHeld = tickExtractHeld;
+            lastSentSprint = tickSprint; // 新增: 更新上次发送的冲刺状态
             // P2-2: interact 已改为 TTL 脉冲，不再在这里处理
           } else {
             // 修复: 记录发送失败，便于诊断
@@ -3563,8 +3742,30 @@ function renderLoop(): void {
         const beforeX = predictedLocalPlayer.x;
         const beforeY = predictedLocalPlayer.y;
         
+        // 检查是否正在移动
+        const isMoving = commitKeys.up || commitKeys.down || commitKeys.left || commitKeys.right;
+        
+        // 更新耐力预测
+        const currentStamina = predictedLocalPlayer.stamina ?? 100;
+        const maxStamina = predictedLocalPlayer.maxStamina ?? 100;
+        const wantsSprint = tickSprint;
+        const isSprinting = canSprint(currentStamina, wantsSprint) && isMoving;
+        
+        // 计算新的耐力值
+        const newStamina = calculateStaminaChange(
+          currentStamina,
+          maxStamina,
+          isSprinting,
+          isMoving,
+          0.05 // 固定为 server tick 间隔
+        );
+        
+        // 如果耐力耗尽，停止冲刺
+        const finalIsSprinting = newStamina > 0 ? isSprinting : false;
+        
         // 计算速度倍数（基于局内装备 buff）
-        const speedMultiplier = getLocalSpeedMultiplier();
+        const equipmentSpeedMultiplier = getLocalSpeedMultiplier();
+        const sprintSpeedMultiplier = getSprintSpeedMultiplier(finalIsSprinting);
         
         const newPredictedPos = simulatePlayerMove(
           { x: beforeX, y: beforeY },
@@ -3573,7 +3774,8 @@ function renderLoop(): void {
           mapConfig.width,
           mapConfig.height,
           cachedObstacles,
-          speedMultiplier
+          equipmentSpeedMultiplier,
+          sprintSpeedMultiplier
         );
         
         // 检测撞墙/被阻挡：触发短时间"快速收敛"，不瞬移
@@ -3583,8 +3785,11 @@ function renderLoop(): void {
           fastConvergeUntil = performance.now() + FAST_CONVERGE_ON_BLOCK_MS;
         }
         
+        // 更新预测状态
         predictedLocalPlayer.x = newPredictedPos.x;
         predictedLocalPlayer.y = newPredictedPos.y;
+        predictedLocalPlayer.stamina = Math.round(newStamina);
+        predictedLocalPlayer.isSprinting = finalIsSprinting;
       }
       } // 结束 if (currentPhase === 'RAID')
     }

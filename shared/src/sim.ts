@@ -12,6 +12,13 @@ const PLAYER_SPEED = 200;
 // 玩家碰撞半径
 const PLAYER_RADIUS = 10;
 
+// 耐力系统常量
+const STAMINA_SPRINT_MULTIPLIER = 1.5; // 冲刺速度倍数
+const STAMINA_DRAIN_RATE = 20; // 冲刺时耐力消耗速率（点/秒）
+const STAMINA_REGEN_IDLE = 25; // 静止时耐力恢复速率（点/秒）
+const STAMINA_REGEN_MOVING = 10; // 移动时耐力恢复速率（点/秒）
+const STAMINA_MIN_TO_SPRINT = 1; // 开始冲刺所需的最小耐力
+
 /**
  * 模拟玩家移动（包含碰撞检测）
  * 
@@ -22,6 +29,7 @@ const PLAYER_RADIUS = 10;
  * @param mapHeight 地图高度
  * @param obstacles 障碍物列表
  * @param speedMultiplier 速度倍数（可选，用于装备 buff，默认为 1.0）
+ * @param sprintMultiplier 冲刺倍数（可选，用于耐力冲刺，默认为 1.0）
  * @returns 新位置 { x, y }
  */
 export function simulatePlayerMove(
@@ -31,7 +39,8 @@ export function simulatePlayerMove(
   mapWidth: number,
   mapHeight: number,
   obstacles: OBSTACLE_STATE[] = [],
-  speedMultiplier: number = 1.0
+  speedMultiplier: number = 1.0,
+  sprintMultiplier: number = 1.0
 ): { x: number; y: number } {
   // 计算移动向量
   let dx = 0;
@@ -49,8 +58,8 @@ export function simulatePlayerMove(
     dy = dy / len;
   }
   
-  // 计算移动距离（应用速度倍数）
-  const effectiveSpeed = PLAYER_SPEED * speedMultiplier;
+  // 计算移动距离（应用速度倍数和冲刺倍数）
+  const effectiveSpeed = PLAYER_SPEED * speedMultiplier * sprintMultiplier;
   const moveX = dx * effectiveSpeed * deltaTime;
   const moveY = dy * effectiveSpeed * deltaTime;
   
@@ -96,6 +105,59 @@ export function simulatePlayerMove(
   newY = clamp(newY, PLAYER_RADIUS, mapHeight - PLAYER_RADIUS);
   
   return { x: newX, y: newY };
+}
+
+/**
+ * 计算耐力变化
+ * 
+ * @param currentStamina 当前耐力值
+ * @param maxStamina 最大耐力值
+ * @param isSprinting 是否正在冲刺
+ * @param isMoving 是否正在移动
+ * @param deltaTime 时间间隔（秒）
+ * @returns 新的耐力值
+ */
+export function calculateStaminaChange(
+  currentStamina: number,
+  maxStamina: number,
+  isSprinting: boolean,
+  isMoving: boolean,
+  deltaTime: number
+): number {
+  let newStamina = currentStamina;
+  
+  if (isSprinting) {
+    // 冲刺时消耗耐力
+    newStamina -= STAMINA_DRAIN_RATE * deltaTime;
+  } else {
+    // 非冲刺时恢复耐力
+    const regenRate = isMoving ? STAMINA_REGEN_MOVING : STAMINA_REGEN_IDLE;
+    newStamina += regenRate * deltaTime;
+  }
+  
+  // 限制在 0 到 maxStamina 之间
+  return clamp(newStamina, 0, maxStamina);
+}
+
+/**
+ * 检查是否可以开始冲刺
+ * 
+ * @param currentStamina 当前耐力值
+ * @param wantsSprint 玩家是否想要冲刺
+ * @returns 是否可以冲刺
+ */
+export function canSprint(currentStamina: number, wantsSprint: boolean): boolean {
+  return wantsSprint && currentStamina >= STAMINA_MIN_TO_SPRINT;
+}
+
+/**
+ * 计算冲刺速度倍数
+ * 
+ * @param isSprinting 是否正在冲刺
+ * @returns 速度倍数
+ */
+export function getSprintSpeedMultiplier(isSprinting: boolean): number {
+  return isSprinting ? STAMINA_SPRINT_MULTIPLIER : 1.0;
 }
 
 

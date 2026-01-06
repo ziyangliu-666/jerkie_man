@@ -1,11 +1,14 @@
 import type { PLAYER_STATE, OBSTACLE_STATE, PlayerInventory, ItemInstance, WeaponRuntime } from '@jerkie-man/shared';
-import { simulatePlayerMove, getItemType, getWeaponDef, getArmorDef, getBagDef, PositionHistory } from '@jerkie-man/shared';
+import { simulatePlayerMove, getItemType, getWeaponDef, getArmorDef, getBagDef, PositionHistory, calculateStaminaChange, canSprint, getSprintSpeedMultiplier } from '@jerkie-man/shared';
 
 export class Player {
   public id: string;
   public x: number;
   public y: number;
   public hp: number;
+  public stamina: number; // 新增: 当前耐力值
+  public maxStamina: number; // 新增: 最大耐力值
+  public isSprinting: boolean = false; // 新增: 是否正在冲刺
   public status: 'ALIVE' | 'DEAD' | 'EXTRACTED';
   public lastInputSeq: number;
   public lastInputTick: number;
@@ -37,6 +40,8 @@ export class Player {
     this.x = x;
     this.y = y;
     this.hp = 100;
+    this.stamina = 100; // 新增: 初始化耐力为满值
+    this.maxStamina = 100; // 新增: 初始化最大耐力
     this.status = 'ALIVE';
     this.lastInputSeq = 0;
     this.lastInputTick = 0;
@@ -99,20 +104,45 @@ export class Player {
   // Day3: EXTRACTED 玩家也不能移动
   // Day4-2: 添加碰撞检测（世界边界 + obstacles）
   // 新增: 考虑装备 buff 对速度的影响
+  // 新增: 支持冲刺系统
   processInput(
     keys: { up: boolean; down: boolean; left: boolean; right: boolean },
     deltaTime: number, // 秒
     mapWidth: number,
     mapHeight: number,
-    obstacles: OBSTACLE_STATE[] = [] // Day4-2: 障碍物列表
+    obstacles: OBSTACLE_STATE[] = [], // Day4-2: 障碍物列表
+    wantsSprint: boolean = false // 新增: 是否想要冲刺
   ): void {
     // Day2/Day3: 死亡或已撤离的玩家不能移动
     if (this.status === 'DEAD' || this.status === 'EXTRACTED') {
       return;
     }
 
+    // 检查是否正在移动
+    const isMoving = keys.up || keys.down || keys.left || keys.right;
+
+    // 更新冲刺状态
+    this.isSprinting = canSprint(this.stamina, wantsSprint) && isMoving;
+
+    // 更新耐力
+    this.stamina = calculateStaminaChange(
+      this.stamina,
+      this.maxStamina,
+      this.isSprinting,
+      isMoving,
+      deltaTime
+    );
+
+    // 如果耐力耗尽，停止冲刺
+    if (this.stamina <= 0) {
+      this.isSprinting = false;
+    }
+
     // 计算速度倍数（基于装备 buff）
-    const speedMultiplier = this.getSpeedMultiplier();
+    const equipmentSpeedMultiplier = this.getSpeedMultiplier();
+    
+    // 计算冲刺速度倍数
+    const sprintSpeedMultiplier = getSprintSpeedMultiplier(this.isSprinting);
 
     // 修复: 使用 shared 的 simulatePlayerMove，确保 client/server 逻辑一致
     const newPos = simulatePlayerMove(
@@ -122,7 +152,8 @@ export class Player {
       mapWidth,
       mapHeight,
       obstacles,
-      speedMultiplier
+      equipmentSpeedMultiplier,
+      sprintSpeedMultiplier
     );
     
     // 更新位置
@@ -200,24 +231,26 @@ export class Player {
    * 从背包移除物品
    */
   removeItem(iid: string, qty: number): boolean {
-    const item = this.inventory.items.find(i => i.iid === iid);
-    if (!item || item.qty < qty) {
+    const itemIndex = this.inventory.items.findIndex(i => i.iid === iid);
+    if (itemIndex === -1) {
+      return false;
+    }
+    
+    const item = this.inventory.items[itemIndex];
+    if (item.qty < qty) {
       return false;
     }
     
     item.qty -= qty;
     if (item.qty <= 0) {
-      // 确保完全移除数量为0或负数的物品
-      const index = this.inventory.items.indexOf(item);
-      if (index !== -1) {
-        this.inventory.items.splice(index, 1);
-      }
+      // 立即移除数量为0或负数的物品，避免Zod验证错误
+      this.inventory.items.splice(itemIndex, 1);
     }
     return true;
   }
 
   /**
-   * 清理背包中数量为0或负数的物品
+   * 清理背包中的无效物品（数量为0或负数的物品）
    */
   cleanupInventory(): void {
     this.inventory.items = this.inventory.items.filter(item => item.qty > 0);
@@ -243,17 +276,27 @@ export class Player {
     const weaponRuntime = this.weaponRuntime
       ? { ...this.weaponRuntime, fireCredit: this.getFireCredit(currentTick) }
       : undefined;
+    
+    // 安全过滤：确保背包中没有数量为0或负数的物品（防止Zod验证错误）
+    const safeInventory = {
+      ...this.inventory,
+      items: this.inventory.items.filter(item => item.qty > 0)
+    };
+    
     return {
       id: this.id,
       x: this.x,
       y: this.y,
       hp: this.hp,
+      stamina: Math.round(this.stamina), // 新增: 耐力值（四舍五入到整数）
+      maxStamina: this.maxStamina, // 新增: 最大耐力值
+      isSprinting: this.isSprinting, // 新增: 冲刺状态
       status: this.status,
       lastInputSeq: this.lastInputSeq,
       lastInputTick: this.lastInputTick,
       lootCount: this.lootCount, // Day3: 包含战利品计数（已废弃，保留兼容）
       extractProgress: this.extractProgress, // 游戏化增强: 包含撤离进度
-      inventory: this.inventory, // 新增: 包含背包
+      inventory: safeInventory, // 新增: 包含背包（已过滤无效物品）
       name: this.name, // 新增: 包含玩家昵称
       weaponRuntime, // 新增: 包含武器运行时状态
       raidEquipment: {
@@ -272,7 +315,6 @@ export class Player {
     const wr = this.weaponRuntime;
     if (!wr) return 0;
     if (currentTick < wr.reloadingUntilTick) return 0;
-    if ((wr.burstRemaining ?? 0) > 0) return 0;
 
     let hasAmmo = wr.ammoInMag > 0;
     if (!hasAmmo) {
