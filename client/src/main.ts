@@ -3259,20 +3259,20 @@ function renderLoop(): void {
   const nowPerf = performance.now();
   const dtSec = Math.min(0.05, (nowPerf - lastRenderNow) / 1000); // cap 50ms 防止切后台后爆炸
   lastRenderNow = nowPerf;
-  
-  // 修复: 只在 RAID 阶段更新子弹轨迹
+
+  // 获取插值后的状态（必须在子弹更新之前，确保碰撞检测使用正确的玩家位置）
+  const state = network.getSnapshotBuffer().getInterpolatedState(180);
+
+  // 修复: 只在 RAID 阶段更新子弹轨迹，传入插值后的玩家位置
   if (currentPhase === 'RAID') {
-    bulletTracks.update(dtSec);
+    bulletTracks.update(dtSec, state.players);
   } else if (currentPhase === null) {
     // Phase 未接收时，仍然更新子弹轨迹（以防万一）
-    bulletTracks.update(dtSec);
+    bulletTracks.update(dtSec, state.players);
   }
-  
+
   // UI 覆盖层更新（衰减动画）
   uiOverlay.update(dtSec);
-  
-  // 获取插值后的状态
-  const state = network.getSnapshotBuffer().getInterpolatedState(180);
   
   // 修复: 客户端预测 - 本地玩家使用平滑渲染位置，其他玩家使用插值位置
   let playersToRender = state.players;

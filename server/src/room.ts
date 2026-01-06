@@ -1886,7 +1886,9 @@ export class Room {
     const bulletsToRemove = new Set<string>(); // Step4: 用Set代替O(n^2)
 
     // 延迟补偿配置
-    const SAFETY_MARGIN_MS = 50;
+    // 修复: 客户端插值延迟 120ms（getInterpolatedState(180) - 60ms buffer）
+    // 服务端必须回溯到"客户端看到的时间点"才能与视觉一致
+    const CLIENT_INTERPOLATION_DELAY_MS = 120;
     const MAX_REWIND_MS = 500;
     
     for (const bullet of this.bullets) {
@@ -2054,22 +2056,41 @@ export class Room {
         }
 
         // 延迟补偿: 根据射击者延迟回溯目标位置
+        // 修复: 回溯时间 = RTT/2 + 客户端插值延迟（120ms）
+        // 这样才能回溯到"客户端看到的时间点"
         const shooterLatency = playerLatencies.get(bullet.ownerId) ?? 0;
         const rewindTimeMs = Math.min(
-          Math.max(0, shooterLatency / 2 + SAFETY_MARGIN_MS),
+          Math.max(0, shooterLatency / 2 + CLIENT_INTERPOLATION_DELAY_MS),
           MAX_REWIND_MS
         );
 
-        const targetTimestamp = now - rewindTimeMs;
-        const historicalPos = player.positionHistory.getPositionAt(targetTimestamp);
+        // 改进: 多点采样检测，避免漏掉玩家在时间窗口内穿越子弹轨迹的情况
+        // 在回溯时间窗口内均匀采样 3 个点：当前位置、中间位置、回溯位置
+        const SAMPLE_COUNT = 3;
+        let rewindHit = false;
+        let hitPosition = { x: player.x, y: player.y }; // 记录命中位置（用于日志）
 
-        // 使用历史位置（如果可用，否则使用当前位置）
-        const targetX = historicalPos?.x ?? player.x;
-        const targetY = historicalPos?.y ?? player.y;
+        for (let i = 0; i < SAMPLE_COUNT; i++) {
+          const t = i / (SAMPLE_COUNT - 1); // 0, 0.5, 1
+          const sampleTime = now - rewindTimeMs * t;
+          const pos = player.positionHistory.getPositionAt(sampleTime);
+          const sampleX = pos?.x ?? player.x;
+          const sampleY = pos?.y ?? player.y;
+
+          if (segmentIntersectsCircle(oldX, oldY, bullet.x, bullet.y, sampleX, sampleY, PLAYER_HIT_RADIUS)) {
+            rewindHit = true;
+            hitPosition = { x: sampleX, y: sampleY };
+            break;
+          }
+        }
+
+        // 调试日志：记录未命中的情况（用于分析延迟补偿效果）
         const currentHit = segmentIntersectsCircle(oldX, oldY, bullet.x, bullet.y, player.x, player.y, PLAYER_HIT_RADIUS);
-        const rewindHit = segmentIntersectsCircle(oldX, oldY, bullet.x, bullet.y, targetX, targetY, PLAYER_HIT_RADIUS);
-
         if (!rewindHit && currentHit) {
+          const targetTimestamp = now - rewindTimeMs;
+          const historicalPos = player.positionHistory.getPositionAt(targetTimestamp);
+          const targetX = historicalPos?.x ?? player.x;
+          const targetY = historicalPos?.y ?? player.y;
           log('BULLET_REWIND_MISS', {
             room: this.id,
             bullet: bullet.id,
@@ -2171,7 +2192,7 @@ export class Room {
             this.pushEvent(`${playerId} killed by ${bullet.ownerId}`);
           }
           
-          this.applyExplosion(bullet, targetX, targetY);
+          this.applyExplosion(bullet, hitPosition.x, hitPosition.y);
           bulletsToRemove.add(bullet.id); // Step4: 用Set.add
           break; // 一颗子弹只能命中一个目标
         }

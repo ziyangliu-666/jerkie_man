@@ -134,7 +134,7 @@
         "qty": 1
       },
       {
-        "iid": "i1767708880546_ruy5l0f9s",
+        "iid": "i1767710218327_wcc1t19uf",
         "typeId": "armor_plate_item",
         "qty": 2
       },
@@ -144,127 +144,122 @@
         "qty": 1
       },
       {
-        "iid": "i1767708880546_6dvchf7py",
+        "iid": "i1767710218327_j8hdgzg5m",
         "typeId": "cloth",
         "qty": 30
       },
       {
-        "iid": "i1767708880546_fzq02jex6",
+        "iid": "i1767710218327_ob8uq1cq9",
         "typeId": "cloth",
         "qty": 9
       },
       {
-        "iid": "i1767708880546_fc6jktxrg",
+        "iid": "i1767710218327_bx8m4at6f",
         "typeId": "scrap_metal",
         "qty": 20
       },
       {
-        "iid": "i1767708880546_68gtcj98w",
+        "iid": "i1767710218327_rtrurp540",
         "typeId": "scrap_metal",
         "qty": 20
       },
       {
-        "iid": "i1767708880546_guggx2q68",
+        "iid": "i1767710218327_j5b77dw7e",
         "typeId": "scrap_metal",
         "qty": 3
       },
       {
-        "iid": "i1767708880546_2xopqw95b",
+        "iid": "i1767710218327_8bw823c45",
         "typeId": "ammo",
         "qty": 19
       },
       {
-        "iid": "i1767708880546_xykoziq4y",
+        "iid": "i1767710218327_a3tsep0ma",
         "typeId": "medkit",
         "qty": 5
       },
       {
-        "iid": "i1767708880546_9jxh9fvyi",
+        "iid": "i1767710218327_rkf06s11n",
         "typeId": "medkit",
         "qty": 5
       },
       {
-        "iid": "i1767708880546_05dy7r1si",
+        "iid": "i1767710218327_y8lm0jcb2",
         "typeId": "medkit",
         "qty": 4
       },
       {
-        "iid": "i1767708880546_q8es2dahw",
+        "iid": "i1767710218327_ebln4szc0",
         "typeId": "frag_grenade",
         "qty": 5
       },
       {
-        "iid": "i1767708880546_4lgfdfyof",
+        "iid": "i1767710218327_yi7quxf8y",
         "typeId": "medical_supplies",
         "qty": 5
       },
       {
-        "iid": "i1767708880546_im0lem5g2",
+        "iid": "i1767710218327_8far9vjsr",
         "typeId": "weapon_parts",
         "qty": 3
       },
       {
-        "iid": "i1767708880546_klxncl0r2",
+        "iid": "i1767710218327_gi2mbifjv",
         "typeId": "smoke_grenade",
         "qty": 3
       },
       {
-        "iid": "i1767708880546_b9kdhdflt",
+        "iid": "i1767710218327_8m0bn0en3",
         "typeId": "smoke_grenade",
         "qty": 1
       },
       {
-        "iid": "i1767708880546_4q6z5k7gx",
+        "iid": "i1767710218327_51moz7v3v",
         "typeId": "electronics",
         "qty": 5
       },
       {
-        "iid": "i1767708880546_f0vcfdxb0",
+        "iid": "i1767710218327_qcbrbpm3i",
         "typeId": "flash_grenade",
         "qty": 3
       },
       {
-        "iid": "i1767708880546_e4w7awl3o",
+        "iid": "i1767710218327_kkcklio3b",
         "typeId": "flash_grenade",
         "qty": 3
       },
       {
-        "iid": "i1767708880546_whurlb6s4",
+        "iid": "i1767710218327_4fe0fc3ai",
         "typeId": "flash_grenade",
         "qty": 3
       },
       {
-        "iid": "i1767708880546_3jh5211r5",
+        "iid": "i1767710218327_tn7x9dpc5",
         "typeId": "regeneration_serum",
         "qty": 2
       },
       {
-        "iid": "i1767708880546_bdx0iv1s0",
-        "typeId": "regeneration_serum",
+        "iid": "i1767710218327_r41epq65w",
+        "typeId": "combat_stim",
         "qty": 1
       },
       {
-        "iid": "i1767708880546_ba9u2x2uu",
-        "typeId": "combat_stim",
-        "qty": 2
-      },
-      {
-        "iid": "i1767708880546_et2nowr7j",
+        "iid": "i1767710218327_gezj54zpx",
         "typeId": "advanced_medkit",
         "qty": 2
       },
       {
-        "iid": "i1767708880546_xy43jzet1",
+        "iid": "i1767710218327_n63l8nf3k",
         "typeId": "advanced_circuit",
         "qty": 3
       },
       {
-        "iid": "i1767708880546_swfq3pfzm",
+        "iid": "i1767710218327_x9fzl32mi",
         "typeId": "advanced_circuit",
         "qty": 3
       },
       {
-        "iid": "i1767708880546_xrv8feyaw",
+        "iid": "i1767710218327_cqena45eh",
         "typeId": "advanced_circuit",
         "qty": 1
       },
@@ -277,7 +272,7 @@
     "prep": [],
     "bagCap": 12,
     "equipment": {
-      "weaponIid": "i1767700671385_6xyak7iuq",
+      "weaponIid": "i1767669209855_nxs4daruf",
       "bagIid": "i1767680517233_b0fay1utw",
       "armorIid": "i1767701869562_k4p295wnq"
     },

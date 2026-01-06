@@ -1325,6 +1325,8 @@ setInterval(() => {
     }
     
     // 按序处理每条 input（保证移动连续性）
+    // 修复: 在每次 processInput 后立即记录位置历史，提高采样率
+    const now = Date.now();
     for (let i = 0; i < slice.length; i++) {
       const raw = slice[i].input;
       const isLast = i === slice.length - 1;
@@ -1334,6 +1336,12 @@ setInterval(() => {
         interact: isLast ? aggregatedInteract : false,
         extract: isLast ? aggregatedExtract : false,
       });
+
+      // 修复: 每处理完一个输入后立即记录位置（提高采样率到约 80Hz）
+      const player = room.players.get(playerId);
+      if (player) {
+        player.positionHistory.add(room.tick, now + i, player.x, player.y);
+      }
     }
     
     // 清空队列

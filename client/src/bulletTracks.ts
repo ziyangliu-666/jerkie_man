@@ -491,8 +491,10 @@ export class BulletTrackManager {
 
   /**
    * 每帧更新子弹位置（纯本地计算）
+   * @param dtSec 时间增量（秒）
+   * @param interpolatedPlayers 插值后的玩家位置（用于碰撞检测，必须与渲染位置一致）
    */
-  update(dtSec: number): void {
+  update(dtSec: number, interpolatedPlayers?: PLAYER_STATE[]): void {
     const nowMs = Date.now();
     const toRemove: Array<{ id: string; reason: 'ttl' | 'boundary' | 'obstacle' | 'player' }> = [];
 
@@ -567,12 +569,14 @@ export class BulletTrackManager {
       }
 
       // 检查玩家碰撞（不检测自己发射的子弹打自己）
+      // 修复: 使用插值后的玩家位置（与渲染一致），而不是 snapshot 原始位置
       let hitPlayer = false;
       let hitTarget: PLAYER_STATE | null = null;
-      for (const player of this.players) {
+      const playersForCollision = interpolatedPlayers ?? this.players; // 优先使用插值位置
+      for (const player of playersForCollision) {
         if (player.id === bullet.ownerId) continue; // 不打自己
         if (player.status !== 'ALIVE') continue; // 只打活人
-        
+
         // 玩家碰撞半径约 16px（方块大小的一半）
         if (pointVsCircle(bullet.x, bullet.y, player.x, player.y, 16)) {
           hitPlayer = true;
