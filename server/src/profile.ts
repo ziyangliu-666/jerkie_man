@@ -455,6 +455,7 @@ export class ProfileManager {
     if (!profile) {
       profile = {
         displayName: this.DEFAULT_DISPLAY_NAME,
+        phase: 'NAME', // 新账号默认为 NAME 阶段
         money: this.DEFAULT_MONEY,
         stash: [],
         prep: [],
@@ -469,6 +470,17 @@ export class ProfileManager {
     if (profile.displayName === undefined) {
       profile.displayName = this.DEFAULT_DISPLAY_NAME;
       this.markDirty();
+    }
+    if ((profile as any).phase === undefined) {
+      // 旧账号：根据 displayName 推断 phase
+      (profile as any).phase = profile.displayName === null ? 'NAME' : 'HIDEOUT';
+      this.markDirty();
+    }
+    // ✅ 修复：如果 phase 是 RESULT（临时状态），刷新/重连时自动返回 HIDEOUT
+    if (profile.phase === 'RESULT') {
+      profile.phase = 'HIDEOUT';
+      this.markDirty();
+      log('PHASE_AUTO_RESET', { accountId, from: 'RESULT', to: 'HIDEOUT', reason: 'reconnect' });
     }
     if (profile.equipment === undefined) {
       profile.equipment = { ...this.DEFAULT_EQUIPMENT };
@@ -487,6 +499,25 @@ export class ProfileManager {
     // bagCap现在是动态计算的，但为了兼容，我们需要更新它
     this.recomputeBagCap(profile);
     return profile;
+  }
+
+  /**
+   * 更新玩家阶段状态
+   * @param accountId 账号 ID
+   * @param phase 新阶段
+   * @param onExitRaidCallback 可选回调，当玩家离开 RAID 时调用（用于清理映射）
+   */
+  updatePhase(accountId: string, phase: 'NAME' | 'HIDEOUT' | 'RAID' | 'RESULT', onExitRaidCallback?: () => void): void {
+    const profile = this.getProfileData(accountId);
+    const oldPhase = profile.phase;
+    profile.phase = phase;
+    this.markDirty();
+    log('PHASE_UPDATE', { accountId, oldPhase, newPhase: phase });
+
+    // ✅ 关键：当玩家离开 RAID 时，触发回调（用于清理 accountId → playerId 映射）
+    if (oldPhase === 'RAID' && phase !== 'RAID' && onExitRaidCallback) {
+      onExitRaidCallback();
+    }
   }
 
   /**
@@ -626,7 +657,12 @@ export class ProfileManager {
     qty: number
   ): { success: boolean; message?: string } {
     const profile = this.getProfileData(accountId);
-    
+
+    // ✅ 关键：只允许在 HIDEOUT 阶段修改整备区
+    if (profile.phase !== 'HIDEOUT') {
+      return { success: false, message: `Cannot modify prep area in phase: ${profile.phase}` };
+    }
+
     // 查找仓库中的物品
     const stashItemIndex = profile.stash.findIndex(s => s.iid === iid);
     if (stashItemIndex === -1) {
@@ -699,7 +735,12 @@ export class ProfileManager {
     qty: number
   ): { success: boolean; message?: string } {
     const profile = this.getProfileData(accountId);
-    
+
+    // ✅ 关键：只允许在 HIDEOUT 阶段修改整备区
+    if (profile.phase !== 'HIDEOUT') {
+      return { success: false, message: `Cannot modify prep area in phase: ${profile.phase}` };
+    }
+
     // 查找整备区中的物品
     const prepItemIndex = profile.prep.findIndex(p => p.iid === iid);
     if (prepItemIndex === -1) {

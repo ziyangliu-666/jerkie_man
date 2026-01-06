@@ -57,8 +57,11 @@ export type WeaponRuntime = {
   fireCredit?: number;         // ?????????????
 };
 
+export type Phase = 'NAME' | 'HIDEOUT' | 'RAID' | 'RESULT';
+
 export type PlayerProfile = {
   displayName: string | null; // 玩家昵称（null 表示未设置）
+  phase: Phase;            // 玩家当前阶段（持久化状态，确保刷新后状态一致）
   money: number;
   stash: ItemInstance[];   // out-of-raid storage
   prep: ItemInstance[];    // 整备区（准备带入局内的物品）

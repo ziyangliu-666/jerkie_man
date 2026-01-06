@@ -426,6 +426,7 @@ const msToTicks = (ms: number) => Math.ceil(ms / TICK_MS);
 2. **硬编码 50ms**：建议抽成 `TICK_MS` 常量
 3. **散布角度单位**：`spreadDeg` 是度，`applySpread()` 内部会转换为弧度
 4. **时间戳混用**：`spawnAt` 用 `Date.now()`（毫秒），但冷却用 tick，注意一致性
+5. **客户端子弹速度不一致**：客户端预测子弹时，必须从 `localPlayer.weaponRuntime.weaponTypeId` 获取武器定义，而不是从 `playerProfile.equipment.weaponIid` 获取。`playerProfile` 可能为 null 或状态过时，导致使用默认值 `DEFAULT_BULLET_SPEED = 800` 而不是实际的武器速度（如狙击步枪的 1600）
 
 ---
 
@@ -435,6 +436,7 @@ const msToTicks = (ms: number) => Math.ceil(ms / TICK_MS);
 - 装备系统：`rg "equip|switch|loadout" server/src -n`
 - 物品目录：`rg "ITEM_CATALOG" shared/src -n`
 - 武器定义：`rg "WEAPONS|getWeaponDef" shared/src -n`
+
 
 
 

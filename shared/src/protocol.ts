@@ -327,7 +327,7 @@ export const S2C_PROFILE_SCHEMA = z.object({
   type: z.literal('S2C_PROFILE'),
   accountId: z.string(), // 确认身份，便于 debug
   displayName: z.string().nullable(), // 新增: 玩家昵称（null 表示未设置）
-  phase: z.enum(['NAME', 'HIDEOUT', 'RAID', 'RESULT']).optional(), // 新增: 当前游戏阶段（可选，兼容旧客户端）
+  phase: z.enum(['NAME', 'HIDEOUT', 'RAID', 'RESULT']), // ✅ 关键：phase 现在是必需的（服务端持久化状态）
   money: z.number().int().nonnegative(),
   stash: z.array(ITEM_INSTANCE_SCHEMA),
   prep: z.array(ITEM_INSTANCE_SCHEMA).optional(), // 新增: 整备区（准备带入局内的物品）

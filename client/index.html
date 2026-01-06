@@ -190,6 +190,69 @@
       padding: 10px;
       pointer-events: auto;
       display: none;
+      opacity: 0;
+      transform: translateX(50px);
+      transition: opacity 0.5s ease, transform 0.5s ease;
+    }
+
+    #raidEquipment.visible {
+      opacity: 1;
+      transform: translateX(0);
+    }
+
+    /* 装备飞行动画元素 */
+    .equipment-fly-animation {
+      position: fixed;
+      z-index: 10000;
+      pointer-events: none;
+      background: linear-gradient(135deg, #2a2a2a 0%, #1f1f1f 100%);
+      border: 2px solid #0ff;
+      border-radius: 8px;
+      padding: 12px;
+      min-width: 180px;
+      box-shadow: 0 8px 24px rgba(0, 255, 255, 0.4), 0 0 40px rgba(0, 255, 255, 0.2);
+      opacity: 1;
+      transform-origin: center;
+      will-change: transform, opacity;
+    }
+
+    .equipment-fly-animation .slot-label {
+      color: #0ff;
+      font-size: 12px;
+      font-weight: bold;
+      margin-bottom: 8px;
+      text-transform: uppercase;
+    }
+
+    .equipment-fly-animation .slot-item-name {
+      color: #fff;
+      font-weight: bold;
+      font-size: 13px;
+      margin-bottom: 4px;
+    }
+
+    .equipment-fly-animation .slot-item-meta {
+      color: #aaa;
+      font-size: 11px;
+    }
+
+    @keyframes flyToRaid {
+      0% {
+        opacity: 1;
+        transform: scale(1) rotate(0deg);
+      }
+      50% {
+        opacity: 0.8;
+        transform: scale(0.9) rotate(5deg);
+      }
+      100% {
+        opacity: 0;
+        transform: scale(0.7) rotate(-5deg);
+      }
+    }
+
+    .equipment-fly-animation.flying {
+      animation: flyToRaid 0.8s cubic-bezier(0.4, 0, 0.2, 1) forwards;
     }
 
     #raidEquipment .raid-equipment-title {
@@ -305,6 +368,33 @@
       box-shadow: 0 6px 16px rgba(0, 0, 0, 0.45);
       pointer-events: none;
       display: none;
+      overflow: hidden;
+      --reload-progress: 0%;
+    }
+
+    /* 换弹进度填充层（从左到右） */
+    #weaponHud::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: var(--reload-progress);
+      height: 100%;
+      background: linear-gradient(
+        90deg,
+        rgba(63, 209, 184, 0.4) 0%,
+        rgba(109, 246, 195, 0.5) 100%
+      );
+      box-shadow: 0 0 20px rgba(109, 246, 195, 0.4);
+      transition: width 0.08s linear;
+      z-index: 0;
+      pointer-events: none;
+    }
+
+    /* 确保内容在背景之上 */
+    #weaponHud > * {
+      position: relative;
+      z-index: 1;
     }
 
     #weaponHud .weapon-hud-header {
@@ -356,22 +446,6 @@
       color: #c7c7c7;
     }
 
-    #weaponHud .weapon-hud-bar {
-      margin-top: 8px;
-      height: 4px;
-      border-radius: 2px;
-      background: rgba(255, 255, 255, 0.08);
-      overflow: hidden;
-      display: none;
-    }
-
-    #weaponHud .weapon-hud-bar-fill {
-      height: 100%;
-      width: 0%;
-      background: #3fd1b8;
-      box-shadow: 0 0 10px rgba(109, 246, 195, 0.6);
-      transition: width 0.08s linear;
-    }
 
     /* 底部快捷栏 HUD */
     #hotbarHud {
@@ -819,18 +893,44 @@
 
     /* 物品列表 */
     .item-list {
-      display: flex;
-      flex-direction: column;
-      gap: 8px;
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 12px;
     }
 
     .item-row {
-      background: #2a2a2a;
+      background: linear-gradient(135deg, #2a2a2a 0%, #1f1f1f 100%);
       border: 1px solid #444;
-      padding: 10px;
+      border-radius: 8px;
+      padding: 16px;
       display: flex;
-      justify-content: space-between;
-      align-items: center;
+      flex-direction: column;
+      gap: 12px;
+      transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+      position: relative;
+      overflow: hidden;
+      margin-bottom: 8px;
+    }
+
+    .item-row::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: -100%;
+      width: 100%;
+      height: 100%;
+      background: linear-gradient(90deg, transparent, rgba(0, 255, 255, 0.05), transparent);
+      transition: left 0.6s;
+    }
+
+    .item-row:hover::before {
+      left: 100%;
+    }
+
+    .item-row:hover {
+      border-color: #0ff;
+      box-shadow: 0 4px 16px rgba(0, 255, 255, 0.2);
+      transform: translateX(4px);
     }
 
     /* 商店容器样式 */
@@ -889,10 +989,31 @@
     }
 
     .shop-rarity-items {
-      display: flex;
-      flex-direction: column;
-      gap: 6px;
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 12px;
       margin-left: 16px;
+    }
+
+    /* 商店中的物品卡片使用更大的最小宽度 */
+    .shop-rarity-items-wide {
+      grid-template-columns: repeat(auto-fit, minmax(360px, 1fr)) !important;
+    }
+    
+    /* 整备区和仓库的卡片使用最窄宽度（320px），确保三个按钮在一排 */
+    #prepList.item-list {
+      grid-template-columns: repeat(auto-fill, minmax(320px, 320px));
+    }
+    
+    /* 仓库的卡片也使用最窄宽度，确保三个按钮在一排 */
+    #stashList .shop-rarity-items {
+      grid-template-columns: repeat(auto-fill, minmax(320px, 320px));
+    }
+    
+    /* 整备区和仓库的按钮容器禁用换行，确保按钮在一排 */
+    #prepList .item-actions,
+    #stashList .item-actions {
+      flex-wrap: nowrap;
     }
 
     /* 商店分类 Tab */
@@ -932,64 +1053,112 @@
 
     .item-info {
       flex: 1;
+      width: 100%;
     }
 
     .item-name {
       color: #fff;
       font-weight: bold;
-      margin-bottom: 4px;
+      margin-bottom: 6px;
+      font-size: 15px;
+      text-shadow: 0 0 8px rgba(0, 255, 255, 0.2);
     }
 
     .item-meta {
       color: #aaa;
       font-size: 12px;
+      line-height: 1.6;
     }
 
     .item-actions {
       display: flex;
-      gap: 8px;
+      gap: 10px;
+      justify-content: center;
+      flex-wrap: wrap;
+      padding-top: 12px;
+      border-top: 1px solid #333;
+      width: 100%;
     }
 
     .item-btn {
-      padding: 6px 12px;
-      background: #444;
+      padding: 8px 16px;
+      background: linear-gradient(135deg, #444 0%, #333 100%);
       border: 1px solid #666;
+      border-radius: 6px;
       color: #fff;
       cursor: pointer;
-      transition: all 0.3s ease;
+      transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
       font-family: 'Courier New', monospace;
       font-size: 12px;
-      transition: all 0.2s;
+      font-weight: 500;
+      position: relative;
+      overflow: hidden;
+      min-width: 80px;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+    }
+
+    .item-btn::before {
+      content: '';
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      width: 0;
+      height: 0;
+      border-radius: 50%;
+      background: rgba(255, 255, 255, 0.2);
+      transform: translate(-50%, -50%);
+      transition: width 0.4s, height 0.4s;
+    }
+
+    .item-btn:hover:not(.loading):not(.success):not(.error)::before {
+      width: 300px;
+      height: 300px;
     }
 
     .item-btn:hover:not(.loading):not(.success):not(.error) {
-      background: #555;
+      background: linear-gradient(135deg, #555 0%, #444 100%);
       border-color: #0ff;
-      transform: translateY(-1px);
-      box-shadow: 0 2px 8px rgba(0, 255, 255, 0.3);
+      transform: translateY(-2px) scale(1.05);
+      box-shadow: 0 4px 16px rgba(0, 255, 255, 0.4);
     }
 
     .item-btn:active:not(.loading):not(.success):not(.error) {
-      transform: translateY(0);
-      box-shadow: 0 1px 4px rgba(0, 255, 255, 0.2);
+      transform: translateY(0) scale(1);
+      box-shadow: 0 2px 8px rgba(0, 255, 255, 0.3);
     }
 
     .item-btn.primary {
-      background: #0ff;
+      background: linear-gradient(135deg, #0ff 0%, #08f 100%);
       color: #000;
       border-color: #0ff;
       font-weight: bold;
+      box-shadow: 0 4px 12px rgba(0, 255, 255, 0.3);
+    }
+
+    .item-btn.primary::after {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: -100%;
+      width: 100%;
+      height: 100%;
+      background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.3), transparent);
+      transition: left 0.5s;
+    }
+
+    .item-btn.primary:hover:not(.loading):not(.success):not(.error)::after {
+      left: 100%;
     }
 
     .item-btn.primary:hover:not(.loading):not(.success):not(.error) {
-      background: #0dd;
-      transform: translateY(-1px);
-      box-shadow: 0 2px 8px rgba(0, 255, 255, 0.4);
+      background: linear-gradient(135deg, #1ff 0%, #19f 100%);
+      transform: translateY(-2px) scale(1.05);
+      box-shadow: 0 6px 20px rgba(0, 255, 255, 0.5);
     }
 
     .item-btn.primary:active:not(.loading):not(.success):not(.error) {
-      transform: translateY(0);
-      box-shadow: 0 1px 4px rgba(0, 255, 255, 0.3);
+      transform: translateY(0) scale(1);
+      box-shadow: 0 2px 8px rgba(0, 255, 255, 0.3);
     }
 
     .primary-btn {
@@ -1064,29 +1233,69 @@
     /* 装备区样式 */
     .equipment-area {
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
       gap: 16px;
       margin-top: 20px;
     }
 
     .equipment-slot {
-      background: #2a2a2a;
+      background: linear-gradient(135deg, #2a2a2a 0%, #1f1f1f 100%);
       border: 2px solid #444;
-      border-radius: 4px;
-      padding: 16px;
-      min-height: 120px;
+      border-radius: 8px;
+      padding: 14px;
+      min-height: 140px;
+      position: relative;
+      overflow: hidden;
+      transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+    }
+
+    .equipment-slot::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: -100%;
+      width: 100%;
+      height: 100%;
+      background: linear-gradient(90deg, transparent, rgba(0, 255, 255, 0.1), transparent);
+      transition: left 0.5s;
+    }
+
+    .equipment-slot:hover::before {
+      left: 100%;
+    }
+
+    .equipment-slot:hover {
+      border-color: #0ff;
+      box-shadow: 0 8px 24px rgba(0, 255, 255, 0.3);
+      transform: translateY(-2px);
     }
 
     .slot-label {
       color: #0ff;
-      font-size: 14px;
+      font-size: 13px;
       font-weight: bold;
       margin-bottom: 12px;
       text-transform: uppercase;
+      letter-spacing: 1px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .slot-label::before {
+      content: '⚡';
+      font-size: 16px;
+      animation: pulse-glow 2s ease-in-out infinite;
+    }
+
+    @keyframes pulse-glow {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.7; transform: scale(1.1); }
     }
 
     .slot-content {
-      min-height: 60px;
+      min-height: 70px;
       pointer-events: none; /* 允许点击事件穿透到父元素 */
     }
     
@@ -1097,20 +1306,47 @@
     .slot-empty {
       color: #666;
       font-size: 12px;
-      padding: 20px;
+      padding: 20px 12px;
       text-align: center;
       font-style: italic;
+      border: 2px dashed #444;
+      border-radius: 6px;
+      background: rgba(0, 0, 0, 0.2);
     }
 
     .slot-item {
-      background: #1a1a1a;
+      background: linear-gradient(135deg, #1a1a1a 0%, #151515 100%);
       border: 1px solid #555;
-      border-radius: 4px;
+      border-radius: 6px;
       padding: 12px;
       display: flex;
-      justify-content: space-between;
-      align-items: center;
-      gap: 12px;
+      flex-direction: column;
+      gap: 10px;
+      position: relative;
+      overflow: hidden;
+      transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+
+    .slot-item::after {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 2px;
+      background: linear-gradient(90deg, transparent, #0ff, transparent);
+      transform: translateX(-100%);
+      transition: transform 0.5s;
+    }
+
+    .slot-item:hover::after {
+      transform: translateX(100%);
+    }
+
+    .slot-item:hover {
+      border-color: #0ff;
+      box-shadow: 0 4px 16px rgba(0, 255, 255, 0.2);
+      transform: translateY(-2px);
     }
 
     .slot-item-info {
@@ -1121,33 +1357,59 @@
       color: #fff;
       font-weight: bold;
       margin-bottom: 4px;
-      font-size: 14px;
+      font-size: 13px;
+      text-shadow: 0 0 8px rgba(0, 255, 255, 0.3);
     }
 
     .slot-item-meta {
       color: #aaa;
-      font-size: 12px;
+      font-size: 11px;
+      line-height: 1.4;
     }
 
     .slot-item-actions {
       display: flex;
       gap: 8px;
+      justify-content: center;
+      padding-top: 6px;
+      border-top: 1px solid #333;
     }
 
     /* 可点击的装备槽位 */
     .clickable-slot {
       cursor: pointer;
-      transition: all 0.2s;
+      transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
       position: relative;
+      perspective: 1000px;
     }
 
     .clickable-slot:hover {
       border-color: #0ff;
-      background: #333;
+      background: linear-gradient(135deg, #333 0%, #2a2a2a 100%);
+      transform: translateY(-4px);
+      box-shadow: 0 8px 24px rgba(0, 255, 255, 0.3);
     }
 
     .clickable-slot:active {
-      transform: scale(0.98);
+      transform: translateY(-2px) scale(0.98);
+    }
+
+    .clickable-slot .slot-label {
+      position: relative;
+    }
+
+    .clickable-slot .slot-label::after {
+      content: '👆';
+      margin-left: 8px;
+      font-size: 14px;
+      opacity: 0;
+      transform: translateX(-10px);
+      transition: all 0.3s;
+    }
+
+    .clickable-slot:hover .slot-label::after {
+      opacity: 1;
+      transform: translateX(0);
     }
 
     .slot-hint {
@@ -1159,25 +1421,32 @@
 
     /* 按钮点击反馈 */
     .item-btn.loading {
-      opacity: 0.6;
+      opacity: 0.7;
       cursor: wait;
       pointer-events: none;
       position: relative;
+      background: linear-gradient(135deg, #444 0%, #333 100%);
+      border-color: #0ff;
     }
 
     .item-btn.loading::after {
       content: '';
       position: absolute;
-      width: 16px;
-      height: 16px;
+      width: 18px;
+      height: 18px;
       top: 50%;
       left: 50%;
-      margin-left: -8px;
-      margin-top: -8px;
-      border: 2px solid #0ff;
-      border-top-color: transparent;
+      margin-left: -9px;
+      margin-top: -9px;
+      border: 3px solid rgba(0, 255, 255, 0.3);
+      border-top-color: #0ff;
       border-radius: 50%;
-      animation: spin 0.6s linear infinite;
+      animation: spin 0.8s linear infinite;
+    }
+
+    .item-btn.primary.loading::after {
+      border-color: rgba(0, 0, 0, 0.3);
+      border-top-color: #000;
     }
 
     @keyframes spin {
@@ -1185,19 +1454,19 @@
     }
 
     .item-btn.success {
-      background: #4CAF50 !important;
+      background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%) !important;
       border-color: #4CAF50 !important;
       color: #fff !important;
-      animation: successPulse 0.4s ease-out;
-      box-shadow: 0 0 12px rgba(76, 175, 80, 0.5);
+      animation: successPulse 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+      box-shadow: 0 0 20px rgba(76, 175, 80, 0.6);
     }
 
     .item-btn.error {
-      background: #f44 !important;
+      background: linear-gradient(135deg, #f44 0%, #d32f2f 100%) !important;
       border-color: #f44 !important;
       color: #fff !important;
-      animation: errorShake 0.4s ease-out;
-      box-shadow: 0 0 12px rgba(255, 68, 68, 0.5);
+      animation: errorShake 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+      box-shadow: 0 0 20px rgba(255, 68, 68, 0.6);
     }
 
     @keyframes successPulse {
@@ -1206,8 +1475,8 @@
         box-shadow: 0 0 0 0 rgba(76, 175, 80, 0.7);
       }
       50% {
-        transform: scale(1.05);
-        box-shadow: 0 0 0 8px rgba(76, 175, 80, 0);
+        transform: scale(1.08);
+        box-shadow: 0 0 0 12px rgba(76, 175, 80, 0);
       }
       100% {
         transform: scale(1);
@@ -1216,21 +1485,65 @@
     }
 
     @keyframes errorShake {
-      0%, 100% { transform: translateX(0); }
-      10%, 30%, 50%, 70%, 90% { transform: translateX(-4px); }
-      20%, 40%, 60%, 80% { transform: translateX(4px); }
+      0%, 100% { 
+        transform: translateX(0) rotate(0deg);
+      }
+      10%, 30%, 50%, 70%, 90% { 
+        transform: translateX(-6px) rotate(-2deg);
+      }
+      20%, 40%, 60%, 80% { 
+        transform: translateX(6px) rotate(2deg);
+      }
     }
 
     /* 装备槽位点击反馈 */
     .equipment-slot.clicking {
       border-color: #0ff;
-      background: #333;
-      animation: pulse 0.3s;
+      background: linear-gradient(135deg, #333 0%, #2a2a2a 100%);
+      animation: slotPulse 0.4s cubic-bezier(0.4, 0, 0.2, 1);
     }
 
-    @keyframes pulse {
-      0%, 100% { transform: scale(1); }
-      50% { transform: scale(1.02); }
+    @keyframes slotPulse {
+      0%, 100% { 
+        transform: scale(1);
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+      }
+      50% { 
+        transform: scale(1.03);
+        box-shadow: 0 8px 24px rgba(0, 255, 255, 0.5);
+      }
+    }
+
+    /* 物品行进入动画 */
+    .item-row {
+      animation: slideInFromRight 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+
+    @keyframes slideInFromRight {
+      from {
+        opacity: 0;
+        transform: translateX(30px);
+      }
+      to {
+        opacity: 1;
+        transform: translateX(0);
+      }
+    }
+
+    /* 装备槽位进入动画 */
+    .equipment-slot {
+      animation: fadeInUp 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+
+    @keyframes fadeInUp {
+      from {
+        opacity: 0;
+        transform: translateY(20px);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
     }
 
     /* 装备选择弹窗 */
@@ -1436,9 +1749,6 @@
           <span class="weapon-hud-ammo-sep">/</span>
           <span class="weapon-hud-ammo-max" id="weaponHudMag">0</span>
         </div>
-        <div class="weapon-hud-bar" id="weaponHudReload">
-          <div class="weapon-hud-bar-fill" id="weaponHudReloadFill"></div>
-        </div>
       </div>
 
       <!-- NAME Phase: 昵称输入 Modal -->
@@ -1507,8 +1817,7 @@
         <div id="hideoutContent">
           <!-- 左侧 Tab -->
           <div id="hideoutTabs">
-            <button class="tab-btn active" data-tab="equipment">装备</button>
-            <button class="tab-btn" data-tab="stash">仓库</button>
+            <button class="tab-btn active" data-tab="equipment">装备与仓库</button>
             <button class="tab-btn" data-tab="shop">商店</button>
           </div>
 
@@ -1541,24 +1850,24 @@
               <!-- 整备区（整合到装备tab） -->
               <div style="margin-top: 30px;">
                 <h3 style="color: #0ff; margin-bottom: 10px; font-size: 18px;">整备区</h3>
-                <p class="panel-desc">准备带入局内的物品（容量: <span id="prepCapacity">0/8</span>）</p>
+                <p class="panel-desc">准备带入局内的道具（容量: <span id="prepCapacity">0/8</span>）</p>
                 <div id="prepList" class="item-list"></div>
               </div>
-            </div>
-
-            <!-- 仓库 -->
-            <div id="hideoutStash" class="hideout-panel">
-              <h3>仓库</h3>
-              <p class="panel-desc">你的物品存储</p>
-              <!-- 仓库分类 Tab -->
-              <div id="stashTabs" class="shop-tabs">
-                <button class="shop-tab-btn active" data-stash-category="weapon">武器</button>
-                <button class="shop-tab-btn" data-stash-category="armor">防具</button>
-                <button class="shop-tab-btn" data-stash-category="bag">背包</button>
-                <button class="shop-tab-btn" data-stash-category="consumable">消耗品</button>
-                <button class="shop-tab-btn" data-stash-category="material">材料</button>
+              
+              <!-- 仓库（合并到装备tab） -->
+              <div style="margin-top: 40px;">
+                <h3 style="color: #0ff; margin-bottom: 10px; font-size: 18px;">仓库</h3>
+                <p class="panel-desc">你的物品存储</p>
+                <!-- 仓库分类 Tab -->
+                <div id="stashTabs" class="shop-tabs">
+                  <button class="shop-tab-btn active" data-stash-category="weapon">武器</button>
+                  <button class="shop-tab-btn" data-stash-category="armor">防具</button>
+                  <button class="shop-tab-btn" data-stash-category="bag">背包</button>
+                  <button class="shop-tab-btn" data-stash-category="consumable">消耗品</button>
+                  <button class="shop-tab-btn" data-stash-category="material">材料</button>
+                </div>
+                <div id="stashList" class="shop-container"></div>
               </div>
-              <div id="stashList" class="shop-container"></div>
             </div>
 
             <!-- 商店 -->

@@ -2248,9 +2248,22 @@ export class Room {
   handlePlayerDeath(playerId: string): { success: boolean; accountId?: string; moneyLost?: number } {
     const player = this.players.get(playerId);
     if (!player || player.status !== 'DEAD') return { success: false };
-    
+
     const accountId = this.playerToAccount.get(playerId) ?? playerId;
-    
+
+    // ✅ 关键：只有在玩家 phase 为 'RAID' 时才处理死亡（防止旧实体误触发）
+    const profile = this.profileManager.getProfileData(accountId);
+    if (profile.phase !== 'RAID') {
+      log('DEATH_SKIP_NOT_IN_RAID', {
+        room: this.id,
+        player: playerId,
+        accountId,
+        phase: profile.phase,
+        tick: this.tick,
+      });
+      return { success: false };
+    }
+
     // 计算损失的金钱（prep 物品的价值，但 prep 已经在进入战局时移到 inventory 了）
     // 所以这里计算的是 inventory 中物品的价值
     let moneyLost = 0;
@@ -2293,9 +2306,9 @@ export class Room {
         tick: this.tick,
       });
     }
-    
+
     // 修复: 清除装备引用，并从 stash/prep 中移除装备物品（因为它们已经掉落了）
-    const profile = this.profileManager.getProfileData(accountId);
+    // profile 已在上面定义，直接使用
     const equippedIids = new Set<string>();
     if (profile.equipment.weaponIid) {
       equippedIids.add(profile.equipment.weaponIid);
@@ -2342,13 +2355,27 @@ export class Room {
   handlePlayerExtract(playerId: string): { success: boolean; accountId?: string; loot?: ItemInstance[]; moneyGained?: number } {
     const player = this.players.get(playerId);
     if (!player || player.status !== 'EXTRACTED') return { success: false };
-    
-    const items = [...player.inventory.items];
+
     const accountId = this.playerToAccount.get(playerId) ?? playerId;
+
+    // ✅ 关键：只有在玩家 phase 为 'RAID' 时才处理撤离（防止旧实体误触发）
+    const profile = this.profileManager.getProfileData(accountId);
+    if (profile.phase !== 'RAID') {
+      log('EXTRACT_SKIP_NOT_IN_RAID', {
+        room: this.id,
+        player: playerId,
+        accountId,
+        phase: profile.phase,
+        tick: this.tick,
+      });
+      return { success: false };
+    }
+
+    const items = [...player.inventory.items];
     let moneyGained = 0;
-    
+
     if (items.length > 0) {
-      const profile = this.profileManager.getProfileData(accountId);
+      // profile 已在上面定义，直接使用
       const existingIids = new Set([
         ...profile.stash.map(item => item.iid),
         ...profile.prep.map(item => item.iid),
@@ -2396,9 +2423,9 @@ export class Room {
         tick: this.tick,
       });
     }
-    
+
     // 同步局内装备到档案（装备不占背包格）
-    const profile = this.profileManager.getProfileData(accountId);
+    // profile 已在上面定义，直接使用
     const equippedItems: ItemInstance[] = [];
     if (player.equippedWeaponItem) equippedItems.push(player.equippedWeaponItem);
     if (player.equippedBagItem) equippedItems.push(player.equippedBagItem);

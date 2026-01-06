@@ -289,12 +289,12 @@ let cachedItems: ITEM_STATE[] = [];
 // 新增: 缓存世界物品（从 WORLD_INIT 接收）
 let cachedWorldItems: WorldItem[] = [];
 // P1-1 新增: 玩家 Profile（从 S2C_PROFILE 接收）
-let playerProfile: (PlayerProfile & { accountId: string; phase?: 'NAME' | 'HIDEOUT' | 'RAID' | 'RESULT' }) | null = null;
+let playerProfile: (PlayerProfile & { accountId: string }) | null = null;
 // 新增: 本地 accountId（从 WELCOME 消息确认）
 let localAccountId: string | null = null;
 // 新增: 游戏阶段状态机
 type Phase = 'NAME' | 'HIDEOUT' | 'RAID' | 'RESULT';
-let currentPhase: Phase = 'NAME';
+let currentPhase: Phase | null = null; // 修复: 初始化为 null，等待服务端下发 phase
 
 // 新增: NAME Modal DOM 元素（延迟获取，确保 DOM 已加载）
 let nameModal: HTMLElement | null = null;
@@ -379,8 +379,6 @@ let weaponHudName: HTMLElement | null = null;
 let weaponHudAmmo: HTMLElement | null = null;
 let weaponHudMag: HTMLElement | null = null;
 let weaponHudState: HTMLElement | null = null;
-let weaponHudReload: HTMLElement | null = null;
-let weaponHudReloadFill: HTMLElement | null = null;
 let healthHud: HTMLElement | null = null;
 let healthHudValue: HTMLElement | null = null;
 let healthHudFill: HTMLElement | null = null;
@@ -445,8 +443,6 @@ function getWeaponHudElements(): void {
   if (!weaponHudAmmo) weaponHudAmmo = document.getElementById('weaponHudAmmo');
   if (!weaponHudMag) weaponHudMag = document.getElementById('weaponHudMag');
   if (!weaponHudState) weaponHudState = document.getElementById('weaponHudState');
-  if (!weaponHudReload) weaponHudReload = document.getElementById('weaponHudReload');
-  if (!weaponHudReloadFill) weaponHudReloadFill = document.getElementById('weaponHudReloadFill');
 }
 
 function getHealthHudElements(): void {
@@ -465,11 +461,17 @@ let lastRaidBagExpanded = false;
 
 // 新增: 更新 phase UI（显示/隐藏 modal，控制世界渲染等）
 function updatePhaseUI(): void {
+  // 修复: 如果 phase 还未从服务端接收，不做任何操作
+  if (currentPhase === null) {
+    console.log('[updatePhaseUI] Phase not yet received from server, skipping UI update');
+    return;
+  }
+
   // 确保 DOM 元素已获取
   getModalElements();
   getHideoutElements();
   getRaidElements();
-  
+
   // 修复: 如果关键 DOM 元素未准备好，延迟到 DOMContentLoaded
   if (!nameModal || !hideoutUI) {
     if (document.readyState === 'loading') {
@@ -477,9 +479,9 @@ function updatePhaseUI(): void {
     }
     return;
   }
-  
+
   console.log('[updatePhaseUI] currentPhase:', currentPhase, 'nameModal:', nameModal);
-  
+
   if (currentPhase === 'NAME') {
     // 显示 NAME modal
     if (nameModal) {
@@ -799,6 +801,11 @@ function updateHideoutUI(): void {
   
   // 更新装备槽位显示
   updateEquipmentSlots();
+  
+  // 更新仓库列表（如果装备tab是激活的）
+  if (hideoutEquipment && hideoutEquipment.classList.contains('active')) {
+    updateStashList();
+  }
 }
 
 // 新增: 在stash和prep中查找物品实例
@@ -1201,12 +1208,28 @@ function updateHotbarHud(localPlayer: PLAYER_STATE | null): void {
 function updateRaidEquipmentUI(localPlayer: PLAYER_STATE | null): void {
   getRaidElements();
 
+  const showRaidHUD = (): void => {
+    if (!raidEquipment) return;
+    raidEquipment.style.display = 'block';
+    raidEquipment.style.opacity = '1';
+    raidEquipment.style.pointerEvents = 'auto';
+    raidEquipment.classList.add('visible');
+  };
+
+  const hideRaidHUD = (): void => {
+    if (!raidEquipment) return;
+    raidEquipment.style.display = 'none';
+    raidEquipment.style.opacity = '0';
+    raidEquipment.style.pointerEvents = 'none';
+    raidEquipment.classList.remove('visible');
+  };
+
   if (!raidEquipment) {
     return;
   }
 
   if (currentPhase !== 'RAID') {
-    raidEquipment.style.display = 'none';
+    hideRaidHUD();
     if (raidBagList) {
       raidBagList.classList.remove('expanded');
       raidBagList.innerHTML = '';
@@ -1216,7 +1239,7 @@ function updateRaidEquipmentUI(localPlayer: PLAYER_STATE | null): void {
     return;
   }
 
-  raidEquipment.style.display = 'block';
+  showRaidHUD();
 
   if (!localPlayer || localPlayer.status !== 'ALIVE') {
     if (raidWeaponName) raidWeaponName.textContent = '未就绪';
@@ -1386,12 +1409,10 @@ function updateWeaponHud(localPlayer: PLAYER_STATE | null): void {
   if (weaponHudAmmo) weaponHudAmmo.textContent = magSize > 0 ? String(ammoInMag) : '-';
   if (weaponHudMag) weaponHudMag.textContent = magSize > 0 ? String(magSize) : '-';
   if (weaponHudState) weaponHudState.textContent = reloading ? '换弹中' : '';
-  if (weaponHudReload) {
-    weaponHudReload.style.display = reloading ? 'block' : 'none';
-  }
-  if (weaponHudReloadFill) {
-    weaponHudReloadFill.style.width = `${Math.floor(reloadProgress * 100)}%`;
-  }
+  
+  // 设置换弹进度（整个block从左到右填充）
+  const reloadProgressPercent = reloading ? `${Math.floor(reloadProgress * 100)}%` : '0%';
+  weaponHud.style.setProperty('--reload-progress', reloadProgressPercent);
 }
 
 function updateHealthHud(localPlayer: PLAYER_STATE | null): void {
@@ -1441,17 +1462,26 @@ function updateItemLists(): void {
   // 更新整备区列表（过滤已装备的物品）
     if (prepList && playerProfile.prep) {
       prepList.innerHTML = '';
-      const availablePrepItems = sortItemInstances(playerProfile.prep.filter(item => !isItemEquipped(item)));
+      const availablePrepItems = playerProfile.prep.filter(item => !isItemEquipped(item));
       if (availablePrepItems.length === 0) {
         prepList.innerHTML = '<div style="color: #666; padding: 20px; text-align: center;">整备区为空</div>';
       } else {
-      for (const item of availablePrepItems) {
-        const itemType = getItemType(item.typeId);
-        const row = createItemRow(item, itemType, 'prep');
-        prepList.appendChild(row);
+        // 合并相同typeId的物品
+        const mergedItems = mergeItemsByTypeId(availablePrepItems);
+        // 按typeId排序
+        mergedItems.sort((a, b) => a.typeId.localeCompare(b.typeId));
+        
+        for (const mergedItem of mergedItems) {
+          try {
+            const itemType = getItemType(mergedItem.typeId);
+            const row = createItemRow(mergedItem, itemType, 'prep');
+            prepList.appendChild(row);
+          } catch {
+            // 跳过无法获取类型的物品
+          }
+        }
       }
     }
-  }
   
   // 更新仓库列表（按分类和稀有度组织，过滤已装备的物品）
   updateStashList();
@@ -1520,7 +1550,7 @@ function updateShopList(): void {
         
         // 物品列表
         const rarityItemsDiv = document.createElement('div');
-        rarityItemsDiv.className = 'shop-rarity-items';
+        rarityItemsDiv.className = 'shop-rarity-items shop-rarity-items-wide';
         
         // 按名称排序
         rarityItems.sort((a, b) => a.name.localeCompare(b.name));
@@ -1632,15 +1662,25 @@ function updateStashList(): void {
     
     // 物品列表
     const rarityItemsDiv = document.createElement('div');
-    rarityItemsDiv.className = 'shop-rarity-items';
+    rarityItemsDiv.className = 'shop-rarity-items stash-rarity-items';
     
-    // 排序物品
-    const sortedItems = sortItemInstances(rarityItems);
-    
-    for (const item of sortedItems) {
+    // 合并相同typeId的物品
+    const mergedItems = mergeItemsByTypeId(rarityItems);
+    // 按typeId排序
+    mergedItems.sort((a, b) => {
       try {
-        const itemType = getItemType(item.typeId);
-        const row = createItemRow(item, itemType, 'stash');
+        const aType = getItemType(a.typeId);
+        const bType = getItemType(b.typeId);
+        return aType.name.localeCompare(bType.name);
+      } catch {
+        return a.typeId.localeCompare(b.typeId);
+      }
+    });
+    
+    for (const mergedItem of mergedItems) {
+      try {
+        const itemType = getItemType(mergedItem.typeId);
+        const row = createItemRow(mergedItem, itemType, 'stash');
         rarityItemsDiv.appendChild(row);
       } catch {
         // 跳过无法获取类型的物品
@@ -1797,29 +1837,61 @@ function getItemSlot(typeId: string): 'weapon' | 'bag' | 'armor' | null {
   }
 }
 
+// 新增: 合并相同物品的辅助类型
+interface MergedItem {
+  typeId: string;
+  totalQty: number;
+  items: ItemInstance[]; // 所有相同typeId的物品实例
+}
+
+// 新增: 合并相同typeId的物品
+function mergeItemsByTypeId(items: ItemInstance[]): MergedItem[] {
+  const mergedMap = new Map<string, MergedItem>();
+  
+  for (const item of items) {
+    const existing = mergedMap.get(item.typeId);
+    if (existing) {
+      existing.totalQty += item.qty;
+      existing.items.push(item);
+    } else {
+      mergedMap.set(item.typeId, {
+        typeId: item.typeId,
+        totalQty: item.qty,
+        items: [item]
+      });
+    }
+  }
+  
+  return Array.from(mergedMap.values());
+}
+
 // 新增: 创建物品行（用于整备区和仓库）
-function createItemRow(item: ItemInstance, itemType: any, source: 'prep' | 'stash'): HTMLElement {
+function createItemRow(mergedItem: MergedItem, itemType: any, source: 'prep' | 'stash'): HTMLElement {
   const row = document.createElement('div');
   row.className = 'item-row';
   
   const info = document.createElement('div');
   info.className = 'item-info';
   
-  // stackMax==1的物品：qty固定显示1
-  const displayQty = itemType.stackMax <= 1 ? 1 : item.qty;
+  // 数量显示在名称中
+  const displayName = mergedItem.totalQty > 1 
+    ? `${itemType.name} x${mergedItem.totalQty}`
+    : itemType.name;
+  
   info.innerHTML = `
-    <div class="item-name">${itemType.name}</div>
-    <div class="item-meta">数量: ${displayQty} | 价值: ${itemType.value} | 稀有度: ${rarityToZh(itemType.rarity)}</div>
+    <div class="item-name">${displayName}</div>
+    <div class="item-meta">价值: ${itemType.value}</div>
   `;
   
   const actions = document.createElement('div');
   actions.className = 'item-actions';
   
   // 检查是否是装备（武器/背包/防具）
-  const slot = getItemSlot(item.typeId);
+  const slot = getItemSlot(mergedItem.typeId);
   
-  // stackMax==1的物品：移动/卖出时qty固定为1
-  const moveQty = itemType.stackMax <= 1 ? 1 : item.qty;
+  // 使用第一个物品实例进行操作（如果需要操作多个，可以后续扩展）
+  const firstItem = mergedItem.items[0];
+  const isStackable = itemType.stackMax > 1;
   
   if (source === 'prep') {
     // 整备区：可以移回仓库，如果是装备可以装备
@@ -1828,8 +1900,10 @@ function createItemRow(item: ItemInstance, itemType: any, source: 'prep' | 'stas
     moveBtn.textContent = '移回仓库';
     moveBtn.onclick = () => {
       moveBtn.classList.add('loading');
-      network.sendMovePrepToStash(item.iid, moveQty);
-      hud.addEvent(`移回仓库: ${itemType.name}${itemType.stackMax <= 1 ? '' : ` x${moveQty}`}`);
+      // 每次只移动1个
+      const moveQty = 1;
+      network.sendMovePrepToStash(firstItem.iid, moveQty);
+      hud.addEvent(`移回仓库: ${itemType.name} x1`);
       setTimeout(() => {
         moveBtn.classList.remove('loading');
         addButtonFeedback(moveBtn, true);
@@ -1843,7 +1917,7 @@ function createItemRow(item: ItemInstance, itemType: any, source: 'prep' | 'stas
       equipBtn.textContent = slot === 'weapon' ? '装备为武器' : slot === 'bag' ? '装备为背包' : '装备为防具';
       equipBtn.onclick = () => {
         equipBtn.classList.add('loading');
-        network.sendEquip(slot, item.iid);
+        network.sendEquip(slot, firstItem.iid);
         hud.addEvent(`装备: ${itemType.name}`);
         setTimeout(() => {
           equipBtn.classList.remove('loading');
@@ -1859,8 +1933,10 @@ function createItemRow(item: ItemInstance, itemType: any, source: 'prep' | 'stas
     moveBtn.textContent = '移到整备';
     moveBtn.onclick = () => {
       moveBtn.classList.add('loading');
-      network.sendMoveStashToPrep(item.iid, moveQty);
-      hud.addEvent(`移到整备: ${itemType.name}${itemType.stackMax <= 1 ? '' : ` x${moveQty}`}`);
+      // 每次只移动1个
+      const moveQty = 1;
+      network.sendMoveStashToPrep(firstItem.iid, moveQty);
+      hud.addEvent(`移到整备: ${itemType.name} x1`);
       setTimeout(() => {
         moveBtn.classList.remove('loading');
         addButtonFeedback(moveBtn, true);
@@ -1873,8 +1949,10 @@ function createItemRow(item: ItemInstance, itemType: any, source: 'prep' | 'stas
     sellBtn.textContent = '卖出';
     sellBtn.onclick = () => {
       sellBtn.classList.add('loading');
-      network.sendSellFromStash(item.iid, moveQty);
-      hud.addEvent(`卖出: ${itemType.name}${itemType.stackMax <= 1 ? '' : ` x${moveQty}`}`);
+      // 每次只卖出1个
+      const sellQty = 1;
+      network.sendSellFromStash(firstItem.iid, sellQty);
+      hud.addEvent(`卖出: ${itemType.name} x1`);
       setTimeout(() => {
         sellBtn.classList.remove('loading');
         addButtonFeedback(sellBtn, true, '已卖出');
@@ -1888,7 +1966,7 @@ function createItemRow(item: ItemInstance, itemType: any, source: 'prep' | 'stas
       equipBtn.textContent = slot === 'weapon' ? '装备为武器' : slot === 'bag' ? '装备为背包' : '装备为防具';
       equipBtn.onclick = () => {
         equipBtn.classList.add('loading');
-        network.sendEquip(slot, item.iid);
+        network.sendEquip(slot, firstItem.iid);
         hud.addEvent(`装备: ${itemType.name}`);
         setTimeout(() => {
           equipBtn.classList.remove('loading');
@@ -1913,7 +1991,7 @@ function createShopRow(itemType: any): HTMLElement {
   info.className = 'item-info';
   info.innerHTML = `
     <div class="item-name">${itemType.name}</div>
-    <div class="item-meta">价格: ${itemType.value} | 稀有度: ${rarityToZh(itemType.rarity)} | 堆叠上限: ${itemType.stackMax}</div>
+    <div class="item-meta">价格: ${itemType.value} | 堆叠上限: ${itemType.stackMax}</div>
   `;
   
   const actions = document.createElement('div');
@@ -1987,6 +2065,9 @@ function createShopRow(itemType: any): HTMLElement {
 function initHideoutUI(): void {
   getHideoutElements();
   
+  // 初始化仓库 tabs（在装备tab中，所以一开始就初始化）
+  initStashTabs();
+  
   // Tab 切换
   if (hideoutTabs) {
     hideoutTabs.addEventListener('click', (e) => {
@@ -2003,15 +2084,10 @@ function initHideoutUI(): void {
         
         // 更新面板显示
         if (hideoutEquipment) hideoutEquipment.classList.remove('active');
-        if (hideoutStash) hideoutStash.classList.remove('active');
         if (hideoutShop) hideoutShop.classList.remove('active');
         
         if (tabName === 'equipment' && hideoutEquipment) {
           hideoutEquipment.classList.add('active');
-        } else if (tabName === 'stash' && hideoutStash) {
-          hideoutStash.classList.add('active');
-          // 初始化仓库 tabs（如果还没初始化）
-          initStashTabs();
           // 更新仓库列表
           updateStashList();
         } else if (tabName === 'shop' && hideoutShop) {
@@ -2083,6 +2159,8 @@ function initHideoutUI(): void {
     enterRaidBtn.onclick = () => {
       if (network.sendEnterRaid()) {
         hud.addEvent('正在进入战局...');
+        // 播放装备飞行动画
+        animateEquipmentToRaid();
       } else {
         hud.addEvent('进入战局失败：连接未就绪');
       }
@@ -2117,6 +2195,159 @@ function initHideoutUI(): void {
       }
     });
   }
+}
+
+// 新增: 装备飞向raid HUD的动画
+function animateEquipmentToRaid(): void {
+  getHideoutElements();
+  getRaidElements();
+  
+  if (!equipmentWeapon || !equipmentBag || !equipmentArmor || !raidEquipment) {
+    return;
+  }
+  
+  // 获取装备槽位的父元素（整个槽位卡片）
+  const weaponSlot = equipmentWeapon.closest('.equipment-slot') as HTMLElement;
+  const bagSlot = equipmentBag.closest('.equipment-slot') as HTMLElement;
+  const armorSlot = equipmentArmor.closest('.equipment-slot') as HTMLElement;
+  
+  if (!weaponSlot || !bagSlot || !armorSlot) {
+    return;
+  }
+  
+  // 先确保raid HUD已更新内容（如果phase已经是RAID）
+  if (currentPhase === 'RAID' && raidLocalPlayer) {
+    updateRaidEquipmentUI(raidLocalPlayer);
+  }
+  
+  // 先显示raid HUD（但设为透明），确保能获取位置
+  // 注意：不使用visibility: hidden，因为那会导致内容无法获取位置
+  raidEquipment.style.display = 'block';
+  raidEquipment.style.opacity = '0';
+  raidEquipment.style.pointerEvents = 'none'; // 禁用交互，但不隐藏内容
+  
+  // 延迟一帧确保raid HUD已渲染
+  requestAnimationFrame(() => {
+    if (!raidEquipment) return;
+    
+    // 再次确保内容已更新
+    if (currentPhase === 'RAID' && raidLocalPlayer) {
+      updateRaidEquipmentUI(raidLocalPlayer);
+    }
+    
+    // 获取raid HUD中对应的目标位置
+    const raidWeaponSlot = raidEquipment.querySelector('.raid-slot:nth-child(2)') as HTMLElement; // 第一个是标题，第二个是武器
+    const raidBagSlot = raidEquipment.querySelector('.raid-slot:nth-child(3)') as HTMLElement;
+    const raidArmorSlot = raidEquipment.querySelector('.raid-slot:nth-child(4)') as HTMLElement;
+    
+    if (!raidWeaponSlot || !raidBagSlot || !raidArmorSlot) {
+      // 如果获取不到，直接显示raid HUD
+      raidEquipment.style.opacity = '1';
+      raidEquipment.style.pointerEvents = 'auto';
+      raidEquipment.classList.add('visible');
+      return;
+    }
+    
+    // 获取装备信息
+    const slots = [
+      { source: weaponSlot, target: raidWeaponSlot, label: '武器', slot: equipmentWeapon },
+      { source: bagSlot, target: raidBagSlot, label: '背包', slot: equipmentBag },
+      { source: armorSlot, target: raidArmorSlot, label: '防具', slot: equipmentArmor }
+    ];
+    let completed = 0;
+    const total = slots.length;
+    
+    slots.forEach(({ source, target, label, slot: slotEl }, index) => {
+      if (!slotEl) {
+        completed++;
+        if (completed === total) {
+          finishAnimation();
+        }
+        return;
+      }
+      
+      // 检查是否有装备
+      const slotItem = slotEl.querySelector('.slot-item');
+      if (!slotItem) {
+        completed++;
+        if (completed === total) {
+          finishAnimation();
+        }
+        return;
+      }
+      
+      // 获取位置
+      const sourceRect = source.getBoundingClientRect();
+      const targetRect = target.getBoundingClientRect();
+      
+      // 创建动画元素
+      const flyEl = document.createElement('div');
+      flyEl.className = 'equipment-fly-animation';
+      
+      // 复制内容
+      const slotLabel = slotEl.querySelector('.slot-label')?.textContent || label;
+      const slotItemName = slotItem.querySelector('.slot-item-name')?.textContent || '';
+      const slotItemMeta = slotItem.querySelector('.slot-item-meta')?.textContent || '';
+      
+      flyEl.innerHTML = `
+        <div class="slot-label">${slotLabel}</div>
+        <div class="slot-item-name">${slotItemName}</div>
+        <div class="slot-item-meta">${slotItemMeta}</div>
+      `;
+      
+      // 设置初始位置和大小
+      flyEl.style.left = `${sourceRect.left}px`;
+      flyEl.style.top = `${sourceRect.top}px`;
+      flyEl.style.width = `${sourceRect.width}px`;
+      flyEl.style.height = `${sourceRect.height}px`;
+      
+      document.body.appendChild(flyEl);
+      
+      // 延迟启动动画（错开时间）
+      setTimeout(() => {
+        // 计算目标位置（目标元素的中心点）
+        const targetX = targetRect.left + targetRect.width / 2 - sourceRect.width / 2;
+        const targetY = targetRect.top + targetRect.height / 2 - sourceRect.height / 2;
+        
+        // 计算距离和角度
+        const deltaX = targetX - sourceRect.left;
+        const deltaY = targetY - sourceRect.top;
+        const distance = Math.sqrt(deltaX * deltaX + deltaY * deltaY);
+        const angle = Math.atan2(deltaY, deltaX) * (180 / Math.PI);
+        
+        // 添加发光效果
+        flyEl.style.boxShadow = `0 8px 32px rgba(0, 255, 255, 0.6), 0 0 60px rgba(0, 255, 255, 0.3)`;
+        
+        // 设置动画
+        flyEl.style.transition = 'all 0.9s cubic-bezier(0.25, 0.46, 0.45, 0.94)';
+        flyEl.style.transform = `translate(${deltaX}px, ${deltaY}px) scale(0.6) rotate(${angle * 0.15}deg)`;
+        flyEl.style.opacity = '0';
+        flyEl.style.filter = 'blur(2px)';
+        
+        // 动画完成后移除元素
+        setTimeout(() => {
+          flyEl.remove();
+          completed++;
+          if (completed === total) {
+            finishAnimation();
+          }
+        }, 900);
+      }, index * 120); // 每个动画错开120ms
+    });
+    
+    function finishAnimation() {
+      // 显示raid HUD
+      if (raidEquipment) {
+        raidEquipment.style.opacity = '1';
+        raidEquipment.style.pointerEvents = 'auto';
+        raidEquipment.classList.add('visible');
+        // 确保内容已更新（如果还没有的话）
+        if (currentPhase === 'RAID' && raidLocalPlayer) {
+          updateRaidEquipmentUI(raidLocalPlayer);
+        }
+      }
+    }
+  });
 }
 
 // 新增: 初始化 RAID UI
@@ -2615,14 +2846,9 @@ const network = new Network(getWebSocketUrl(), 'local', {
       ...profile,
       prep: profile.prep ?? [],
     };
-    // 更新 phase（如果服务端提供了 phase）
+    // ✅ 更新 phase（服务端总是提供 phase，使用服务端的权威状态）
     const oldPhase = currentPhase;
-    if (profile.phase) {
-      currentPhase = profile.phase;
-    } else {
-      // 兼容旧服务端：根据 displayName 推断 phase
-      currentPhase = profile.displayName === null ? 'NAME' : 'HIDEOUT';
-    }
+    currentPhase = profile.phase;
     console.log(`[onProfile] Phase changed: ${oldPhase} -> ${currentPhase}, displayName=${profile.displayName}, money=${profile.money}, stash=${profile.stash.length} items, prep=${profile.prep?.length ?? 0} items, bagCap=${profile.bagCap}`);
     
     // 更新 UI（显示/隐藏 NAME modal / Hideout UI）
@@ -2761,6 +2987,9 @@ function renderLoop(): void {
   // 修复: 只在 RAID 阶段更新子弹轨迹
   if (currentPhase === 'RAID') {
     bulletTracks.update(dtSec);
+  } else if (currentPhase === null) {
+    // Phase 未接收时，仍然更新子弹轨迹（以防万一）
+    bulletTracks.update(dtSec);
   }
   
   // UI 覆盖层更新（衰减动画）
@@ -2823,8 +3052,8 @@ function renderLoop(): void {
     }
   }
 
-      // 新增: 只在 RAID phase 时渲染世界
-      if (currentPhase === 'RAID') {
+      // 新增: 在 RAID phase 或 phase 未接收时渲染世界
+      if (currentPhase === 'RAID' || currentPhase === null) {
         // Day4-1: 使用 server 下发的 mapConfig（优先），fallback 到本地配置
         const extractZone = serverMapConfig?.extractZone ?? fallbackMapConfig.extractZone;
         
@@ -3593,5 +3822,4 @@ rafId = requestAnimationFrame(renderLoop);
 
 console.log('Client initialized');
 console.log('Type __admin.help() in console for admin commands');
-
 

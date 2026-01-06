@@ -66,7 +66,7 @@ export interface NetworkCallbacks {
   onWelcome?: (playerId: string, accountId: string, roomInfo?: RoomInfo) => void;
   onEvent?: (message: string) => void; // 游戏化增强: 服务端事件回调
   onWorldInit?: (world: S2C_WORLD_INIT) => void; // 新增: 世界初始化回调（使用协议类型）
-  onProfile?: (profile: { accountId: string; displayName: string | null; phase?: 'NAME' | 'HIDEOUT' | 'RAID' | 'RESULT'; money: number; stash: any[]; prep?: any[]; bagCap: number; equipment: { weaponIid: string | null; bagIid: string | null; armorIid: string | null } }) => void; // P1-1: Profile 回调
+  onProfile?: (profile: { accountId: string; displayName: string | null; phase: 'NAME' | 'HIDEOUT' | 'RAID' | 'RESULT'; money: number; stash: any[]; prep?: any[]; bagCap: number; equipment: { weaponIid: string | null; bagIid: string | null; armorIid: string | null } }) => void; // P1-1: Profile 回调
   onRaidResult?: (result: S2C_RAID_RESULT) => void; // 新增: 战局结果回调
   onCombatEvent?: (event: { kind: 'DRY_FIRE' | 'HIT' | 'DAMAGE_TAKEN'; direction?: number }) => void; // 新增: 战斗事件回调
   onMeleeSwing?: (event: S2C_MELEE_SWING) => void; // 新增: 近战挥击事件回调
