@@ -51,7 +51,7 @@ Defines the safe extraction area (rectangular).
 Defines a solid obstacle (wall, building, etc.).
 
 ```
-@obstacle x=300 y=300 w=200 h=150
+@obstacle x=300 y=300 w=200 h=150 type=wall
 ```
 
 **Parameters:**
@@ -59,6 +59,13 @@ Defines a solid obstacle (wall, building, etc.).
 - `y` (required): Y coordinate of top-left corner
 - `w` (required): Width of the obstacle
 - `h` (required): Height of the obstacle
+- `type` (optional): Obstacle type (default: `wall`)
+
+**Obstacle Types:**
+- `wall`: Stone wall - indestructible, blocks everything
+- `crate`: Wooden crate - destructible (HP: 100), blocks everything
+- `bush`: Bush - passable, provides concealment
+- `water`: Water - impassable, bullets pass through
 
 ### @spawn - Spawn Point
 Defines a player spawn location.

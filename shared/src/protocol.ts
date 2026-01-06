@@ -280,11 +280,9 @@ export const LOOT_BAG_SCHEMA = z.object({
 // Day4-2: 障碍物类型定义
 export const OBSTACLE_TYPE = {
   WALL: 'wall',           // 石墙：不可穿过，子弹不可穿过，不可破坏
-  WOODEN_WALL: 'wooden_wall', // 木墙：不可穿过，子弹可穿透（削弱），可破坏
   CRATE: 'crate',         // 木箱：不可穿过，子弹不可穿过，可破坏
   BUSH: 'bush',           // 草丛：可穿过，子弹可穿过，提供视野遮挡
   WATER: 'water',         // 水域：不可穿过，子弹可穿过
-  COVER: 'cover',         // 半身掩体：不可穿过，部分遮挡
 } as const;
 
 export type ObstacleType = typeof OBSTACLE_TYPE[keyof typeof OBSTACLE_TYPE];
@@ -311,7 +309,7 @@ export const S2C_SNAPSHOT_SCHEMA = z.object({
   items: z.array(ITEM_STATE_SCHEMA).optional(), // 保留兼容
   worldItems: z.array(WORLD_ITEM_SCHEMA).optional(), // 新增: 世界物品列表（MVP 全量，未来做 delta）
   lootBags: z.array(LOOT_BAG_SCHEMA).optional(), // 新增: 掉落包列表
-  // 修复: obstacles 已移至 S2C_WORLD_INIT，不再在 snapshot 中发送（减少带宽）
+  obstacles: z.array(OBSTACLE_STATE_SCHEMA).optional(), // 新增: 障碍物列表（可破坏，需要同步）
 });
 
 export const S2C_ERROR_SCHEMA = z.object({

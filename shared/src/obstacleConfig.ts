@@ -45,21 +45,6 @@ export const OBSTACLE_CONFIGS: Record<ObstacleType, ObstacleConfig> = {
     alpha: 1.0,
   },
 
-  [OBSTACLE_TYPE.WOODEN_WALL]: {
-    type: OBSTACLE_TYPE.WOODEN_WALL,
-    name: '木墙',
-    description: '木质墙壁，子弹可穿透但会削弱，可被破坏',
-    blocksPlayer: true,
-    blocksBullet: false,
-    bulletPenetration: 0.4, // 穿透时伤害削弱60%
-    blocksVision: true,
-    providesConcealment: false,
-    destructible: true,
-    maxHp: 200,
-    color: '#8B4513',
-    alpha: 1.0,
-  },
-
   [OBSTACLE_TYPE.CRATE]: {
     type: OBSTACLE_TYPE.CRATE,
     name: '木箱',
@@ -104,21 +89,6 @@ export const OBSTACLE_CONFIGS: Record<ObstacleType, ObstacleConfig> = {
     color: '#4169E1',
     alpha: 0.7,
   },
-
-  [OBSTACLE_TYPE.COVER]: {
-    type: OBSTACLE_TYPE.COVER,
-    name: '半身掩体',
-    description: '低矮掩体，可提供部分保护',
-    blocksPlayer: true,
-    blocksBullet: false,
-    bulletPenetration: 0.7, // 30%削弱
-    blocksVision: false,
-    providesConcealment: false,
-    destructible: true,
-    maxHp: 150,
-    color: '#696969',
-    alpha: 1.0,
-  },
 };
 
 /**
@@ -127,7 +97,7 @@ export const OBSTACLE_CONFIGS: Record<ObstacleType, ObstacleConfig> = {
 export function getObstacleConfig(type: ObstacleType): ObstacleConfig {
   const config = OBSTACLE_CONFIGS[type];
   if (!config) {
-    console.warn(`Unknown obstacle type: ${type}, using WALL as fallback`);
+    // 静默回退到 WALL（兼容旧地图数据）
     return OBSTACLE_CONFIGS[OBSTACLE_TYPE.WALL];
   }
   return config;

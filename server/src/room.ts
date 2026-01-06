@@ -264,12 +264,10 @@ export class Room {
 
     // 障碍物类型权重（根据游戏平衡调整）
     const obstacleTypes = [
-      { type: 'wall', weight: 15, minSize: 60, maxSize: 150 },      // 石墙：少量，大型
-      { type: 'wooden_wall', weight: 20, minSize: 40, maxSize: 100 }, // 木墙：适中
-      { type: 'crate', weight: 25, minSize: 30, maxSize: 60 },      // 木箱：较多，小型
-      { type: 'bush', weight: 30, minSize: 50, maxSize: 120 },      // 草丛：很多，中型
-      { type: 'water', weight: 8, minSize: 80, maxSize: 200 },      // 水域：少量，大型
-      { type: 'cover', weight: 20, minSize: 40, maxSize: 80 },      // 掩体：适中
+      { type: 'wall', weight: 20, minSize: 60, maxSize: 150 },      // 石墙：适中，大型
+      { type: 'crate', weight: 30, minSize: 30, maxSize: 60 },      // 木箱：常见，小型
+      { type: 'bush', weight: 35, minSize: 50, maxSize: 120 },      // 草丛：很多，中型
+      { type: 'water', weight: 10, minSize: 80, maxSize: 200 },     // 水域：少量，大型
     ];
 
     const totalWeight = obstacleTypes.reduce((sum, t) => sum + t.weight, 0);
@@ -362,12 +360,6 @@ export class Room {
         if (selectedType.type === 'crate') {
           obstacle.hp = 100;
           obstacle.maxHp = 100;
-        } else if (selectedType.type === 'wooden_wall') {
-          obstacle.hp = 200;
-          obstacle.maxHp = 200;
-        } else if (selectedType.type === 'cover') {
-          obstacle.hp = 150;
-          obstacle.maxHp = 150;
         }
 
         this.obstacles.push(obstacle);
@@ -1573,6 +1565,54 @@ export class Room {
             
             // 推送命中事件
             this.pushEvent(`${playerId} melee hit ${hitTarget.id} (-${weaponDef.damage})`);
+          } else {
+            // 没有命中玩家，检查是否命中可破坏障碍物
+            for (const obstacle of this.obstacles) {
+              const obsType = (obstacle as any).type || 'wall';
+              if (!isObstacleDestructible(obsType)) continue;
+              
+              // 检查障碍物是否在攻击范围内
+              const obsCenterX = obstacle.x + obstacle.w / 2;
+              const obsCenterY = obstacle.y + obstacle.h / 2;
+              const dx = obsCenterX - player.x;
+              const dy = obsCenterY - player.y;
+              const dist = Math.sqrt(dx * dx + dy * dy);
+              
+              if (dist <= meleeRange + Math.max(obstacle.w, obstacle.h) / 2) {
+                // 检查是否在瞄准方向
+                const aimDir = Math.atan2(dy, dx);
+                const aimDiff = Math.abs(aimDir - input.aim);
+                const normalizedDiff = Math.min(aimDiff, Math.PI * 2 - aimDiff);
+                
+                if (normalizedDiff < meleeArcRad / 2) {
+                  // 命中障碍物！造成伤害
+                  const obstacleHp = (obstacle as any).hp ?? Infinity;
+                  const damage = weaponDef.damage;
+                  const newHp = Math.max(0, obstacleHp - damage);
+                  (obstacle as any).hp = newHp;
+                  
+                  log('MELEE_OBSTACLE_DAMAGE', {
+                    room: this.id,
+                    playerId,
+                    obstacleId: (obstacle as any).id ?? 'unknown',
+                    obstacleType: obsType,
+                    damage,
+                    oldHp: obstacleHp,
+                    newHp,
+                    destroyed: newHp <= 0 ? 'true' : 'false',
+                    tick: this.tick,
+                  });
+                  
+                  // 给攻击者发送命中事件
+                  if (!this.combatEvents.has(playerId)) {
+                    this.combatEvents.set(playerId, []);
+                  }
+                  this.combatEvents.get(playerId)!.push({ kind: 'HIT' });
+                  
+                  break; // 只命中一个障碍物
+                }
+              }
+            }
           }
 
           // 更新冷却
@@ -2141,78 +2181,23 @@ export class Room {
     // Step4: 移除所有标记的子弹（用Set.has，O(1)查找）
     this.bullets = this.bullets.filter(b => !bulletsToRemove.has(b.id));
 
-    // 清理被摧毁的障碍物（HP <= 0）并生成战利品
+    // 清理被摧毁的障碍物（HP <= 0）
     const beforeCount = this.obstacles.length;
-    const destroyedObstacles: any[] = [];
     this.obstacles = this.obstacles.filter((obs: any) => {
       const obsType = obs.type || 'wall';
       if (!isObstacleDestructible(obsType)) return true; // 不可破坏的永久保留
       const isDestroyed = (obs.hp ?? Infinity) <= 0;
       if (isDestroyed) {
-        destroyedObstacles.push(obs);
+        log('OBSTACLE_DESTROYED', {
+          room: this.id,
+          obstacleId: obs.id ?? 'unknown',
+          obstacleType: obsType,
+          tick: this.tick,
+        });
       }
       return !isDestroyed; // 可破坏的检查HP
     });
     const destroyedCount = beforeCount - this.obstacles.length;
-
-    // 为被摧毁的木箱生成战利品
-    for (const obs of destroyedObstacles) {
-      const obsType = obs.type || 'wall';
-      if (obsType === 'crate') {
-        // 生成随机战利品
-        const rng = createRng(this.seed + this.tick + (obs.id || '').length);
-        const lootItems: ItemInstance[] = [];
-
-        // 30% 概率掉落医疗包
-        if (rng() < 0.3) {
-          lootItems.push({
-            iid: `loot_${this.seed}_${this.lootBagIdCounter}_med`,
-            typeId: 'medkit',
-            qty: 1,
-          });
-        }
-
-        // 20% 概率掉落手雷
-        if (rng() < 0.2) {
-          lootItems.push({
-            iid: `loot_${this.seed}_${this.lootBagIdCounter}_gren`,
-            typeId: 'grenade',
-            qty: 1,
-          });
-        }
-
-        // 40% 概率掉落弹药
-        if (rng() < 0.4) {
-          lootItems.push({
-            iid: `loot_${this.seed}_${this.lootBagIdCounter}_ammo`,
-            typeId: 'ammo',
-            qty: 30 + Math.floor(rng() * 30), // 30-60发
-          });
-        }
-
-        // 如果有战利品，创建 lootBag
-        if (lootItems.length > 0) {
-          const bid = `bag_crate_${this.seed}_${this.lootBagIdCounter++}_${Date.now().toString(36)}`;
-          const lootX = obs.x + obs.w / 2;
-          const lootY = obs.y + obs.h / 2;
-          this.lootBags.set(bid, {
-            bid,
-            x: lootX,
-            y: lootY,
-            items: lootItems,
-          });
-
-          log('CRATE_LOOT_DROP', {
-            room: this.id,
-            obstacleId: obs.id ?? 'unknown',
-            bid,
-            position: `(${lootX.toFixed(1)},${lootY.toFixed(1)})`,
-            itemCount: lootItems.length,
-            tick: this.tick,
-          });
-        }
-      }
-    }
 
     if (destroyedCount > 0) {
       log('OBSTACLES_DESTROYED', {
@@ -2226,7 +2211,6 @@ export class Room {
 
   // 获取当前状态快照
   // Step4: 导出时只包含BULLET_STATE字段，不包含spawnAt，保证协议兼容
-  // 修复: obstacles 已移至 WORLD_INIT，不再在 snapshot 中发送
   // 新增: 只包含 inWorld=true 的玩家（未来会实现 inWorld 字段，现在先包含所有玩家）
   getSnapshot(): {
     players: PLAYER_STATE[];
@@ -2234,6 +2218,7 @@ export class Room {
     items: ITEM_STATE[];
     worldItems: WorldItem[];
     lootBags: LootBag[];
+    obstacles: OBSTACLE_STATE[]; // 新增: 障碍物（可破坏，需要同步）
   } {
     // 新增: 只包含 ALIVE/DEAD 状态的玩家（EXTRACTED 玩家不再出现在 snapshot 中）
     // 未来会改为检查 inWorld 字段
@@ -2262,7 +2247,7 @@ export class Room {
       items: [], // P2-1: 旧 items 系统已停用，返回空数组
       worldItems: this.getWorldItems(), // 新增: 世界物品
       lootBags: this.getLootBags(), // 新增: 掉落包
-      // 修复: obstacles 已移至 S2C_WORLD_INIT，不再在 snapshot 中发送（减少带宽）
+      obstacles: this.getObstacles(), // 新增: 障碍物（可破坏，需要同步）
     };
   }
   

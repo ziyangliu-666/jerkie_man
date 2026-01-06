@@ -750,10 +750,6 @@ export class Renderer {
         fillColor = '#666666';
         strokeColor = '#333333';
         break;
-      case 'wooden_wall':
-        fillColor = '#8B4513';
-        strokeColor = '#5D2906';
-        break;
       case 'crate':
         fillColor = '#A0522D';
         strokeColor = '#6B3410';
@@ -770,22 +766,6 @@ export class Renderer {
         strokeColor = '#1E3A8A';
         pattern = 'water';
         break;
-      case 'cover':
-        fillColor = '#696969';
-        strokeColor = '#404040';
-        break;
-    }
-
-    // 如果有HP，根据损坏程度调整颜色
-    if (obsHp !== undefined && obsMaxHp !== undefined && obsMaxHp > 0) {
-      const hpRatio = obsHp / obsMaxHp;
-      if (hpRatio < 0.3) {
-        // 严重损坏，变暗
-        fillColor = this.darkenColor(fillColor, 0.5);
-      } else if (hpRatio < 0.6) {
-        // 中度损坏，略微变暗
-        fillColor = this.darkenColor(fillColor, 0.8);
-      }
     }
 
     this.ctx.save();
@@ -824,6 +804,86 @@ export class Renderer {
     this.ctx.lineWidth = 2;
     this.ctx.strokeRect(screenX, screenY, obstacle.w, obstacle.h);
 
+    // 绘制破损裂痕（仅对可破坏物体）- 辐射状裂痕
+    if (obsHp !== undefined && obsMaxHp !== undefined && obsMaxHp > 0) {
+      const hpRatio = obsHp / obsMaxHp;
+      
+      // 根据破损程度决定裂痕数量
+      let crackCount = 0;
+      if (hpRatio < 0.3) {
+        crackCount = 8; // 严重损坏：8条裂痕
+      } else if (hpRatio < 0.6) {
+        crackCount = 5; // 中度损坏：5条裂痕
+      } else if (hpRatio < 0.9) {
+        crackCount = 3; // 轻微损坏：3条裂痕
+      }
+
+      if (crackCount > 0) {
+        // 使用障碍物ID作为随机种子
+        const seedStr = obstacle.id || `${obstacle.x}_${obstacle.y}`;
+        const seed = seedStr.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
+        
+        // 裂痕中心点（略微偏移，但保持在木箱内）
+        const centerX = screenX + obstacle.w / 2 + ((seed % 20) - 10);
+        const centerY = screenY + obstacle.h / 2 + (((seed * 7) % 20) - 10);
+        
+        this.ctx.save();
+        // 裁剪区域，确保裂痕不超出木箱边界
+        this.ctx.beginPath();
+        this.ctx.rect(screenX, screenY, obstacle.w, obstacle.h);
+        this.ctx.clip();
+        
+        this.ctx.strokeStyle = 'rgba(0, 0, 0, 0.5)';
+        this.ctx.lineWidth = 1.5;
+        this.ctx.lineCap = 'round';
+        
+        for (let i = 0; i < crackCount; i++) {
+          // 计算裂痕方向（辐射状）
+          const angle = ((seed + i * 137) % 360) * Math.PI / 180; // 黄金角度分布
+          
+          // 计算射线与木箱边界的交点（延伸到边缘）
+          const dx = Math.cos(angle);
+          const dy = Math.sin(angle);
+          
+          // 计算到达四条边的距离
+          let tMax = Infinity;
+          
+          // 右边界
+          if (dx > 0) {
+            const t = (screenX + obstacle.w - centerX) / dx;
+            tMax = Math.min(tMax, t);
+          }
+          // 左边界
+          if (dx < 0) {
+            const t = (screenX - centerX) / dx;
+            tMax = Math.min(tMax, t);
+          }
+          // 下边界
+          if (dy > 0) {
+            const t = (screenY + obstacle.h - centerY) / dy;
+            tMax = Math.min(tMax, t);
+          }
+          // 上边界
+          if (dy < 0) {
+            const t = (screenY - centerY) / dy;
+            tMax = Math.min(tMax, t);
+          }
+          
+          // 裂痕终点（到达边缘）
+          const endX = centerX + dx * tMax;
+          const endY = centerY + dy * tMax;
+          
+          // 绘制主裂痕
+          this.ctx.beginPath();
+          this.ctx.moveTo(centerX, centerY);
+          this.ctx.lineTo(endX, endY);
+          this.ctx.stroke();
+        }
+        
+        this.ctx.restore();
+      }
+    }
+
     this.ctx.restore();
   }
 
@@ -835,6 +895,45 @@ export class Renderer {
     const g = Math.floor(parseInt(hex.substr(2, 2), 16) * factor);
     const b = Math.floor(parseInt(hex.substr(4, 2), 16) * factor);
     return `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`;
+  }
+
+  // 绘制隐蔽状态提示（当玩家在草丛中时）
+  private drawConcealmentIndicator(playerX: number, playerY: number): void {
+    // 将玩家世界坐标转换为屏幕坐标
+    const screenX = Math.round(playerX - this.camX);
+    const screenY = Math.round(playerY - this.camY);
+    
+    // 在玩家下方显示小型"隐蔽"提示
+    const textY = screenY + 25; // 玩家下方25px
+    
+    this.ctx.save();
+    
+    // 绘制小型提示
+    const text = '🌿 隐蔽';
+    this.ctx.font = 'bold 12px monospace';
+    this.ctx.textAlign = 'center';
+    this.ctx.textBaseline = 'middle';
+    
+    const metrics = this.ctx.measureText(text);
+    const textWidth = metrics.width;
+    const padding = 6;
+    const boxWidth = textWidth + padding * 2;
+    const boxHeight = 20;
+    
+    // 绘制背景框（深绿色半透明）
+    this.ctx.fillStyle = 'rgba(34, 139, 34, 0.8)';
+    this.ctx.fillRect(screenX - boxWidth / 2, textY - boxHeight / 2, boxWidth, boxHeight);
+    
+    // 绘制边框（亮绿色）
+    this.ctx.strokeStyle = '#90EE90';
+    this.ctx.lineWidth = 1.5;
+    this.ctx.strokeRect(screenX - boxWidth / 2, textY - boxHeight / 2, boxWidth, boxHeight);
+    
+    // 绘制文字
+    this.ctx.fillStyle = '#FFFFFF';
+    this.ctx.fillText(text, screenX, textY);
+    
+    this.ctx.restore();
   }
 
   // 渲染所有玩家和子弹
@@ -856,7 +955,8 @@ export class Renderer {
     explosionEffects: Array<{ x: number; y: number; radius: number; age: number }> = [],
     currentServerTick?: number, // 新增: 当前服务器 tick（用于计算换弹进度）
     nearbyInteractable?: { type: 'worldItem' | 'lootBag' | 'extractZone'; name: string; distance: number } | null, // 新增: 附近可交互目标
-    localPlayer?: PLAYER_STATE | null // 新增: 本地玩家（用于计算相对位置）
+    localPlayer?: PLAYER_STATE | null, // 新增: 本地玩家（用于计算相对位置）
+    isLocalPlayerInBush: boolean = false // 新增: 本地玩家是否在草丛内
   ): void {
     this.clear();
 
@@ -914,7 +1014,7 @@ export class Renderer {
 
     // 绘制所有玩家（使用屏幕坐标）
     // 新增: 草丛视野遮挡 - 只有在草丛内的玩家才能看到其他在草丛内的玩家
-    const localInBush = localPlayer?.inBush ?? false;
+    const localInBush = isLocalPlayerInBush; // 使用客户端本地计算的值
 
     for (const player of players) {
       const isLocal = player.id === localPlayerId;
@@ -1024,6 +1124,11 @@ export class Renderer {
           20
         );
       }
+    }
+
+    // 绘制隐蔽状态提示（当本地玩家在草丛中时）
+    if (isLocalPlayerInBush && localPlayer) {
+      this.drawConcealmentIndicator(localPlayer.x, localPlayer.y);
     }
   }
 

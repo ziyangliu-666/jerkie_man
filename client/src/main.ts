@@ -3238,7 +3238,14 @@ function renderLoop(): void {
         // Day4-1: 使用 server 下发的 mapConfig（优先），fallback 到本地配置
         const extractZone = serverMapConfig?.extractZone ?? fallbackMapConfig.extractZone;
         
-        // 修复: 使用缓存的静态世界数据（obstacles 从 WORLD_INIT 接收，不再从 snapshot 获取）
+        // 修复: 使用 snapshot 中的障碍物（可破坏，需要实时同步）
+        // 如果 snapshot 中没有 obstacles，则使用缓存的（向后兼容）
+        const obstaclesForRender = state.obstacles ?? cachedObstacles;
+        
+        // 调试：检查障碍物数量
+        if (obstaclesForRender.length === 0 && cachedObstacles.length > 0) {
+          console.warn('[Render] No obstacles in snapshot, using cached:', cachedObstacles.length);
+        }
         // items 仍然从 snapshot 获取（因为会被拾取，是动态的）
         // 新增: 渲染 worldItems 和 lootBags
         // 使用 BulletTrackManager 的 dead-reckoning + 本地预测渲染
@@ -3274,6 +3281,27 @@ function renderLoop(): void {
         const renderLocalPlayerForTooltip = renderLocalPlayer ?? predictedLocalPlayer ?? 
           (localPlayerId ? state.players.find((p) => p.id === localPlayerId) : null);
         
+        // 本地计算玩家是否在草丛内（用于显示隐蔽提示）
+        let isLocalPlayerInBush = false;
+        if (renderLocalPlayerForTooltip && renderLocalPlayerForTooltip.status === 'ALIVE') {
+          const PLAYER_RADIUS = 10;
+          for (const obstacle of obstaclesForRender) {
+            const obsType = (obstacle as any).type || 'wall';
+            if (obsType === 'bush') {
+              // 简单的圆形与AABB碰撞检测
+              const closestX = Math.max(obstacle.x, Math.min(renderLocalPlayerForTooltip.x, obstacle.x + obstacle.w));
+              const closestY = Math.max(obstacle.y, Math.min(renderLocalPlayerForTooltip.y, obstacle.y + obstacle.h));
+              const distX = renderLocalPlayerForTooltip.x - closestX;
+              const distY = renderLocalPlayerForTooltip.y - closestY;
+              const distSq = distX * distX + distY * distY;
+              if (distSq <= PLAYER_RADIUS * PLAYER_RADIUS) {
+                isLocalPlayerInBush = true;
+                break;
+              }
+            }
+          }
+        }
+        
         // 计算最近可交互目标（用于在canvas中显示物品信息提示框）
         let nearbyInteractableForRender: { type: 'worldItem' | 'lootBag' | 'extractZone'; name: string; distance: number } | null = null;
         if (renderLocalPlayerForTooltip && renderLocalPlayerForTooltip.status === 'ALIVE') {
@@ -3294,7 +3322,7 @@ function renderLoop(): void {
           bulletsToRender,
           state.items,
           extractZone,
-          cachedObstacles,
+          obstaclesForRender,
           state.worldItems, // 新增: 世界物品
           state.lootBags, // 新增: 掉落包
           meleeSwingsToRender,
@@ -3302,7 +3330,8 @@ function renderLoop(): void {
           explosionsToRender,
           network.getConnectionState().lastServerTick, // 新增: 当前服务器 tick（用于计算换弹进度）
           nearbyInteractableForRender, // 新增: 附近可交互目标
-          renderLocalPlayerForTooltip // 新增: 本地玩家（用于计算相对位置）
+          renderLocalPlayerForTooltip, // 新增: 本地玩家（用于计算相对位置）
+          isLocalPlayerInBush // 新增: 本地玩家是否在草丛内
         );
       } else {
         // 非 RAID phase: 只清屏（显示暗背景）

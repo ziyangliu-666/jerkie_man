@@ -1,4 +1,4 @@
-import type { S2C_SNAPSHOT, PLAYER_STATE, BULLET_STATE, ITEM_STATE, WorldItem, LootBag } from '@jerkie-man/shared';
+import type { S2C_SNAPSHOT, PLAYER_STATE, BULLET_STATE, ITEM_STATE, WorldItem, LootBag, OBSTACLE_STATE } from '@jerkie-man/shared';
 import { lerp } from '@jerkie-man/shared';
 
 interface SnapshotEntry {
@@ -40,13 +40,13 @@ export class SnapshotBuffer {
   }
 
   // 获取插值后的状态
-  // 修复: obstacles 已移至 WORLD_INIT，不再从 snapshot 获取
   getInterpolatedState(renderDelay: number = 120): {
     players: PLAYER_STATE[];
     bullets: BULLET_STATE[];
     items: ITEM_STATE[];
     worldItems: WorldItem[];
     lootBags: LootBag[];
+    obstacles?: OBSTACLE_STATE[]; // 新增: 障碍物（可破坏，需要同步）
   } {
     // P0-1: 使用服务器时间域计算renderTime，避免跨机器时钟偏移导致插值失败
     // 将客户端时间转换为服务器时间域：clientNow + offset = serverNow
@@ -56,7 +56,7 @@ export class SnapshotBuffer {
     const renderTimeServer = serverNow - renderDelay;
 
     if (this.buffer.length === 0) {
-      return { players: [], bullets: [], items: [], worldItems: [], lootBags: [] };
+      return { players: [], bullets: [], items: [], worldItems: [], lootBags: [], obstacles: [] };
     }
 
     if (this.buffer.length === 1) {
@@ -66,6 +66,7 @@ export class SnapshotBuffer {
         items: this.buffer[0].snapshot.items ?? [], // 修复: 处理可选字段
         worldItems: this.buffer[0].snapshot.worldItems ?? [], // 新增: 世界物品
         lootBags: this.buffer[0].snapshot.lootBags ?? [], // 新增: 掉落包
+        obstacles: this.buffer[0].snapshot.obstacles ?? [], // 新增: 障碍物
       };
     }
 
@@ -101,6 +102,7 @@ export class SnapshotBuffer {
           items: latest.snapshot.items ?? [], // 修复: 处理可选字段
           worldItems: latest.snapshot.worldItems ?? [], // 新增: 世界物品
           lootBags: latest.snapshot.lootBags ?? [], // 新增: 掉落包
+          obstacles: latest.snapshot.obstacles ?? [], // 新增: 障碍物
         };
       }
     }
@@ -146,13 +148,13 @@ export class SnapshotBuffer {
     // 子弹渲染已完全由 BulletTrackManager 负责，此处不再插值
     // 仅保留字段用于向后兼容（如服务端调试等）
 
-    // 修复: obstacles 已移至 WORLD_INIT，不再从 snapshot 获取
     return {
       players: interpolatedPlayers,
       bullets: t1.snapshot.bullets, // 不再插值，直接返回最新帧
       items: t1.snapshot.items ?? [], // 修复: 处理可选字段
       worldItems: t1.snapshot.worldItems ?? [], // 新增: 世界物品（不做插值）
       lootBags: t1.snapshot.lootBags ?? [], // 新增: 掉落包（不做插值）
+      obstacles: t1.snapshot.obstacles ?? [], // 新增: 障碍物（不做插值，直接使用最新状态）
     };
   }
 

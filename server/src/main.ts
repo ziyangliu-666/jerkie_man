@@ -1685,7 +1685,7 @@ setInterval(() => {
     items: snapshot.items, // 保留兼容
     worldItems: snapshot.worldItems, // 新增: 世界物品列表（MVP 全量，未来做 delta）
     lootBags: snapshot.lootBags, // 新增: 掉落包列表
-    // 修复: obstacles 已移至 S2C_WORLD_INIT，不再在 snapshot 中发送（减少带宽）
+    obstacles: snapshot.obstacles, // 新增: 障碍物列表（可破坏，需要同步）
   });
 
   // 广播给所有连接

@@ -222,6 +222,12 @@ export function parseMapTemplateText(text: string): MapTemplate {
         h: 'extract.h',
       });
     } else if (directive === '@obstacle') {
+      // 注意：障碍物行通常是这种形式：
+      // @obstacle x=850 y=850 w=300 h=300 type=wall
+      // 也就是全部是 key=value，没有位置参数。
+      // 之前错误地只把 positionals 传给 parseRect，导致 x/y/w/h 解析成空字符串，
+      // Number('') === 0，从而在 Zod 校验时触发 "Number must be greater than 0"。
+      const { kv } = parseKeyValues(tokens);
       const rect = parseRect(tokens, lineNumber, {
         x: 'obstacle.x',
         y: 'obstacle.y',
@@ -230,7 +236,7 @@ export function parseMapTemplateText(text: string): MapTemplate {
       });
       template.obstacles.push({
         ...rect,
-        type: 'wall', // 默认类型为墙
+        type: kv.type || 'wall', // 支持 type 参数，默认为 wall
       });
     } else if (directive === '@spawn') {
       template.spawns.push(parsePoint(tokens, lineNumber));
@@ -309,7 +315,8 @@ export function formatMapTemplateText(template: MapTemplate): string {
     lines.push('');
     lines.push('# Obstacles (walls, buildings, etc.)');
     for (const obstacle of template.obstacles) {
-      lines.push(`@obstacle x=${obstacle.x} y=${obstacle.y} w=${obstacle.w} h=${obstacle.h}`);
+      const typeParam = obstacle.type && obstacle.type !== 'wall' ? ` type=${obstacle.type}` : '';
+      lines.push(`@obstacle x=${obstacle.x} y=${obstacle.y} w=${obstacle.w} h=${obstacle.h}${typeParam}`);
     }
   }
   
