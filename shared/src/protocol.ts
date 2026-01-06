@@ -233,6 +233,7 @@ export const PLAYER_STATE_SCHEMA = z.object({
   inventory: PLAYER_INVENTORY_SCHEMA.optional(), // 新增: 背包系统
   name: z.string().optional(), // 新增: 玩家昵称（用于显示）
   weaponRuntime: WEAPON_RUNTIME_SCHEMA.optional(), // 新增: 武器运行时状态（局内状态）
+  inBush: z.boolean().optional().default(false), // 新增: 是否在草丛内（用于视野遮挡）
   raidEquipment: PLAYER_RAID_EQUIPMENT_SCHEMA.optional(), // 新增: 局内装备状态
   killedBy: z.string().optional(), // 新增: 击杀者名字
   killedByWeaponName: z.string().optional(), // 新增: 击杀使用的武器名称
@@ -276,12 +277,29 @@ export const LOOT_BAG_SCHEMA = z.object({
   items: z.array(ITEM_INSTANCE_SCHEMA),
 });
 
-// Day4-2: 障碍物状态（矩形 AABB）
+// Day4-2: 障碍物类型定义
+export const OBSTACLE_TYPE = {
+  WALL: 'wall',           // 石墙：不可穿过，子弹不可穿过，不可破坏
+  WOODEN_WALL: 'wooden_wall', // 木墙：不可穿过，子弹可穿透（削弱），可破坏
+  CRATE: 'crate',         // 木箱：不可穿过，子弹不可穿过，可破坏
+  BUSH: 'bush',           // 草丛：可穿过，子弹可穿过，提供视野遮挡
+  WATER: 'water',         // 水域：不可穿过，子弹可穿过
+  COVER: 'cover',         // 半身掩体：不可穿过，部分遮挡
+} as const;
+
+export type ObstacleType = typeof OBSTACLE_TYPE[keyof typeof OBSTACLE_TYPE];
+
+// 障碍物状态（矩形 AABB + 类型 + 属性）
 export const OBSTACLE_STATE_SCHEMA = z.object({
+  id: z.string().optional(),   // 唯一标识（用于可破坏物体）
   x: z.number().nonnegative(), // 矩形左上角 x
   y: z.number().nonnegative(), // 矩形左上角 y
   w: z.number().positive(),    // 宽度
   h: z.number().positive(),    // 高度
+  type: z.string().default(OBSTACLE_TYPE.WALL), // 障碍物类型
+  hp: z.number().optional(),   // 生命值（可破坏物体）
+  maxHp: z.number().optional(), // 最大生命值
+  data: z.record(z.any()).optional(), // 额外数据（扩展用）
 });
 
 export const S2C_SNAPSHOT_SCHEMA = z.object({

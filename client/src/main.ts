@@ -1386,8 +1386,23 @@ function updateRaidEquipmentUI(localPlayer: PLAYER_STATE | null): void {
           raidBagList.innerHTML = '';
           for (const item of inventoryItems) {
             let itemName = item.typeId;
+            let rarityLabel = '';
+            let rarityColor = '#888';
+            let itemValue = 0;
             try {
-              itemName = getItemType(item.typeId).name;
+              const itemType = getItemType(item.typeId);
+              itemName = itemType.name;
+              itemValue = itemType.value * item.qty;
+              if (itemType.rarity === 'COMMON') {
+                rarityLabel = '常见';
+                rarityColor = '#aaa';
+              } else if (itemType.rarity === 'RARE') {
+                rarityLabel = '稀有';
+                rarityColor = '#4CAF50';
+              } else if (itemType.rarity === 'EPIC') {
+                rarityLabel = '史诗';
+                rarityColor = '#9d4edd';
+              }
             } catch {}
             const isEquipped =
               item.iid === equippedWeaponIid ||
@@ -1399,7 +1414,7 @@ function updateRaidEquipmentUI(localPlayer: PLAYER_STATE | null): void {
             row.innerHTML = `
               <div>
                 <div class="raid-bag-item-name">${itemName}</div>
-                <div class="raid-bag-item-meta">x${item.qty}${isEquipped ? ' | 已装备' : ''}</div>
+                <div class="raid-bag-item-meta">x${item.qty}${isEquipped ? ' | 已装备' : ''} | <span style="color: ${rarityColor};">${rarityLabel}</span> | <span style="color: #ffd700;">$${itemValue}</span></div>
               </div>
               <button class="item-btn raid-bag-drop" data-iid="${item.iid}" data-qty="${item.qty}" ${isEquipped ? 'disabled' : ''}>丢弃</button>
             `;

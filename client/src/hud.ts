@@ -284,9 +284,10 @@ export class HUD {
               }
               rows += `
                 <tr>
-                  <td>${escapeHtml(itemName)} <span style="color: ${rarityColor}; font-size: 10px; margin-left: 4px;">${escapeHtml(rarityLabel)}</span></td>
+                  <td>${escapeHtml(itemName)}</td>
+                  <td style="color: ${rarityColor}; font-weight: bold;">${escapeHtml(rarityLabel)}</td>
                   <td>x${escapeHtml(item.qty)}</td>
-                  <td>${escapeHtml(valueText)}</td>
+                  <td style="color: #ffd700; font-weight: bold;">${escapeHtml(valueText)}</td>
                   <td>${escapeHtml(stackableText)}</td>
                   <td><button class="item-btn hud-drop-btn" data-iid="${escapeHtml(item.iid)}" data-qty="${escapeHtml(item.qty)}">丢弃</button></td>
                 </tr>
@@ -295,9 +296,9 @@ export class HUD {
             const totalQty = items.reduce((sum, entry) => sum + entry.qty, 0);
             let html = `
               <div><strong>容量：</strong> ${escapeHtml(items.length)}/${escapeHtml(data.inventory.bagCap)} <span style="color: #666;">| 总数 ${escapeHtml(totalQty)}</span></div>
-              <div><strong>总价值：</strong> $${escapeHtml(totalValue)}</div>
+              <div><strong>总价值：</strong> <span style="color: #ffd700; font-weight: bold;">$${escapeHtml(totalValue)}</span></div>
               <table>
-                <tr><th>物品</th><th>数量</th><th>价值</th><th>堆叠</th><th>操作</th></tr>
+                <tr><th>物品</th><th>稀有度</th><th>数量</th><th>价格</th><th>堆叠</th><th>操作</th></tr>
                 ${rows}
               </table>
             `;

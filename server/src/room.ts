@@ -1,7 +1,7 @@
 import { Player } from './player.js';
 import { ProfileManager } from './profile.js';
 import type { PLAYER_STATE, BULLET_STATE, ITEM_STATE, C2S_INPUT, MAP_CONFIG, OBSTACLE_STATE, WorldItem, LootBag, ItemInstance, WeaponRuntime, WeaponDef, MapTemplate, SpawnPoint } from '@jerkie-man/shared';
-import { loadMapConfig, loadItemTypes, circleVsAABB, createRng, rectIntersects, segmentIntersectsCircle, getItemType, getAllItemTypes, getItemTypesByRarity, getWeaponDef, getArmorDef, getBagDef, applySpread, msToTicks, getFireSchedule, shouldStartBurst, canFireTick, advanceFireCooldown, PLAYER_HIT_RADIUS } from '@jerkie-man/shared';
+import { loadMapConfig, loadItemTypes, circleVsAABB, createRng, rectIntersects, segmentIntersectsCircle, getItemType, getAllItemTypes, getItemTypesByRarity, getWeaponDef, getArmorDef, getBagDef, applySpread, msToTicks, getFireSchedule, shouldStartBurst, canFireTick, advanceFireCooldown, PLAYER_HIT_RADIUS, getBulletPenetration, isObstacleDestructible } from '@jerkie-man/shared';
 import { log } from './logger.js';
 
 // Step4: 内部子弹类型（包含spawnAt、damage和bulletLifeMs用于TTL检查和伤害计算）
@@ -261,22 +261,46 @@ export class Room {
   private generateObstacles(): void {
     // 使用 shared 的 createRng，确保可复现
     const rng = createRng(this.seed);
-    
-    const count = 10 + Math.floor(rng() * 11); // 10-20 个障碍物
-    const minSize = 40;
-    const maxSize = 120;
-    const minDistance = 60; // 障碍物之间最小距离
+
+    // 障碍物类型权重（根据游戏平衡调整）
+    const obstacleTypes = [
+      { type: 'wall', weight: 15, minSize: 60, maxSize: 150 },      // 石墙：少量，大型
+      { type: 'wooden_wall', weight: 20, minSize: 40, maxSize: 100 }, // 木墙：适中
+      { type: 'crate', weight: 25, minSize: 30, maxSize: 60 },      // 木箱：较多，小型
+      { type: 'bush', weight: 30, minSize: 50, maxSize: 120 },      // 草丛：很多，中型
+      { type: 'water', weight: 8, minSize: 80, maxSize: 200 },      // 水域：少量，大型
+      { type: 'cover', weight: 20, minSize: 40, maxSize: 80 },      // 掩体：适中
+    ];
+
+    const totalWeight = obstacleTypes.reduce((sum, t) => sum + t.weight, 0);
+    const count = 20 + Math.floor(rng() * 21); // 20-40 个障碍物
+    const minDistance = 50; // 障碍物之间最小距离
     const playerSpawnRadius = 100; // 玩家出生区域范围，避免障碍物
+
+    let obstacleIdCounter = 0;
     
     for (let i = 0; i < count; i++) {
       let attempts = 0;
       let x: number, y: number, w: number, h: number;
+      let selectedType: typeof obstacleTypes[0];
       let valid = false;
-      
+
+      // 随机选择障碍物类型（基于权重）
+      const randomWeight = rng() * totalWeight;
+      let weightSum = 0;
+      selectedType = obstacleTypes[0]; // fallback
+      for (const obsType of obstacleTypes) {
+        weightSum += obsType.weight;
+        if (randomWeight <= weightSum) {
+          selectedType = obsType;
+          break;
+        }
+      }
+
       // 随机生成位置和大小，避免重叠、避开玩家出生点和撤离区
       while (!valid && attempts < 100) {
-        w = minSize + rng() * (maxSize - minSize);
-        h = minSize + rng() * (maxSize - minSize);
+        w = selectedType.minSize + rng() * (selectedType.maxSize - selectedType.minSize);
+        h = selectedType.minSize + rng() * (selectedType.maxSize - selectedType.minSize);
         x = rng() * (this.mapConfig.width - w);
         y = rng() * (this.mapConfig.height - h);
         
@@ -324,12 +348,29 @@ export class Room {
       }
       
       if (valid) {
-        this.obstacles.push({
+        const obstacleId = `obs_${this.seed}_${obstacleIdCounter++}`;
+        const obstacle: any = {
+          id: obstacleId,
           x: x!,
           y: y!,
           w: w!,
           h: h!,
-        });
+          type: selectedType.type,
+        };
+
+        // 为可破坏物体添加HP
+        if (selectedType.type === 'crate') {
+          obstacle.hp = 100;
+          obstacle.maxHp = 100;
+        } else if (selectedType.type === 'wooden_wall') {
+          obstacle.hp = 200;
+          obstacle.maxHp = 200;
+        } else if (selectedType.type === 'cover') {
+          obstacle.hp = 150;
+          obstacle.maxHp = 150;
+        }
+
+        this.obstacles.push(obstacle);
       }
     }
     
@@ -893,11 +934,26 @@ export class Room {
     }
   }
 
+  // 新增: 检查玩家是否在草丛内
+  private isPlayerInBush(x: number, y: number): boolean {
+    const PLAYER_RADIUS = 10;
+    for (const obstacle of this.obstacles) {
+      const obsType = (obstacle as any).type || 'wall';
+      if (obsType === 'bush') {
+        // 使用圆形与AABB碰撞检测
+        if (circleVsAABB(x, y, PLAYER_RADIUS, obstacle)) {
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+
   // 新增: 更新武器运行时状态（处理换弹完成）
   public updateWeaponRuntime(playerId: string): void {
     const player = this.players.get(playerId);
     if (!player || !player.weaponRuntime) return;
-    
+
     const wr = player.weaponRuntime;
     if (wr.reloadingUntilTick > 0 && this.tick >= wr.reloadingUntilTick) {
       // 换弹完成
@@ -1734,6 +1790,44 @@ export class Room {
       }
     }
 
+    // 对范围内的可破坏障碍物造成伤害
+    for (const obstacle of this.obstacles) {
+      const obsType = (obstacle as any).type || 'wall';
+      if (!isObstacleDestructible(obsType)) continue;
+
+      // 检查障碍物中心点是否在爆炸范围内
+      const obsCenterX = obstacle.x + obstacle.w / 2;
+      const obsCenterY = obstacle.y + obstacle.h / 2;
+      const dx = obsCenterX - x;
+      const dy = obsCenterY - y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      if (dist > radius) continue;
+
+      // 距离越近伤害越高
+      const scaledDamage = Math.floor(damage * (1 - dist / radius));
+      if (scaledDamage <= 0) continue;
+
+      const obstacleHp = (obstacle as any).hp ?? Infinity;
+      const obstacleMaxHp = (obstacle as any).maxHp ?? Infinity;
+      const newHp = Math.max(0, obstacleHp - scaledDamage);
+      (obstacle as any).hp = newHp;
+
+      log('EXPLOSION_OBSTACLE_DAMAGE', {
+        room: this.id,
+        obstacleId: (obstacle as any).id ?? 'unknown',
+        obstacleType: obsType,
+        scaledDamage,
+        oldHp: obstacleHp,
+        newHp,
+        maxHp: obstacleMaxHp,
+        destroyed: newHp <= 0 ? 'true' : 'false',
+        distance: Math.round(dist),
+        tick: this.tick,
+      });
+
+      // HP为0时会在 updateBullets 结束时清理
+    }
+
     // 记录爆炸事件
     this.pushEvent(`Grenade exploded at (${Math.round(x)}, ${Math.round(y)})`);
     log('GRENADE_EXPLOSION', {
@@ -1820,35 +1914,79 @@ export class Room {
       const oldY = bullet.y;
       const newX = bullet.x + bullet.vx * deltaTime;
       const newY = bullet.y + bullet.vy * deltaTime;
-      
+
       // 将移动分成 4 个采样点，每个检测障碍物碰撞
       const steps = 4;
-      let hitObstacle = false;
+      let shouldRemoveBullet = false;
       let impactX = newX;
       let impactY = newY;
       for (let step = 1; step <= steps; step++) {
         const t = step / steps;
         const stepX = oldX + (newX - oldX) * t;
         const stepY = oldY + (newY - oldY) * t;
-        
+
         // 检查是否和障碍物碰撞（子弹当作点）
         for (const obstacle of this.obstacles) {
           // 点是否在矩形内（AABB 点包含检测）
           if (stepX >= obstacle.x && stepX <= obstacle.x + obstacle.w &&
               stepY >= obstacle.y && stepY <= obstacle.y + obstacle.h) {
-              hitObstacle = true;
-              impactX = stepX;
-              impactY = stepY;
-              break;
+              // 获取障碍物类型和穿透系数
+              const obsType = (obstacle as any).type || 'wall';
+              const penetration = getBulletPenetration(obsType);
+
+              // 检查是否可破坏，如果是则造成伤害
+              if (isObstacleDestructible(obsType)) {
+                const obstacleHp = (obstacle as any).hp ?? Infinity;
+                const obstacleMaxHp = (obstacle as any).maxHp ?? Infinity;
+                const damage = bullet.damage;
+                const newHp = Math.max(0, obstacleHp - damage);
+                (obstacle as any).hp = newHp;
+
+                log('OBSTACLE_DAMAGE', {
+                  room: this.id,
+                  obstacleId: (obstacle as any).id ?? 'unknown',
+                  obstacleType: obsType,
+                  damage,
+                  oldHp: obstacleHp,
+                  newHp,
+                  maxHp: obstacleMaxHp,
+                  destroyed: newHp <= 0 ? 'true' : 'false',
+                  tick: this.tick,
+                });
+
+                // HP为0时会在 updateBullets 结束时清理
+              }
+
+              if (penetration > 0) {
+                // 子弹可以穿透，但伤害降低
+                const oldDamage = bullet.damage;
+                bullet.damage = Math.floor(bullet.damage * penetration);
+                log('BULLET_PENETRATE', {
+                  room: this.id,
+                  bullet: bullet.id,
+                  obstacle: obsType,
+                  penetration,
+                  oldDamage,
+                  newDamage: bullet.damage,
+                  tick: this.tick,
+                });
+                // 继续检测下一个障碍物（可能穿透多个）
+              } else {
+                // 子弹被完全阻挡
+                shouldRemoveBullet = true;
+                impactX = stepX;
+                impactY = stepY;
+                break;
+              }
             }
           }
-          if (hitObstacle) {
+          if (shouldRemoveBullet) {
             break;
           }
         }
-        
-        if (hitObstacle) {
-          // 命中障碍物，删除子弹
+
+        if (shouldRemoveBullet) {
+          // 命中不可穿透障碍物，删除子弹
           this.applyExplosion(bullet, impactX, impactY);
           bulletsToRemove.add(bullet.id);
           continue;
@@ -2002,6 +2140,88 @@ export class Room {
     
     // Step4: 移除所有标记的子弹（用Set.has，O(1)查找）
     this.bullets = this.bullets.filter(b => !bulletsToRemove.has(b.id));
+
+    // 清理被摧毁的障碍物（HP <= 0）并生成战利品
+    const beforeCount = this.obstacles.length;
+    const destroyedObstacles: any[] = [];
+    this.obstacles = this.obstacles.filter((obs: any) => {
+      const obsType = obs.type || 'wall';
+      if (!isObstacleDestructible(obsType)) return true; // 不可破坏的永久保留
+      const isDestroyed = (obs.hp ?? Infinity) <= 0;
+      if (isDestroyed) {
+        destroyedObstacles.push(obs);
+      }
+      return !isDestroyed; // 可破坏的检查HP
+    });
+    const destroyedCount = beforeCount - this.obstacles.length;
+
+    // 为被摧毁的木箱生成战利品
+    for (const obs of destroyedObstacles) {
+      const obsType = obs.type || 'wall';
+      if (obsType === 'crate') {
+        // 生成随机战利品
+        const rng = createRng(this.seed + this.tick + (obs.id || '').length);
+        const lootItems: ItemInstance[] = [];
+
+        // 30% 概率掉落医疗包
+        if (rng() < 0.3) {
+          lootItems.push({
+            iid: `loot_${this.seed}_${this.lootBagIdCounter}_med`,
+            typeId: 'medkit',
+            qty: 1,
+          });
+        }
+
+        // 20% 概率掉落手雷
+        if (rng() < 0.2) {
+          lootItems.push({
+            iid: `loot_${this.seed}_${this.lootBagIdCounter}_gren`,
+            typeId: 'grenade',
+            qty: 1,
+          });
+        }
+
+        // 40% 概率掉落弹药
+        if (rng() < 0.4) {
+          lootItems.push({
+            iid: `loot_${this.seed}_${this.lootBagIdCounter}_ammo`,
+            typeId: 'ammo',
+            qty: 30 + Math.floor(rng() * 30), // 30-60发
+          });
+        }
+
+        // 如果有战利品，创建 lootBag
+        if (lootItems.length > 0) {
+          const bid = `bag_crate_${this.seed}_${this.lootBagIdCounter++}_${Date.now().toString(36)}`;
+          const lootX = obs.x + obs.w / 2;
+          const lootY = obs.y + obs.h / 2;
+          this.lootBags.set(bid, {
+            bid,
+            x: lootX,
+            y: lootY,
+            items: lootItems,
+          });
+
+          log('CRATE_LOOT_DROP', {
+            room: this.id,
+            obstacleId: obs.id ?? 'unknown',
+            bid,
+            position: `(${lootX.toFixed(1)},${lootY.toFixed(1)})`,
+            itemCount: lootItems.length,
+            tick: this.tick,
+          });
+        }
+      }
+    }
+
+    if (destroyedCount > 0) {
+      log('OBSTACLES_DESTROYED', {
+        room: this.id,
+        count: destroyedCount,
+        remaining: this.obstacles.length,
+        tick: this.tick,
+      });
+    }
   }
 
   // 获取当前状态快照
@@ -2019,7 +2239,12 @@ export class Room {
     // 未来会改为检查 inWorld 字段
     const visiblePlayers = Array.from(this.players.values())
       .filter(p => p.status !== 'EXTRACTED')
-      .map((p) => p.toState(this.tick));
+      .map((p) => {
+        const state = p.toState(this.tick);
+        // 计算玩家是否在草丛内
+        state.inBush = this.isPlayerInBush(p.x, p.y);
+        return state;
+      });
     
     const snapshotBullets = this.bullets.map(({ spawnAt, damage, isGrenade, explodeTick, targetX, targetY, ...b }) => ({
       ...b,

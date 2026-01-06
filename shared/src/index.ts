@@ -33,5 +33,8 @@ export * from './constants.js';
 export * from './profileUtils.js';
 export * from './mapTemplate.js';
 
+// 障碍物配置
+export * from './obstacleConfig.js';
+
 // 显式导出内容加载器函数
 export { loadMapConfig, loadItemTypes } from './content.js';

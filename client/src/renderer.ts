@@ -605,21 +605,25 @@ export class Renderer {
     const tooltipX = screenX;
     const tooltipY = screenY + offsetY;
 
-    // 收集要显示的信息
-    const lines: string[] = [];
+    // 收集要显示的信息（支持颜色）
+    interface TooltipLine {
+      text: string;
+      color?: string;
+    }
+    const lines: TooltipLine[] = [];
     
     if (itemInfo.type === 'worldItem' && itemInfo.worldItem) {
       try {
         const itemType = getItemType(itemInfo.worldItem.typeId);
-        lines.push(`${itemType.name} x${itemInfo.worldItem.qty}`);
-        // 可以根据需要添加更多信息，比如稀有度、价值等
+        const itemValue = itemType.value * itemInfo.worldItem.qty;
+        lines.push({ text: `${itemType.name} x${itemInfo.worldItem.qty} ($${itemValue})`, color: '#ffffff' });
       } catch {
-        lines.push(`${itemInfo.worldItem.typeId} x${itemInfo.worldItem.qty}`);
+        lines.push({ text: `${itemInfo.worldItem.typeId} x${itemInfo.worldItem.qty}`, color: '#ffffff' });
       }
     } else if (itemInfo.type === 'lootBag' && itemInfo.lootBag) {
       const bag = itemInfo.lootBag;
       if (bag.items.length === 0) {
-        lines.push('空掉落包');
+        lines.push({ text: '空掉落包', color: '#ffffff' });
       } else {
         // 显示前几个物品
         const maxItems = 5; // 最多显示5个物品
@@ -627,13 +631,13 @@ export class Renderer {
         for (const item of itemsToShow) {
           try {
             const itemType = getItemType(item.typeId);
-            lines.push(`${itemType.name} x${item.qty}`);
+            lines.push({ text: `${itemType.name} x${item.qty}`, color: '#ffffff' });
           } catch {
-            lines.push(`${item.typeId} x${item.qty}`);
+            lines.push({ text: `${item.typeId} x${item.qty}`, color: '#ffffff' });
           }
         }
         if (bag.items.length > maxItems) {
-          lines.push(`... 还有 ${bag.items.length - maxItems} 个物品`);
+          lines.push({ text: `... 还有 ${bag.items.length - maxItems} 个物品`, color: '#ffffff' });
         }
       }
     }
@@ -652,7 +656,7 @@ export class Renderer {
     const lineHeight = 16;
     let maxWidth = 0;
     for (const line of lines) {
-      const metrics = this.ctx.measureText(line);
+      const metrics = this.ctx.measureText(line.text);
       maxWidth = Math.max(maxWidth, metrics.width);
     }
     
@@ -677,10 +681,10 @@ export class Renderer {
     this.ctx.lineWidth = 2;
     this.ctx.strokeRect(finalX, finalY, boxWidth, boxHeight);
     
-    // 绘制文本
-    this.ctx.fillStyle = '#ffffff';
+    // 绘制文本（每行可以使用不同颜色）
     for (let i = 0; i < lines.length; i++) {
-      this.ctx.fillText(lines[i], finalX + padding, finalY + padding + i * lineHeight);
+      this.ctx.fillStyle = lines[i].color || '#ffffff';
+      this.ctx.fillText(lines[i].text, finalX + padding, finalY + padding + i * lineHeight);
     }
     
     this.ctx.restore();
@@ -725,20 +729,112 @@ export class Renderer {
     this.ctx.restore();
   }
 
-  // Day4-2: 绘制障碍物（灰色矩形）
+  // Day4-2: 绘制障碍物（根据类型渲染）
   drawObstacle(obstacle: OBSTACLE_STATE): void {
     // 修复: round 到整数像素，避免子像素抗锯齿导致的重影
     const screenX = Math.round(obstacle.x - this.camX);
     const screenY = Math.round(obstacle.y - this.camY);
 
-    // 填充（深灰色）
-    this.ctx.fillStyle = '#666';
+    const obsType = (obstacle as any).type || 'wall';
+    const obsHp = (obstacle as any).hp;
+    const obsMaxHp = (obstacle as any).maxHp;
+
+    // 根据类型选择颜色和样式
+    let fillColor = '#666';
+    let alpha = 1.0;
+    let strokeColor = '#333';
+    let pattern: 'solid' | 'bush' | 'water' = 'solid';
+
+    switch (obsType) {
+      case 'wall':
+        fillColor = '#666666';
+        strokeColor = '#333333';
+        break;
+      case 'wooden_wall':
+        fillColor = '#8B4513';
+        strokeColor = '#5D2906';
+        break;
+      case 'crate':
+        fillColor = '#A0522D';
+        strokeColor = '#6B3410';
+        break;
+      case 'bush':
+        fillColor = '#228B22';
+        alpha = 0.6;
+        strokeColor = '#006400';
+        pattern = 'bush';
+        break;
+      case 'water':
+        fillColor = '#4169E1';
+        alpha = 0.7;
+        strokeColor = '#1E3A8A';
+        pattern = 'water';
+        break;
+      case 'cover':
+        fillColor = '#696969';
+        strokeColor = '#404040';
+        break;
+    }
+
+    // 如果有HP，根据损坏程度调整颜色
+    if (obsHp !== undefined && obsMaxHp !== undefined && obsMaxHp > 0) {
+      const hpRatio = obsHp / obsMaxHp;
+      if (hpRatio < 0.3) {
+        // 严重损坏，变暗
+        fillColor = this.darkenColor(fillColor, 0.5);
+      } else if (hpRatio < 0.6) {
+        // 中度损坏，略微变暗
+        fillColor = this.darkenColor(fillColor, 0.8);
+      }
+    }
+
+    this.ctx.save();
+    this.ctx.globalAlpha = alpha;
+
+    // 填充
+    this.ctx.fillStyle = fillColor;
     this.ctx.fillRect(screenX, screenY, obstacle.w, obstacle.h);
 
-    // 边框（深色）
-    this.ctx.strokeStyle = '#333';
+    // 特殊图案
+    if (pattern === 'bush') {
+      // 草丛：绘制一些圆点
+      this.ctx.fillStyle = '#1a6b1a';
+      for (let i = 0; i < 5; i++) {
+        const cx = screenX + (obstacle.w * (i + 1)) / 6;
+        const cy = screenY + obstacle.h / 2;
+        this.ctx.beginPath();
+        this.ctx.arc(cx, cy, 8, 0, Math.PI * 2);
+        this.ctx.fill();
+      }
+    } else if (pattern === 'water') {
+      // 水域：绘制波纹线
+      this.ctx.strokeStyle = '#2D5BA8';
+      this.ctx.lineWidth = 1;
+      for (let y = 0; y < 3; y++) {
+        const waveY = screenY + (obstacle.h * (y + 1)) / 4;
+        this.ctx.beginPath();
+        this.ctx.moveTo(screenX, waveY);
+        this.ctx.lineTo(screenX + obstacle.w, waveY);
+        this.ctx.stroke();
+      }
+    }
+
+    // 边框
+    this.ctx.strokeStyle = strokeColor;
     this.ctx.lineWidth = 2;
     this.ctx.strokeRect(screenX, screenY, obstacle.w, obstacle.h);
+
+    this.ctx.restore();
+  }
+
+  // 辅助函数：使颜色变暗
+  private darkenColor(color: string, factor: number): string {
+    // 简单的颜色变暗实现
+    const hex = color.replace('#', '');
+    const r = Math.floor(parseInt(hex.substr(0, 2), 16) * factor);
+    const g = Math.floor(parseInt(hex.substr(2, 2), 16) * factor);
+    const b = Math.floor(parseInt(hex.substr(4, 2), 16) * factor);
+    return `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`;
   }
 
   // 渲染所有玩家和子弹
@@ -817,16 +913,32 @@ export class Renderer {
     }
 
     // 绘制所有玩家（使用屏幕坐标）
+    // 新增: 草丛视野遮挡 - 只有在草丛内的玩家才能看到其他在草丛内的玩家
+    const localInBush = localPlayer?.inBush ?? false;
+
     for (const player of players) {
-      this.drawPlayer(player, player.id === localPlayerId, currentServerTick);
+      const isLocal = player.id === localPlayerId;
+      const playerInBush = player.inBush ?? false;
+
+      // 可见性检查：
+      // 1. 本地玩家总是可见
+      // 2. 不在草丛内的玩家总是可见
+      // 3. 在草丛内的玩家，只有本地玩家也在草丛内时才可见
+      const isVisible = isLocal || !playerInBush || (playerInBush && localInBush);
+
+      if (isVisible) {
+        this.drawPlayer(player, isLocal, currentServerTick);
+      }
     }
     
     // 新增: 绘制屏幕外玩家的箭头指引
-    if (localPlayerId) {
-      const localPlayer = players.find((p) => p.id === localPlayerId);
-      if (localPlayer) {
-        for (const player of players) {
-          if (player.id !== localPlayerId && player.status === 'ALIVE') {
+    if (localPlayerId && localPlayer) {
+      for (const player of players) {
+        if (player.id !== localPlayerId && player.status === 'ALIVE') {
+          const playerInBush = player.inBush ?? false;
+          // 应用视野遮挡：草丛内的玩家，只有本地玩家也在草丛内时才显示指引
+          const isVisible = !playerInBush || (playerInBush && localInBush);
+          if (isVisible) {
             this.drawOffscreenPlayerIndicator(localPlayer, player);
           }
         }

@@ -228,7 +228,10 @@ export function parseMapTemplateText(text: string): MapTemplate {
         w: 'obstacle.w',
         h: 'obstacle.h',
       });
-      template.obstacles.push(rect);
+      template.obstacles.push({
+        ...rect,
+        type: 'wall', // 默认类型为墙
+      });
     } else if (directive === '@spawn') {
       template.spawns.push(parsePoint(tokens, lineNumber));
     } else if (directive === '@poi') {

@@ -10,7 +10,7 @@
  */
 
 import type { S2C_SNAPSHOT, BULLET_STATE, OBSTACLE_STATE, PLAYER_STATE } from '@jerkie-man/shared';
-import { getWeaponDef, applySpread, createRng } from '@jerkie-man/shared';
+import { getWeaponDef, applySpread, createRng, getBulletPenetration } from '@jerkie-man/shared';
 
 // 子弹常量（与服务端保持一致）
 const DEFAULT_BULLET_SPEED = 800; // px/s（默认值，实际使用武器参数）
@@ -545,15 +545,23 @@ export class BulletTrackManager {
         continue;
       }
 
-      // 检查障碍物碰撞
-      let hitObstacle = false;
+      // 检查障碍物碰撞（只有完全阻挡的障碍物才删除子弹）
+      let hitBlockingObstacle = false;
       for (const obs of this.obstacles) {
         if (circleVsAABB(bullet.x, bullet.y, BULLET_RADIUS, obs.x, obs.y, obs.w, obs.h)) {
-          hitObstacle = true;
-          break;
+          // 检查障碍物的穿透系数
+          const obsType = (obs as any).type || 'wall';
+          const penetration = getBulletPenetration(obsType);
+
+          // 只有完全阻挡（penetration = 0）的障碍物才删除子弹
+          if (penetration === 0) {
+            hitBlockingObstacle = true;
+            break;
+          }
+          // 穿透系数 > 0 的障碍物（如水域、草丛、木墙等）让子弹继续飞行
         }
       }
-      if (hitObstacle) {
+      if (hitBlockingObstacle) {
         toRemove.push({ id, reason: 'obstacle' });
         continue;
       }

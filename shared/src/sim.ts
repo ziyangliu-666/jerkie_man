@@ -5,6 +5,7 @@
 
 import { circleVsAABB, clamp } from './math.js';
 import type { OBSTACLE_STATE } from './protocol.js';
+import { doesObstacleBlockPlayer } from './obstacleConfig.js';
 
 // 玩家移动速度（像素/秒）
 const PLAYER_SPEED = 200;
@@ -73,29 +74,33 @@ export function simulatePlayerMove(
   // 检查 X 轴移动
   const testX = newX;
   let xBlocked = false;
-  
+
   for (const obstacle of obstacles) {
-    if (circleVsAABB(testX, pos.y, PLAYER_RADIUS, obstacle)) {
+    // 只检查阻挡玩家移动的障碍物
+    const obsType = (obstacle as any).type || 'wall';
+    if (doesObstacleBlockPlayer(obsType) && circleVsAABB(testX, pos.y, PLAYER_RADIUS, obstacle)) {
       xBlocked = true;
       break;
     }
   }
-  
+
   if (xBlocked) {
     newX = pos.x; // 回退 X 轴移动
   }
-  
+
   // 检查 Y 轴移动
   const testY = newY;
   let yBlocked = false;
-  
+
   for (const obstacle of obstacles) {
-    if (circleVsAABB(newX, testY, PLAYER_RADIUS, obstacle)) {
+    // 只检查阻挡玩家移动的障碍物
+    const obsType = (obstacle as any).type || 'wall';
+    if (doesObstacleBlockPlayer(obsType) && circleVsAABB(newX, testY, PLAYER_RADIUS, obstacle)) {
       yBlocked = true;
       break;
     }
   }
-  
+
   if (yBlocked) {
     newY = pos.y; // 回退 Y 轴移动
   }

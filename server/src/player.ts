@@ -299,6 +299,7 @@ export class Player {
       inventory: safeInventory, // 新增: 包含背包（已过滤无效物品）
       name: this.name, // 新增: 包含玩家昵称
       weaponRuntime, // 新增: 包含武器运行时状态
+      inBush: false, // 新增: 草丛状态（默认false，在getSnapshot中更新）
       raidEquipment: {
         weaponIid: this.equippedWeaponItem?.iid ?? null,
         bagIid: this.equippedBagItem?.iid ?? null,
