@@ -15,6 +15,7 @@ import {
   S2C_COMBAT_EVENT_SCHEMA, // 新增: 战斗事件消息
   S2C_MELEE_SWING_SCHEMA, // 新增: 近战挥击事件
   S2C_EXPLOSION_SCHEMA, // 新增: 爆炸事件
+  S2C_SMOKE_SCHEMA, // 新增: 烟雾事件
   getWeaponDef, // 新增: 用于重置武器运行时状态
   type C2S_MESSAGE,
 } from '@jerkie-man/shared';
@@ -1465,6 +1466,7 @@ setInterval(() => {
     
     // 只处理最后一个请求（避免重复投掷）
     const lastReq = queue[queue.length - 1];
+    console.log(`[server/main] 准备调用 handleThrow: playerId=${playerId}, itemType="${lastReq.itemType}", targetX=${lastReq.targetX.toFixed(2)}, targetY=${lastReq.targetY.toFixed(2)}`);
     
     const result = room.handleThrow(playerId, lastReq.targetX, lastReq.targetY, lastReq.itemType);
     if (!result.success) {
@@ -1615,7 +1617,10 @@ setInterval(() => {
   // Day2: 更新子弹位置并检测命中（20Hz tick = 50ms = 0.05s）
   const deltaTime = 0.05;
   room.updateBullets(deltaTime, latencyMap);
-  
+
+  // 新增: 更新烟雾生命周期（清理过期烟雾）
+  room.updateSmokes();
+
   // 新增: 处理战斗事件（干火/命中/受伤反馈）
   const combatEvents = room.drainCombatEvents();
   for (const [playerId, events] of combatEvents.entries()) {
@@ -1674,6 +1679,26 @@ setInterval(() => {
         x: explosion.x,
         y: explosion.y,
         radius: explosion.radius,
+      });
+
+      for (const ws of connections.keys()) {
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify(message));
+        }
+      }
+    }
+  }
+
+  // 新增: 广播烟雾事件（用于渲染烟雾区域）
+  const smokes = room.drainSmokes();
+  if (smokes.length > 0) {
+    for (const smoke of smokes) {
+      const message = S2C_SMOKE_SCHEMA.parse({
+        type: 'S2C_SMOKE',
+        x: smoke.x,
+        y: smoke.y,
+        radius: smoke.radius,
+        durationMs: smoke.durationMs,
       });
 
       for (const ws of connections.keys()) {

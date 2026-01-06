@@ -349,7 +349,7 @@ export class BulletTrackManager {
         continue;
       }
 
-      const isGrenade = b.weaponTypeId === 'frag_grenade' || (b.targetX !== undefined && b.targetY !== undefined);
+      const isGrenade = b.weaponTypeId === 'frag_grenade' || b.weaponTypeId === 'smoke_grenade' || b.weaponTypeId === 'flash_grenade' || (b.targetX !== undefined && b.targetY !== undefined);
 
 
       // 如果子弹已存在（第一遍匹配的或之前的快照创建的）
@@ -470,7 +470,7 @@ export class BulletTrackManager {
       });
 
       // 日志：记录添加的手雷子弹
-      if (b.weaponTypeId === 'frag_grenade' || b.weaponTypeId === 'w_grenade_launcher') {
+      if (b.weaponTypeId === 'frag_grenade' || b.weaponTypeId === 'smoke_grenade' || b.weaponTypeId === 'flash_grenade' || b.weaponTypeId === 'w_grenade_launcher') {
         console.log('[BulletTracks] 添加手雷到bullets:', {
           id: b.id,
           weaponTypeId: b.weaponTypeId,
@@ -500,7 +500,7 @@ export class BulletTrackManager {
 
     // 日志：update 开始时检查手雷
     const grenadesBeforeUpdate = Array.from(this.bullets.values()).filter(b =>
-      b.weaponTypeId === 'frag_grenade' || b.weaponTypeId === 'w_grenade_launcher'
+      b.weaponTypeId === 'frag_grenade' || b.weaponTypeId === 'smoke_grenade' || b.weaponTypeId === 'flash_grenade' || b.weaponTypeId === 'w_grenade_launcher'
     );
 
     for (const [id, bullet] of this.bullets) {

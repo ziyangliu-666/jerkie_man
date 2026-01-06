@@ -131,10 +131,14 @@ export class SnapshotBuffer {
 
       if (p0 && p1) {
         // 两个快照都有，插值（玩家使用 clampedAlphaPlayers）
+        // 注意：状态字段（如 isFlashed, flashEndTime）使用最新值，不插值
         interpolatedPlayers.push({
           ...p0,
           x: lerp(p0.x, p1.x, clampedAlphaPlayers),
           y: lerp(p0.y, p1.y, clampedAlphaPlayers),
+          // 使用最新的状态字段（不插值），如果 p1 没有则使用 p0 的值
+          isFlashed: p1.isFlashed ?? p0.isFlashed ?? false,
+          flashEndTime: p1.flashEndTime ?? p0.flashEndTime ?? 0,
         });
       } else if (p0) {
         // 只有t0有

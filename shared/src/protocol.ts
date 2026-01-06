@@ -247,6 +247,9 @@ export const PLAYER_STATE_SCHEMA = z.object({
   name: z.string().optional(), // 新增: 玩家昵称（用于显示）
   weaponRuntime: WEAPON_RUNTIME_SCHEMA.optional(), // 新增: 武器运行时状态（局内状态）
   inBush: z.boolean().optional().default(false), // 新增: 是否在草丛内（用于视野遮挡）
+  inSmoke: z.boolean().optional().default(false), // 新增: 是否在烟雾内（用于视野遮挡）
+  isFlashed: z.boolean().optional().default(false), // 新增: 是否被闪光弹致盲
+  flashEndTime: z.number().optional().default(0), // 新增: 致盲结束时间（毫秒时间戳）
   raidEquipment: PLAYER_RAID_EQUIPMENT_SCHEMA.optional(), // 新增: 局内装备状态
   killedBy: z.string().optional(), // 新增: 击杀者名字
   killedByWeaponName: z.string().optional(), // 新增: 击杀使用的武器名称
@@ -412,6 +415,15 @@ export const S2C_EXPLOSION_SCHEMA = z.object({
   radius: z.number().positive(),
 });
 
+// 新增: 烟雾事件（用于生成持续一段时间的烟雾区域）
+export const S2C_SMOKE_SCHEMA = z.object({
+  type: z.literal('S2C_SMOKE'),
+  x: z.number(),
+  y: z.number(),
+  radius: z.number().positive(),
+  durationMs: z.number().int().positive(),
+});
+
 export const S2C_MESSAGE_SCHEMA = z.discriminatedUnion('type', [
   S2C_SNAPSHOT_SCHEMA,
   S2C_ERROR_SCHEMA,
@@ -424,6 +436,7 @@ export const S2C_MESSAGE_SCHEMA = z.discriminatedUnion('type', [
   S2C_COMBAT_EVENT_SCHEMA, // 新增: 战斗事件消息
   S2C_MELEE_SWING_SCHEMA, // 新增: 近战挥击事件
   S2C_EXPLOSION_SCHEMA, // 新增: 爆炸事件
+  S2C_SMOKE_SCHEMA, // 新增: 烟雾事件
 ]);
 
 // TypeScript 类型推导
@@ -449,6 +462,7 @@ export type S2C_RAID_RESULT = z.infer<typeof S2C_RAID_RESULT_SCHEMA>; // P1-1: P
 export type S2C_COMBAT_EVENT = z.infer<typeof S2C_COMBAT_EVENT_SCHEMA>; // 新增: 战斗事件类型
 export type S2C_MELEE_SWING = z.infer<typeof S2C_MELEE_SWING_SCHEMA>; // 新增: 近战挥击事件类型
 export type S2C_EXPLOSION = z.infer<typeof S2C_EXPLOSION_SCHEMA>; // 新增: 爆炸事件类型
+export type S2C_SMOKE = z.infer<typeof S2C_SMOKE_SCHEMA>; // 新增: 烟雾事件类型
 export type S2C_MESSAGE = z.infer<typeof S2C_MESSAGE_SCHEMA>;
 
 // 新增: 物品系统类型导出

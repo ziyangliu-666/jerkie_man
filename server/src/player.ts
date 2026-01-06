@@ -47,6 +47,7 @@ export class Player {
   public lastShotOriginY?: number;
   // 新增: 短效 Buff 列表（仅服务端运行时使用）
   private activeBuffs: InternalBuff[] = [];
+  public flashedUntil: number = 0; // 新增: 闪光弹致盲结束时间（毫秒时间戳，0表示未被闪）
 
   // 修复: 移动速度已移至 shared/sim.ts，这里不再需要（保留注释用于文档）
   // SPEED = 200 (在 shared/sim.ts 中定义)
@@ -405,6 +406,9 @@ export class Player {
       name: this.name, // 新增: 包含玩家昵称
       weaponRuntime, // 新增: 包含武器运行时状态
       inBush: false, // 新增: 草丛状态（默认false，在getSnapshot中更新）
+      inSmoke: false, // 新增: 烟雾状态（默认false，在getSnapshot中更新）
+      isFlashed: false, // 新增: 闪光弹致盲状态（默认false，在getSnapshot中更新）
+      flashEndTime: 0, // 新增: 致盲结束时间（毫秒时间戳）
       raidEquipment: {
         weaponIid: this.equippedWeaponItem?.iid ?? null,
         bagIid: this.equippedBagItem?.iid ?? null,

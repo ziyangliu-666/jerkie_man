@@ -1,7 +1,7 @@
 import { Player } from './player.js';
 import { ProfileManager } from './profile.js';
 import type { PLAYER_STATE, BULLET_STATE, ITEM_STATE, C2S_INPUT, MAP_CONFIG, OBSTACLE_STATE, WorldItem, LootBag, ItemInstance, WeaponRuntime, WeaponDef, MapTemplate, SpawnPoint } from '@jerkie-man/shared';
-import { loadMapConfig, loadItemTypes, circleVsAABB, createRng, rectIntersects, segmentIntersectsCircle, getItemType, getAllItemTypes, getItemTypesByRarity, getWeaponDef, getArmorDef, getBagDef, applySpread, msToTicks, getFireSchedule, shouldStartBurst, canFireTick, advanceFireCooldown, PLAYER_HIT_RADIUS, getBulletPenetration, isObstacleDestructible } from '@jerkie-man/shared';
+import { loadMapConfig, loadItemTypes, circleVsAABB, createRng, rectIntersects, segmentIntersectsCircle, getItemType, getAllItemTypes, getItemTypesByRarity, getWeaponDef, getArmorDef, getBagDef, applySpread, msToTicks, getFireSchedule, shouldStartBurst, canFireTick, advanceFireCooldown, PLAYER_HIT_RADIUS, getBulletPenetration, isObstacleDestructible, isUsableItem } from '@jerkie-man/shared';
 import { log } from './logger.js';
 
 // Step4: 内部子弹类型（包含spawnAt、damage和bulletLifeMs用于TTL检查和伤害计算）
@@ -45,6 +45,8 @@ export class Room {
   public combatEvents: Map<string, Array<{ kind: 'DRY_FIRE' | 'HIT' | 'DAMAGE_TAKEN'; direction?: number }>> = new Map();
   public meleeSwings: Array<{ playerId: string; x: number; y: number; aimRad: number; range: number; arcRad: number }> = [];
   public explosions: Array<{ x: number; y: number; radius: number }> = [];
+  private smokes: Array<{ x: number; y: number; radius: number; durationMs: number; createdAt: number }> = [];
+  private newSmokes: Array<{ x: number; y: number; radius: number; durationMs: number }> = []; // 新生成的烟雾（用于广播）
 
   constructor(id: string, options?: { seed?: number; mapTemplate?: MapTemplate }) {
     this.id = id;
@@ -936,6 +938,20 @@ export class Room {
         if (circleVsAABB(x, y, PLAYER_RADIUS, obstacle)) {
           return true;
         }
+      }
+    }
+    return false;
+  }
+
+  // 新增: 检查玩家是否在烟雾内
+  private isPlayerInSmoke(x: number, y: number): boolean {
+    for (const smoke of this.smokes) {
+      // 检查玩家是否在烟雾圆形区域内
+      const dx = x - smoke.x;
+      const dy = y - smoke.y;
+      const distSq = dx * dx + dy * dy;
+      if (distSq < smoke.radius * smoke.radius) {
+        return true;
       }
     }
     return false;
@@ -1881,6 +1897,63 @@ export class Room {
     });
   }
 
+  // 辅助函数：获取手雷属性
+  private getGrenadeProps(weaponTypeId: string): {
+    explosionRadius?: number;
+    damage?: number;
+    smokeRadius?: number;
+    smokeDurationMs?: number;
+    flashRadius?: number;
+    flashDurationMs?: number;
+  } {
+    try {
+      const itemType = getItemType(weaponTypeId);
+      return itemType.consumableProps ?? {};
+    } catch {
+      return {};
+    }
+  }
+
+  // 新增: 闪光弹爆炸（致盲范围内玩家）
+  private createFlashbang(x: number, y: number, radius: number, durationMs: number, ownerId?: string): void {
+    const now = Date.now();
+    const flashEndTime = now + durationMs;
+
+    // 对范围内所有存活玩家施加致盲效果
+    for (const [playerId, player] of this.players.entries()) {
+      if (player.status !== 'ALIVE') continue;
+
+      const dx = player.x - x;
+      const dy = player.y - y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+
+      if (dist <= radius) {
+        // 在范围内，设置致盲时间
+        player.flashedUntil = flashEndTime;
+
+        log('FLASHBANG_HIT', {
+          room: this.id,
+          owner: ownerId || 'unknown',
+          target: playerId,
+          distance: Math.round(dist),
+          durationMs,
+          tick: this.tick,
+        });
+      }
+    }
+
+    this.pushEvent(`Flashbang exploded at (${Math.round(x)}, ${Math.round(y)})`);
+    log('FLASHBANG_EXPLOSION', {
+      room: this.id,
+      x: Math.round(x),
+      y: Math.round(y),
+      radius,
+      durationMs,
+      owner: ownerId || 'unknown',
+      tick: this.tick,
+    });
+  }
+
   updateBullets(deltaTime: number, playerLatencies: Map<string, number> = new Map()): void {
     const now = Date.now();
     const bulletsToRemove = new Set<string>(); // Step4: 用Set代替O(n^2)
@@ -1896,8 +1969,44 @@ export class Room {
       if (bullet.isGrenade) {
         // 检查是否到达爆炸时间
         if (this.tick >= (bullet.explodeTick ?? 0)) {
-          // 爆炸！
-          this.createExplosion(bullet.x, bullet.y, 100, 500, bullet.ownerId); // 100像素爆炸半径，500伤害
+          // 爆炸/生成烟雾！
+          if (bullet.weaponTypeId === 'smoke_grenade') {
+            // 烟雾弹：不造成伤害，只生成烟雾区域
+            const logMsg = `[烟雾弹] 实际爆点（时间到）: (${bullet.x.toFixed(2)}, ${bullet.y.toFixed(2)}), 目标落点: (${bullet.targetX?.toFixed(2) ?? 'N/A'}, ${bullet.targetY?.toFixed(2) ?? 'N/A'})`;
+            console.log(logMsg);
+            log('SMOKE_GRENADE_EXPLODE_TIMEOUT', {
+              room: this.id,
+              bulletId: bullet.id,
+              actualX: bullet.x.toFixed(2),
+              actualY: bullet.y.toFixed(2),
+              targetX: bullet.targetX?.toFixed(2) ?? 'N/A',
+              targetY: bullet.targetY?.toFixed(2) ?? 'N/A',
+              tick: this.tick,
+            });
+            const props = this.getGrenadeProps(bullet.weaponTypeId);
+            const smoke = { 
+              x: bullet.x, 
+              y: bullet.y, 
+              radius: props.smokeRadius ?? 140, 
+              durationMs: props.smokeDurationMs ?? 15000 
+            };
+            this.smokes.push({ ...smoke, createdAt: now });
+            this.newSmokes.push(smoke);
+          } else if (bullet.weaponTypeId === 'flash_grenade') {
+            // 闪光弹：致盲范围内玩家
+            const props = this.getGrenadeProps(bullet.weaponTypeId);
+            const flashRadius = props.flashRadius ?? 150;
+            const flashDurationMs = props.flashDurationMs ?? 3000;
+            const explosionRadius = props.explosionRadius ?? 150;
+            this.createFlashbang(bullet.x, bullet.y, flashRadius, flashDurationMs, bullet.ownerId);
+            this.explosions.push({ x: bullet.x, y: bullet.y, radius: explosionRadius });
+          } else {
+            // 其他手雷：正常爆炸
+            const props = this.getGrenadeProps(bullet.weaponTypeId);
+            const explosionRadius = props.explosionRadius ?? 100;
+            const damage = props.damage ?? 500;
+            this.createExplosion(bullet.x, bullet.y, explosionRadius, damage, bullet.ownerId);
+          }
           bulletsToRemove.add(bullet.id);
           continue;
         }
@@ -1910,7 +2019,6 @@ export class Room {
 
           // 如果距离目标小于速度*时间（即下一帧会超过目标），则停在目标位置
           const speed = Math.sqrt(bullet.vx * bullet.vx + bullet.vy * bullet.vy);
-          const deltaTime = 1 / 50; // 50Hz
           const moveDistance = speed * deltaTime;
 
           if (distToTarget <= moveDistance || speed === 0) {
@@ -1919,7 +2027,42 @@ export class Room {
             bullet.y = bullet.targetY;
             bullet.vx = 0;
             bullet.vy = 0;
-            // 继续等待爆炸
+
+            // 修复: 烟雾弹/闪光弹一到达目标位置就立即生效
+            if (bullet.weaponTypeId === 'smoke_grenade') {
+              const logMsg = `[烟雾弹] 实际爆点（到达落点）: (${bullet.x.toFixed(2)}, ${bullet.y.toFixed(2)}), 目标落点: (${bullet.targetX?.toFixed(2) ?? 'N/A'}, ${bullet.targetY?.toFixed(2) ?? 'N/A'})`;
+              console.log(logMsg);
+              log('SMOKE_GRENADE_EXPLODE_TARGET', {
+                room: this.id,
+                bulletId: bullet.id,
+                actualX: bullet.x.toFixed(2),
+                actualY: bullet.y.toFixed(2),
+                targetX: bullet.targetX?.toFixed(2) ?? 'N/A',
+                targetY: bullet.targetY?.toFixed(2) ?? 'N/A',
+                tick: this.tick,
+              });
+              const props = this.getGrenadeProps(bullet.weaponTypeId);
+              const smoke = { 
+                x: bullet.x, 
+                y: bullet.y, 
+                radius: props.smokeRadius ?? 140, 
+                durationMs: props.smokeDurationMs ?? 15000 
+              };
+              this.smokes.push({ ...smoke, createdAt: now });
+              this.newSmokes.push(smoke);
+              bulletsToRemove.add(bullet.id);
+              continue;
+            } else if (bullet.weaponTypeId === 'flash_grenade') {
+              const props = this.getGrenadeProps(bullet.weaponTypeId);
+              const flashRadius = props.flashRadius ?? 150;
+              const flashDurationMs = props.flashDurationMs ?? 3000;
+              const explosionRadius = props.explosionRadius ?? 150;
+              this.createFlashbang(bullet.x, bullet.y, flashRadius, flashDurationMs, bullet.ownerId);
+              this.explosions.push({ x: bullet.x, y: bullet.y, radius: explosionRadius });
+              bulletsToRemove.add(bullet.id);
+              continue;
+            }
+            // 其他手雷继续等待 TTL 爆炸
           } else {
             // 继续飞行
             bullet.x += bullet.vx * deltaTime;
@@ -1927,15 +2070,47 @@ export class Room {
           }
         } else {
           // 没有目标位置，继续飞行（兼容旧版本）
-          const deltaTime = 1 / 50; // 50Hz
           bullet.x += bullet.vx * deltaTime;
           bullet.y += bullet.vy * deltaTime;
         }
 
-        // 边界检查（手雷碰到边界就爆炸）
+        // 边界检查（手雷碰到边界就爆炸/生成烟雾）
         if (bullet.x < 0 || bullet.x > this.mapConfig.width ||
             bullet.y < 0 || bullet.y > this.mapConfig.height) {
-          this.createExplosion(bullet.x, bullet.y, 100, 500, bullet.ownerId);
+          if (bullet.weaponTypeId === 'smoke_grenade') {
+            const logMsg = `[烟雾弹] 实际爆点（边界碰撞）: (${bullet.x.toFixed(2)}, ${bullet.y.toFixed(2)}), 目标落点: (${bullet.targetX?.toFixed(2) ?? 'N/A'}, ${bullet.targetY?.toFixed(2) ?? 'N/A'})`;
+            console.log(logMsg);
+            log('SMOKE_GRENADE_EXPLODE_BOUNDARY', {
+              room: this.id,
+              bulletId: bullet.id,
+              actualX: bullet.x.toFixed(2),
+              actualY: bullet.y.toFixed(2),
+              targetX: bullet.targetX?.toFixed(2) ?? 'N/A',
+              targetY: bullet.targetY?.toFixed(2) ?? 'N/A',
+              tick: this.tick,
+            });
+            const props = this.getGrenadeProps(bullet.weaponTypeId);
+            const smoke = { 
+              x: bullet.x, 
+              y: bullet.y, 
+              radius: props.smokeRadius ?? 140, 
+              durationMs: props.smokeDurationMs ?? 15000 
+            };
+            this.smokes.push({ ...smoke, createdAt: now });
+            this.newSmokes.push(smoke);
+          } else if (bullet.weaponTypeId === 'flash_grenade') {
+            const props = this.getGrenadeProps(bullet.weaponTypeId);
+            const flashRadius = props.flashRadius ?? 150;
+            const flashDurationMs = props.flashDurationMs ?? 3000;
+            const explosionRadius = props.explosionRadius ?? 150;
+            this.createFlashbang(bullet.x, bullet.y, flashRadius, flashDurationMs, bullet.ownerId);
+            this.explosions.push({ x: bullet.x, y: bullet.y, radius: explosionRadius });
+          } else {
+            const props = this.getGrenadeProps(bullet.weaponTypeId);
+            const explosionRadius = props.explosionRadius ?? 100;
+            const damage = props.damage ?? 500;
+            this.createExplosion(bullet.x, bullet.y, explosionRadius, damage, bullet.ownerId);
+          }
           bulletsToRemove.add(bullet.id);
           continue;
         }
@@ -2249,6 +2424,12 @@ export class Room {
         const state = p.toState(this.tick);
         // 计算玩家是否在草丛内
         state.inBush = this.isPlayerInBush(p.x, p.y);
+        // 计算玩家是否在烟雾内
+        state.inSmoke = this.isPlayerInSmoke(p.x, p.y);
+        // 计算玩家是否被闪光弹致盲
+        const now = Date.now();
+        state.isFlashed = p.flashedUntil > now;
+        state.flashEndTime = p.flashedUntil;
         return state;
       });
     
@@ -2755,6 +2936,22 @@ export class Room {
     return explosions;
   }
 
+  // 新增: 更新烟雾生命周期（清理过期烟雾）
+  updateSmokes(): void {
+    const now = Date.now();
+    this.smokes = this.smokes.filter(smoke => {
+      const age = now - smoke.createdAt;
+      return age < smoke.durationMs;
+    });
+  }
+
+  // 新增: 获取并清空新烟雾事件（广播用）
+  drainSmokes(): Array<{ x: number; y: number; radius: number; durationMs: number }> {
+    const smokes = [...this.newSmokes];
+    this.newSmokes = [];
+    return smokes;
+  }
+
   // 新增: 自动交互（服务端选最近可交互目标）
   // 优先级：worldItems > lootBags
   handleAutoInteract(playerId: string): { success: boolean; message?: string; target?: string } {
@@ -2899,14 +3096,9 @@ export class Room {
       return { success: false, message: 'Player not alive' };
     }
 
-    // 获取可使用的物品列表（医疗包、战斗兴奋剂、再生血清和投掷物占位）
+    // 获取可使用的物品列表（使用统一的定义）
     const usableItems = player.inventory.items.filter(item => {
-      try {
-        const itemType = getItemType(item.typeId);
-        return item.typeId === 'medkit' || item.typeId === 'frag_grenade' || item.typeId === 'combat_stim' || item.typeId === 'regeneration_serum';
-      } catch {
-        return false;
-      }
+      return isUsableItem(item.typeId);
     });
 
     // 检查槽位是否有效
@@ -2919,13 +3111,14 @@ export class Room {
     try {
       const itemType = getItemType(item.typeId);
       
-      if (item.typeId === 'medkit') {
+      if (item.typeId === 'medkit' || item.typeId === 'advanced_medkit') {
         // 使用医疗包：恢复生命值
         if (player.hp >= 100) {
           return { success: false, message: 'Already at full health' };
         }
         
-        const healAmount = Math.min(50, 100 - player.hp); // 恢复50点生命值，但不超过100
+        const itemType = getItemType(item.typeId);
+        const healAmount = Math.min(itemType.consumableProps?.healAmount ?? 50, 100 - player.hp);
         player.hp += healAmount;
         
         // 消耗一个医疗包
@@ -2937,21 +3130,24 @@ export class Room {
         // 清理背包中可能的无效物品
         player.cleanupInventory();
         
-        this.pushEvent(`Player ${playerId} used medkit (+${healAmount} HP)`);
+        const itemName = itemType.name;
+        this.pushEvent(`Player ${playerId} used ${itemName} (+${healAmount} HP)`);
         log('USE_MEDKIT', {
           room: this.id,
           player: playerId,
+          itemType: item.typeId,
           healAmount,
           newHp: player.hp,
           tick: this.tick,
         });
         
-        return { success: true, itemType: 'medkit' };
+        return { success: true, itemType: item.typeId };
         
       } else if (item.typeId === 'combat_stim') {
         // 战斗兴奋剂：在一段时间内提升移动速度
-        const DURATION_MS = 15000; // 15 秒
-        const SPEED_MULTIPLIER = 2.0; // 速度 x2
+        const itemType = getItemType(item.typeId);
+        const DURATION_MS = itemType.consumableProps?.buffDurationMs ?? 15000;
+        const SPEED_MULTIPLIER = itemType.consumableProps?.speedMultiplier ?? 2.0;
 
         // 添加/刷新 Buff
         player.addOrRefreshBuff(
@@ -2986,8 +3182,9 @@ export class Room {
         
       } else if (item.typeId === 'regeneration_serum') {
         // 再生血清：在一段时间内持续回复生命值
-        const DURATION_MS = 20000; // 20 秒
-        const HP_PER_SECOND = 5; // 每秒回复 5 点 HP
+        const itemType = getItemType(item.typeId);
+        const DURATION_MS = itemType.consumableProps?.buffDurationMs ?? 20000;
+        const HP_PER_SECOND = itemType.consumableProps?.hpPerSecond ?? 5;
 
         // 添加/刷新 Buff
         player.addOrRefreshBuff(
@@ -3020,8 +3217,8 @@ export class Room {
 
         return { success: true, itemType: 'regeneration_serum' };
         
-      } else if (item.typeId === 'frag_grenade') {
-        // 手雷不能通过快捷栏直接使用，需要通过投掷系统
+      } else if (item.typeId === 'frag_grenade' || item.typeId === 'smoke_grenade') {
+        // 手雷/烟雾弹不能通过快捷栏直接使用，需要通过投掷系统
         return { success: false, message: 'Use number key to aim and throw grenade' };
       }
       
@@ -3034,14 +3231,20 @@ export class Room {
 
   // 新增: 投掷物品（手雷等）
   handleThrow(playerId: string, targetX: number, targetY: number, itemType: string): { success: boolean; message?: string } {
+    // 调试：打印所有投掷请求（详细版本）
+    console.log(`[handleThrow] 收到投掷请求: playerId=${playerId}, itemType="${itemType}" (类型: ${typeof itemType}, 长度: ${itemType.length}), targetX=${targetX.toFixed(2)}, targetY=${targetY.toFixed(2)}`);
+    console.log(`[handleThrow] itemType === 'smoke_grenade' 结果: ${itemType === 'smoke_grenade'}, JSON: ${JSON.stringify(itemType)}`);
+    
     const player = this.players.get(playerId);
     if (!player || player.status !== 'ALIVE') {
+      console.log(`[handleThrow] 失败: 玩家不存在或已死亡`);
       return { success: false, message: 'Player not alive' };
     }
 
     // 检查是否有对应的投掷物
     const grenadeItem = player.inventory.items.find(item => item.typeId === itemType);
     if (!grenadeItem) {
+      console.log(`[handleThrow] 失败: 找不到物品, itemType="${itemType}", 背包物品: ${player.inventory.items.map(i => i.typeId).join(', ')}`);
       return { success: false, message: 'No grenade available' };
     }
 
@@ -3050,12 +3253,14 @@ export class Room {
     const dy = targetY - player.y;
     const distance = Math.sqrt(dx * dx + dy * dy);
     if (distance > 350) { // 增加50像素容错
+      console.log(`[handleThrow] 失败: 距离太远, distance=${distance.toFixed(2)}`);
       return { success: false, message: 'Target too far' };
     }
 
     // 消耗一个手雷
     const removed = player.removeItem(grenadeItem.iid, 1);
     if (!removed) {
+      console.log(`[handleThrow] 失败: 无法消耗物品`);
       return { success: false, message: 'Failed to consume grenade' };
     }
 
@@ -3065,10 +3270,37 @@ export class Room {
     // 创建投掷物轨迹（类似子弹，但有抛物线轨迹和延时爆炸）
     const grenadeId = `grenade_${this.tick}_${Math.random().toString(36).substr(2, 9)}`;
     
+    // 判断投掷物类型
+    const isSmoke = itemType === 'smoke_grenade';
+    const isFlash = itemType === 'flash_grenade';
+    const isFrag = itemType === 'frag_grenade';
+    console.log(`[handleThrow] 投掷物类型判断: isSmoke=${isSmoke}, isFlash=${isFlash}, isFrag=${isFrag}, itemType="${itemType}"`);
+    
+    // 烟雾弹：打印落点（使用 console.log 和 log 双重输出）
+    if (isSmoke) {
+      const logMsg = `[烟雾弹] 落点: (${targetX.toFixed(2)}, ${targetY.toFixed(2)}), 玩家位置: (${player.x.toFixed(2)}, ${player.y.toFixed(2)}), 距离: ${distance.toFixed(2)}`;
+      console.log(logMsg);
+      log('SMOKE_GRENADE_THROW', {
+        room: this.id,
+        player: playerId,
+        targetX: targetX.toFixed(2),
+        targetY: targetY.toFixed(2),
+        playerX: player.x.toFixed(2),
+        playerY: player.y.toFixed(2),
+        distance: distance.toFixed(2),
+        tick: this.tick,
+      });
+    }
+    
     // 计算投掷速度（基于距离和重力，速度3倍）
-    const flightTime = 1.0 / 3; // 飞行时间缩短为1/3，速度提升3倍
+    const flightTime = isSmoke ? 1.0 : 1.0 / 3; // 烟雾弹飞行1秒，其他手雷0.75秒
     const vx = dx / flightTime;
     const vy = dy / flightTime;
+    
+    // 根据类型设置伤害和爆炸时间
+    const damage = isSmoke ? 0 : (isFlash ? 0 : 500); // 烟雾弹和闪光弹不造成直接伤害
+    const bulletLifeMs = isSmoke ? 1000 : 750; // 烟雾弹1秒后生效，其他手雷0.75秒后爆炸
+    const explodeTickOffset = isSmoke ? 1000 : 750;
     
     // 创建手雷子弹（使用特殊的手雷子弹类型）
     const grenadeBullet: Bullet = {
@@ -3079,11 +3311,11 @@ export class Room {
       vy: vy,
       ownerId: playerId,
       spawnAt: Date.now(),
-      damage: 500, // 手雷基础伤害
-      bulletLifeMs: 750, // 0.75秒后爆炸
-      weaponTypeId: 'frag_grenade', // 用于客户端渲染识别
+      damage: damage,
+      bulletLifeMs: bulletLifeMs,
+      weaponTypeId: itemType, // 使用实际的 itemType，支持所有类型
       isGrenade: true, // 标记为手雷
-      explodeTick: this.tick + msToTicks(750), // 0.75秒后爆炸
+      explodeTick: this.tick + msToTicks(explodeTickOffset),
       targetX: targetX,
       targetY: targetY,
       spawnX: player.x,

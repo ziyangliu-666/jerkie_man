@@ -19,6 +19,10 @@ export const ITEM_CATALOG: Record<string, ItemType> = {
     rarity: 'COMMON',
     value: 150,
     stackMax: 5,
+    shortName: '医疗',
+    consumableProps: {
+      healAmount: 50,  // 恢复50点生命值
+    },
   },
   
   // COMMON items (2个)
@@ -81,6 +85,11 @@ export const ITEM_CATALOG: Record<string, ItemType> = {
     rarity: 'EPIC',
     value: 200,
     stackMax: 3,
+    shortName: '兴奋',
+    consumableProps: {
+      buffDurationMs: 15000,  // 15秒
+      speedMultiplier: 2.0,  // +100% 速度
+    },
   },
   regeneration_serum: {
     id: 'regeneration_serum',
@@ -88,6 +97,11 @@ export const ITEM_CATALOG: Record<string, ItemType> = {
     rarity: 'EPIC',
     value: 250,
     stackMax: 2,
+    shortName: '再生',
+    consumableProps: {
+      buffDurationMs: 20000,  // 20秒
+      hpPerSecond: 5,  // 每秒回复5点HP
+    },
   },
   
   // 武器
@@ -211,6 +225,11 @@ export const ITEM_CATALOG: Record<string, ItemType> = {
     rarity: 'COMMON',
     value: 150,
     stackMax: 5, // 可以堆叠5个
+    shortName: '手雷',
+    consumableProps: {
+      explosionRadius: 100,  // 100像素爆炸半径
+      damage: 300,  // 500伤害
+    },
   },
   flash_grenade: {
     id: 'flash_grenade',
@@ -218,6 +237,12 @@ export const ITEM_CATALOG: Record<string, ItemType> = {
     rarity: 'RARE',
     value: 200,
     stackMax: 3,
+    shortName: '闪光',
+    consumableProps: {
+      flashRadius: 150,  // 150像素致盲范围
+      flashDurationMs: 3000,  // 3秒致盲持续时间
+      explosionRadius: 150,  // 150像素爆炸半径（用于视觉效果）
+    },
   },
   smoke_grenade: {
     id: 'smoke_grenade',
@@ -225,6 +250,11 @@ export const ITEM_CATALOG: Record<string, ItemType> = {
     rarity: 'RARE',
     value: 180,
     stackMax: 3,
+    shortName: '烟雾',
+    consumableProps: {
+      smokeRadius: 200,  // 140像素烟雾半径
+      smokeDurationMs: 15000,  // 15秒持续时间
+    },
   },
   
   // EPIC 消耗品
@@ -232,8 +262,12 @@ export const ITEM_CATALOG: Record<string, ItemType> = {
     id: 'advanced_medkit',
     name: '高级急救包',
     rarity: 'EPIC',
-    value: 500,
+    value: 250,
     stackMax: 3,
+    shortName: '高级',
+    consumableProps: {
+      healAmount: 100,  // 恢复100点生命值（满血）
+    },
   },
   armor_plate_item: {
     id: 'armor_plate_item',
@@ -342,4 +376,31 @@ export function getAllItemTypes(): ItemType[] {
  */
 export function getItemTypesByRarity(rarity: Rarity): ItemType[] {
   return Object.values(ITEM_CATALOG).filter(item => item.rarity === rarity);
+}
+
+/**
+ * 获取所有可使用的物品类型ID列表（有 consumableProps 的物品）
+ */
+export function getUsableItemTypeIds(): string[] {
+  return Object.values(ITEM_CATALOG)
+    .filter(item => item.consumableProps !== undefined)
+    .map(item => item.id);
+}
+
+/**
+ * 检查物品类型是否可使用
+ */
+export function isUsableItem(typeId: string): boolean {
+  const itemType = ITEM_CATALOG[typeId];
+  return itemType?.consumableProps !== undefined;
+}
+
+/**
+ * 检查物品类型是否是手雷（可投掷）
+ */
+export function isThrowableItem(typeId: string): boolean {
+  const itemType = ITEM_CATALOG[typeId];
+  if (!itemType?.consumableProps) return false;
+  const props = itemType.consumableProps;
+  return !!(props.explosionRadius || props.smokeRadius || props.flashRadius);
 }

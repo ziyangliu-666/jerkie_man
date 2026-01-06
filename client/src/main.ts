@@ -36,6 +36,9 @@ import {
   calculateStaminaChange,
   canSprint,
   getSprintSpeedMultiplier,
+  getUsableItemTypeIds,
+  isUsableItem,
+  isThrowableItem,
 } from '@jerkie-man/shared';
 
 // 本地发射 ID 计数器（用于客户端预测子弹对齐）
@@ -82,8 +85,18 @@ type ExplosionEffect = {
   spawnTimeMs: number;
 };
 
+// 新增: 烟雾效果（用于在客户端渲染持续烟雾）
+type SmokeEffect = {
+  x: number;
+  y: number;
+  radius: number;
+  spawnTimeMs: number;
+  durationMs: number;
+};
+
 const EXPLOSION_EFFECT_TTL_MS = 500;
 let explosionEffects: ExplosionEffect[] = [];
+let smokeEffects: SmokeEffect[] = [];
 
 /**
  * 获取本地开火冷却时间（毫秒）
@@ -1222,14 +1235,10 @@ function updateHotbarHud(localPlayer: PLAYER_STATE | null): void {
   
   hotbarHud.style.display = 'flex';
   
-  // 获取可使用的物品（医疗包、战斗兴奋剂、再生血清和手雷）
+  // 获取可使用的物品（使用统一的定义）
+  const usableItemTypeIds = getUsableItemTypeIds();
   const usableItems = localPlayer.inventory?.items?.filter(item => {
-    return (
-      item.typeId === 'medkit' ||
-      item.typeId === 'combat_stim' ||
-      item.typeId === 'regeneration_serum' ||
-      item.typeId === 'frag_grenade'
-    );
+    return isUsableItem(item.typeId);
   }) || [];
   
   // 更新每个槽位
@@ -1245,20 +1254,22 @@ function updateHotbarHud(localPlayer: PLAYER_STATE | null): void {
       // 有物品
       slot.className = 'hotbar-slot has-item';
       
-      if (item.typeId === 'medkit') {
+      // 获取物品类型定义
+      const itemType = getItemType(item.typeId);
+      const shortName = itemType.shortName || itemType.name;
+      
+      // 根据物品类型添加样式类
+      if (item.typeId === 'medkit' || item.typeId === 'advanced_medkit') {
         slot.classList.add('medkit');
-        iconEl.textContent = '医疗';
       } else if (item.typeId === 'combat_stim') {
         slot.classList.add('stim');
-        iconEl.textContent = '兴奋';
       } else if (item.typeId === 'regeneration_serum') {
         slot.classList.add('regen');
-        iconEl.textContent = '再生';
-      } else if (item.typeId === 'frag_grenade') {
+      } else if (isThrowableItem(item.typeId)) {
         slot.classList.add('grenade');
-        iconEl.textContent = '手雷';
       }
       
+      iconEl.textContent = shortName;
       countEl.textContent = `x${item.qty}`;
     } else {
       // 空槽位
@@ -3200,6 +3211,15 @@ const network = new Network(getWebSocketUrl(), 'local', {
       }
     }
   },
+  onSmoke: (event) => {
+    smokeEffects.push({
+      x: event.x,
+      y: event.y,
+      radius: event.radius,
+      spawnTimeMs: performance.now(),
+      durationMs: event.durationMs,
+    });
+  },
 }, isDebug);
 
 // Step3: 右键选中实体（避免与左键开火冲突）
@@ -3315,6 +3335,8 @@ function renderLoop(): void {
         renderLocalPlayer.maxStamina = predictedLocalPlayer.maxStamina; // 新增: 同步最大耐力
         renderLocalPlayer.isSprinting = predictedLocalPlayer.isSprinting; // 新增: 同步冲刺状态
         renderLocalPlayer.status = predictedLocalPlayer.status;
+        renderLocalPlayer.isFlashed = predictedLocalPlayer.isFlashed; // 新增: 同步闪光弹致盲状态
+        renderLocalPlayer.flashEndTime = predictedLocalPlayer.flashEndTime; // 新增: 同步闪光弹结束时间
         renderLocalPlayer.lootCount = predictedLocalPlayer.lootCount;
         renderLocalPlayer.lastInputSeq = predictedLocalPlayer.lastInputSeq;
         renderLocalPlayer.lastInputTick = predictedLocalPlayer.lastInputTick;
@@ -3382,6 +3404,19 @@ function renderLoop(): void {
         explosionEffects = explosionEffects.filter(
           (explosion) => nowPerf2 - explosion.spawnTimeMs <= EXPLOSION_EFFECT_TTL_MS
         );
+
+        // 新增: 计算需要渲染的烟雾（基于服务器下发的持续时间）
+        const smokesToRender = smokeEffects
+          .map((smoke) => ({
+            x: smoke.x,
+            y: smoke.y,
+            radius: smoke.radius,
+            age: (nowPerf2 - smoke.spawnTimeMs) / smoke.durationMs,
+          }))
+          .filter((smoke) => smoke.age >= 0 && smoke.age <= 1);
+        smokeEffects = smokeEffects.filter(
+          (smoke) => nowPerf2 - smoke.spawnTimeMs <= smoke.durationMs
+        );
         
         // 获取本地玩家用于显示物品信息提示框
         const renderLocalPlayerForTooltip = renderLocalPlayer ?? predictedLocalPlayer ?? 
@@ -3434,6 +3469,7 @@ function renderLoop(): void {
           meleeSwingsToRender,
           bulletTracks.getHitEffects(), // 命中特效
           explosionsToRender,
+          smokesToRender, // 新增: 烟雾效果
           network.getConnectionState().lastServerTick, // 新增: 当前服务器 tick（用于计算换弹进度）
           nearbyInteractableForRender, // 新增: 附近可交互目标
           renderLocalPlayerForTooltip, // 新增: 本地玩家（用于计算相对位置）
@@ -3444,7 +3480,7 @@ function renderLoop(): void {
         renderer.clear();
       }
       
-      // 更新 UI 覆盖层状态（撤离进度 + 武器状态）
+      // 更新 UI 覆盖层状态（撤离进度 + 闪光弹 + 武器状态）
       // ✅ 关键：只有 RAID 才允许显示撤离环
       if (currentPhase === 'RAID' && localPlayerId) {
         const localPlayer = renderLocalPlayer ?? predictedLocalPlayer ?? state.players.find((p) => p.id === localPlayerId);
@@ -3458,8 +3494,25 @@ function renderLoop(): void {
         } else {
           uiOverlay.updateState({ extractProgress: { enabled: false, progress: 0 } });
         }
+
+        // 闪光弹效果
+        if (localPlayer && localPlayer.isFlashed) {
+          const now = Date.now();
+          const flashEndTime = localPlayer.flashEndTime ?? 0;
+          const remainingMs = Math.max(0, flashEndTime - now);
+          const progress = remainingMs / 3000; // 3秒总时长
+          uiOverlay.updateState({
+            flash: {
+              enabled: true,
+              progress: Math.max(0, Math.min(1, progress)),
+            },
+          });
+        } else {
+          uiOverlay.updateState({ flash: { enabled: false, progress: 0 } });
+        }
       } else {
         uiOverlay.updateState({ extractProgress: { enabled: false, progress: 0 } });
+        uiOverlay.updateState({ flash: { enabled: false, progress: 0 } });
       }
       
       // 武器状态 / Buff（左下角 HUD）
@@ -3622,14 +3675,14 @@ function renderLoop(): void {
             const localPlayer = predictedLocalPlayer ?? state.players.find((p) => p.id === localPlayerId) ?? null;
             if (localPlayer) {
               const usableItems = localPlayer.inventory?.items?.filter(item => {
-                return item.typeId === 'medkit' || item.typeId === 'frag_grenade';
+                return isUsableItem(item.typeId);
               }) || [];
               
               const item = usableItems[slot - 1];
-              if (item && item.typeId === 'frag_grenade') {
+              if (item && isThrowableItem(item.typeId)) {
                 // 进入投掷瞄准模式
                 isThrowingMode = true;
-                throwingItemType = 'frag_grenade';
+                throwingItemType = item.typeId;
                 throwingAim.startAiming(); // 不再传入玩家位置，由更新时自动跟随
                 dbg.push('THROWING_MODE_START', { slot, itemType: item.typeId });
               } else {
@@ -3664,7 +3717,7 @@ function renderLoop(): void {
                 localPlayer.y,
                 throwingState.targetX,
                 throwingState.targetY,
-                'frag_grenade'
+                throwingItemType!
               );
               console.log('本地预测手雷已创建:', throwingState.targetX, throwingState.targetY);
             } else {

@@ -46,6 +46,12 @@ export interface UIOverlayState {
     text: string; // 提示文本
     color?: string; // 可选：文本颜色，默认为白色
   };
+
+  // 闪光弹效果（新增）
+  flash: {
+    enabled: boolean; // 是否被闪
+    progress: number; // 0~1，剩余致盲时间百分比
+  };
 }
 
 export class UIOverlay {
@@ -62,6 +68,7 @@ export class UIOverlay {
     extractProgress: { enabled: false, progress: 0 },
     weaponStatus: { enabled: false, weaponName: '', ammoInMag: 0, magSize: 0, reloading: false, reloadProgress: 0 },
     textHint: { alpha: 0, text: '', color: undefined },
+    flash: { enabled: false, progress: 0 },
   };
 
   constructor(canvas: HTMLCanvasElement) {
@@ -91,6 +98,9 @@ export class UIOverlay {
     }
     if (partial.textHint) {
       Object.assign(this.state.textHint, partial.textHint);
+    }
+    if (partial.flash) {
+      Object.assign(this.state.flash, partial.flash);
     }
   }
 
@@ -177,6 +187,11 @@ export class UIOverlay {
     // 5. 文本提示（屏幕中央）
     if (this.state.textHint.alpha > 0 && this.state.textHint.text) {
       this.drawTextHint(ctx, cx, cy, this.state.textHint.text, this.state.textHint.alpha, this.state.textHint.color);
+    }
+
+    // 6. 闪光弹效果（全屏偏灰白色 + 中央进度条）
+    if (this.state.flash.enabled) {
+      this.drawFlashEffect(ctx, w, h, cx, cy, this.state.flash.progress);
     }
   }
 
@@ -314,6 +329,34 @@ export class UIOverlay {
       ctx.textAlign = 'left';
       ctx.fillText('RELOADING', x, barY - 5);
     }
+  }
+
+  /**
+   * 绘制闪光弹效果（全屏偏灰白色 + 中央进度条）
+   */
+  private drawFlashEffect(ctx: CanvasRenderingContext2D, w: number, h: number, cx: number, cy: number, progress: number): void {
+    // 全屏黑色遮罩（完全不透明）
+    ctx.fillStyle = 'rgba(0, 0, 0, 1.0)';
+    ctx.fillRect(0, 0, w, h);
+
+    // 中央进度条
+    const barWidth = 120;
+    const barHeight = 10;
+    const barX = cx - barWidth / 2;
+    const barY = cy - barHeight / 2;
+
+    // 进度条背景（深灰色）
+    ctx.fillStyle = 'rgba(60, 60, 60, 0.8)';
+    ctx.fillRect(barX, barY, barWidth, barHeight);
+
+    // 进度条前景（浅灰色）
+    ctx.fillStyle = 'rgba(200, 200, 200, 0.9)';
+    ctx.fillRect(barX, barY, barWidth * progress, barHeight);
+
+    // 进度条边框（黑色）
+    ctx.strokeStyle = 'rgba(0, 0, 0, 0.6)';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(barX, barY, barWidth, barHeight);
   }
 
   /**

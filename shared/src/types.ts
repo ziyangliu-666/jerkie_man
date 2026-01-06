@@ -12,6 +12,25 @@ export type ItemType = {
   value: number;     // sell price for 1 qty
   stackMax: number;  // e.g. 20
   weight?: number;   // optional future use
+  shortName?: string;  // 热键栏显示的简短名称（如 "医疗"、"手雷"）
+  // 消耗品属性（可选）
+  consumableProps?: {
+    // 医疗包属性
+    healAmount?: number;  // 回复的生命值
+    // Buff 属性
+    buffDurationMs?: number;  // Buff 持续时间（毫秒）
+    speedMultiplier?: number;  // 速度倍数（例如 2.0 表示 +100% 速度）
+    hpPerSecond?: number;  // 每秒回复生命值
+    // 手雷属性
+    explosionRadius?: number;  // 爆炸半径（像素）
+    damage?: number;  // 伤害值
+    // 烟雾弹属性
+    smokeRadius?: number;  // 烟雾半径（像素）
+    smokeDurationMs?: number;  // 烟雾持续时间（毫秒）
+    // 闪光弹属性
+    flashRadius?: number;  // 致盲范围（像素）
+    flashDurationMs?: number;  // 致盲持续时间（毫秒）
+  };
 };
 
 export type ItemInstance = {

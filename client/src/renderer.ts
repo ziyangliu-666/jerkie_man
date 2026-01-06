@@ -515,7 +515,7 @@ export class Renderer {
     const screenY = bullet.y - this.camY;
 
     // 检查是否是手雷/榴弹（包括榴弹炮的子弹和投掷手雷）
-    const isGrenade = bullet.weaponTypeId === 'w_grenade_launcher' || bullet.weaponTypeId === 'frag_grenade';
+    const isGrenade = bullet.weaponTypeId === 'w_grenade_launcher' || bullet.weaponTypeId === 'frag_grenade' || bullet.weaponTypeId === 'smoke_grenade';
 
 
     if (isGrenade) {
@@ -598,6 +598,42 @@ export class Renderer {
     this.ctx.beginPath();
     this.ctx.arc(screenX, screenY, coreRadius, 0, Math.PI * 2);
     this.ctx.fill();
+    this.ctx.restore();
+  }
+
+  // 新增: 绘制烟雾（偏灰白色圆形 + 中央进度条）
+  private drawSmoke(smoke: { x: number; y: number; radius: number; age: number }): void {
+    const screenX = smoke.x - this.camX;
+    const screenY = smoke.y - this.camY;
+
+    this.ctx.save();
+
+    // 烟雾圆形（黑灰色，完全不透明）
+    this.ctx.fillStyle = 'rgba(100, 100, 100, 1.0)';
+    this.ctx.beginPath();
+    this.ctx.arc(screenX, screenY, smoke.radius, 0, Math.PI * 2);
+    this.ctx.fill();
+
+    // 中央进度条
+    const progress = Math.max(0, Math.min(1, 1 - smoke.age)); // 剩余时间百分比
+    const barWidth = 80;
+    const barHeight = 8;
+    const barX = screenX - barWidth / 2;
+    const barY = screenY - barHeight / 2;
+
+    // 进度条背景（深灰色）
+    this.ctx.fillStyle = 'rgba(60, 60, 60, 0.8)';
+    this.ctx.fillRect(barX, barY, barWidth, barHeight);
+
+    // 进度条前景（浅灰色）
+    this.ctx.fillStyle = 'rgba(200, 200, 200, 0.9)';
+    this.ctx.fillRect(barX, barY, barWidth * progress, barHeight);
+
+    // 进度条边框（黑色）
+    this.ctx.strokeStyle = 'rgba(0, 0, 0, 0.6)';
+    this.ctx.lineWidth = 1;
+    this.ctx.strokeRect(barX, barY, barWidth, barHeight);
+
     this.ctx.restore();
   }
 
@@ -1064,6 +1100,7 @@ export class Renderer {
     meleeSwings: Array<{ x: number; y: number; aimRad: number; range: number; arcRad: number; age: number }> = [],
     hitEffects: Array<{ x: number; y: number; age: number; type: 'obstacle' | 'player' }> = [], // 命中特效
     explosionEffects: Array<{ x: number; y: number; radius: number; age: number }> = [],
+    smokes: Array<{ x: number; y: number; radius: number; age: number }> = [],
     currentServerTick?: number, // 新增: 当前服务器 tick（用于计算换弹进度）
     nearbyInteractable?: { type: 'worldItem' | 'lootBag' | 'extractZone'; name: string; distance: number } | null, // 新增: 附近可交互目标
     localPlayer?: PLAYER_STATE | null, // 新增: 本地玩家（用于计算相对位置）
@@ -1124,8 +1161,9 @@ export class Renderer {
     }
 
     // 绘制所有玩家（使用屏幕坐标）
-    // 新增: 草丛视野遮挡 - 只有在草丛内的玩家才能看到其他在草丛内的玩家
+    // 新增: 草丛/烟雾视野遮挡 - 只有在草丛/烟雾内的玩家才能看到其他在草丛/烟雾内的玩家
     const localInBush = isLocalPlayerInBush; // 使用客户端本地计算的值
+    const localInSmoke = localPlayer?.inSmoke ?? false; // 本地玩家是否在烟雾内
 
     // 清理已离场玩家的拖影（不在 snapshot 里的玩家）
     const activeIds = new Set(players.map((p) => p.id));
@@ -1144,12 +1182,17 @@ export class Renderer {
     for (const player of players) {
       const isLocal = player.id === localPlayerId;
       const playerInBush = player.inBush ?? false;
+      const playerInSmoke = player.inSmoke ?? false;
 
       // 可见性检查：
       // 1. 本地玩家总是可见
-      // 2. 不在草丛内的玩家总是可见
+      // 2. 不在草丛/烟雾内的玩家总是可见
       // 3. 在草丛内的玩家，只有本地玩家也在草丛内时才可见
-      const isVisible = isLocal || !playerInBush || (playerInBush && localInBush);
+      // 4. 在烟雾内的玩家，只有本地玩家也在烟雾内时才可见
+      const isVisible = isLocal ||
+        (!playerInBush && !playerInSmoke) ||
+        (playerInBush && localInBush) ||
+        (playerInSmoke && localInSmoke);
 
       if (isVisible) {
         // 使用“真正被画出来的位置”来判定速度：
@@ -1172,8 +1215,11 @@ export class Renderer {
       for (const player of players) {
         if (player.id !== localPlayerId && player.status === 'ALIVE') {
           const playerInBush = player.inBush ?? false;
-          // 应用视野遮挡：草丛内的玩家，只有本地玩家也在草丛内时才显示指引
-          const isVisible = !playerInBush || (playerInBush && localInBush);
+          const playerInSmoke = player.inSmoke ?? false;
+          // 应用视野遮挡：草丛/烟雾内的玩家，只有本地玩家也在草丛/烟雾内时才显示指引
+          const isVisible = (!playerInBush && !playerInSmoke) ||
+            (playerInBush && localInBush) ||
+            (playerInSmoke && localInSmoke);
           if (isVisible) {
             this.drawOffscreenPlayerIndicator(localPlayer, player);
           }
@@ -1194,6 +1240,11 @@ export class Renderer {
     // 爆炸特效（真实半径）
     for (const explosion of explosionEffects) {
       this.drawExplosionEffect(explosion);
+    }
+
+    // 新增: 烟雾特效（持续白色大圆）
+    for (const smoke of smokes) {
+      this.drawSmoke(smoke);
     }
 
     // 绘制命中特效（简易闪光）
