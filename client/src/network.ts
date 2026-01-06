@@ -212,6 +212,14 @@ export class Network {
             }
           } else if (message.type === 'S2C_RAID_RESULT') {
             // 新增: 处理战局结果消息
+            // 记录日志：记录是否收到 S2C_RAID_RESULT，直接打印到控制台
+            console.log('[S2C_RAID_RESULT] 收到战局结果消息', {
+              result: message.result,
+              extracted: message.result === 'EXTRACTED',
+              lootCount: message.loot.length,
+              moneyGained: message.moneyGained,
+              moneyLost: message.moneyLost,
+            });
             if (this.callbacks.onRaidResult) {
               this.callbacks.onRaidResult(message);
             }

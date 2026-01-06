@@ -3230,11 +3230,6 @@ function renderLoop(): void {
         // 本地预测子弹会通过 shotId 自动对齐到服务端子弹（无接棒割裂）
         const bulletsToRender = bulletTracks.getBulletsForRender();
 
-        // 日志：记录渲染的手雷
-        const grenadesInRender = bulletsToRender.filter(b => b.weaponTypeId === 'frag_grenade' || b.weaponTypeId === 'w_grenade_launcher');
-        if (grenadesInRender.length > 0) {
-          console.log('[Main] 准备渲染手雷:', grenadesInRender.length, grenadesInRender);
-        }
         const nowPerf2 = performance.now();
         const meleeSwingsToRender = meleeSwings
           .map((swing) => ({

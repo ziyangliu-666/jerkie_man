@@ -71,64 +71,6 @@ const wsToAccountId = new Map<WebSocket, string>();
 // 新增: playerId -> accountId 映射（让 room/profile 能查）
 const playerIdToAccountId = new Map<string, string>();
 
-const NON_RAID_DISCONNECT_GRACE_MS = 15_000;
-type PendingNonRaidCleanup = {
-  timer: NodeJS.Timeout;
-  accountId?: string;
-};
-const pendingNonRaidPlayerCleanup = new Map<string, PendingNonRaidCleanup>();
-
-function cancelPendingNonRaidCleanup(playerId: string): boolean {
-  const pending = pendingNonRaidPlayerCleanup.get(playerId);
-  if (!pending) return false;
-  clearTimeout(pending.timer);
-  pendingNonRaidPlayerCleanup.delete(playerId);
-  log('CANCEL_PENDING_NON_RAID_CLEANUP', {
-    room: room.id,
-    player: playerId,
-    tick: room.tick,
-  });
-  return true;
-}
-
-function scheduleNonRaidPlayerCleanup(playerId: string, accountId?: string): void {
-  if (pendingNonRaidPlayerCleanup.has(playerId)) return;
-  const timer = setTimeout(() => {
-    pendingNonRaidPlayerCleanup.delete(playerId);
-    log('NON_RAID_PLAYER_CLEANUP', {
-      room: room.id,
-      player: playerId,
-      accountId,
-      tick: room.tick,
-    });
-    room.removePlayer(playerId);
-    inputQueues.delete(playerId);
-    pickupQueues.delete(playerId);
-    useItemQueues.delete(playerId);
-    throwQueues.delete(playerId);
-    playerLatencies.delete(playerId);
-    lastProfileSentTick.delete(playerId);
-    lastExtractedInventoryCount.delete(playerId);
-    if (accountId) {
-      accountIdToPlayerId.delete(accountId);
-    }
-    log('CLEANUP_NON_RAID_PLAYER', {
-      room: room.id,
-      player: playerId,
-      accountId,
-      tick: room.tick,
-    });
-  }, NON_RAID_DISCONNECT_GRACE_MS);
-  pendingNonRaidPlayerCleanup.set(playerId, { timer, accountId });
-  log('SCHEDULE_NON_RAID_PLAYER_CLEANUP', {
-    room: room.id,
-    player: playerId,
-    accountId,
-    graceMs: NON_RAID_DISCONNECT_GRACE_MS,
-    tick: room.tick,
-  });
-}
-
 // 输入队列（按playerId组织）
 // 队列保护：最大长度32，超过时丢弃旧的
 const INPUT_QUEUE_MAX_LENGTH = 32;
@@ -154,64 +96,8 @@ const throwQueues = new Map<string, ThrowReq[]>();
 // P1-1 修复: lastProfileSentTick 移至模块级，避免每 tick 重新创建导致重复发送
 const lastProfileSentTick = new Map<string, number>();
 
-// ✅ 新增：维护 accountId → playerId 的映射（用于刷新页面时复用玩家实体）
+// ✅ 维护 accountId → playerId 的映射
 const accountIdToPlayerId = new Map<string, string>();
-
-// 新增：清理所有相同 accountId 的玩家实体（修复重复玩家bug）
-function cleanupPlayersByAccountId(accountId: string, excludePlayerId?: string): void {
-  const playersToRemove: string[] = [];
-  
-  // 遍历所有玩家实体，找到所有相同 accountId 的玩家
-  for (const [playerId, player] of room.players.entries()) {
-    // 跳过要保留的玩家（如果是重连场景）
-    if (excludePlayerId && playerId === excludePlayerId) {
-      continue;
-    }
-    
-    // 通过 room 的 playerToAccount 映射查找 accountId
-    const playerAccountId = room.getAccountId(playerId);
-    if (playerAccountId === accountId) {
-      playersToRemove.push(playerId);
-    }
-  }
-  
-  // 清理找到的所有重复玩家实体
-  for (const playerIdToRemove of playersToRemove) {
-    log('CLEANUP_DUPLICATE_PLAYER', {
-      room: room.id,
-      player: playerIdToRemove,
-      accountId: accountId,
-      tick: room.tick,
-    });
-    
-    room.removePlayer(playerIdToRemove);
-    inputQueues.delete(playerIdToRemove);
-    pickupQueues.delete(playerIdToRemove);
-    useItemQueues.delete(playerIdToRemove);
-    throwQueues.delete(playerIdToRemove);
-    playerLatencies.delete(playerIdToRemove);
-    lastProfileSentTick.delete(playerIdToRemove);
-    lastExtractedInventoryCount.delete(playerIdToRemove);
-    
-    // 清理映射
-    if (accountIdToPlayerId.get(accountId) === playerIdToRemove) {
-      accountIdToPlayerId.delete(accountId);
-    }
-    playerIdToAccountId.delete(playerIdToRemove);
-    
-    // 取消待清理的定时器（如果有）
-    cancelPendingNonRaidCleanup(playerIdToRemove);
-    
-    // 断开旧的 WebSocket 连接（如果还存在）
-    for (const [oldWs, oldPid] of connections.entries()) {
-      if (oldPid === playerIdToRemove) {
-        oldWs.close();
-        connections.delete(oldWs);
-        wsToAccountId.delete(oldWs);
-      }
-    }
-  }
-}
 
 // 延迟补偿: 玩家延迟追踪（记录每个玩家的 RTT）
 type PlayerLatency = {
@@ -266,11 +152,7 @@ const admin = {
     useItemQueues.clear(); // 新增: 清理使用物品队列
     lastProfileSentTick.clear();
     lastExtractedInventoryCount.clear();
-    for (const pending of pendingNonRaidPlayerCleanup.values()) {
-      clearTimeout(pending.timer);
-    }
-    pendingNonRaidPlayerCleanup.clear();
-    
+
     // 重新创建房间（会生成新的 seed）
     const newRoom = createRoom();
     Object.assign(room, newRoom);
@@ -399,104 +281,59 @@ ws.on('message', (data: Buffer) => {
             // 读取客户端发送的 accountId
             const accountId = parsed.accountId;
 
-            // ✅ 关键：检查该 accountId 是否已经有活跃的玩家在 RAID 中（刷新页面重连场景）
-            const profile = room.profileManager.getProfileData(accountId);
+            // 简化逻辑：总是清理旧玩家实体，创建新玩家
+            // 检查是否有该accountId的旧玩家
             const existingPlayerId = accountIdToPlayerId.get(accountId);
-            const existingPlayer = existingPlayerId ? room.players.get(existingPlayerId) : null;
-            const hasPendingCleanup = existingPlayerId ? pendingNonRaidPlayerCleanup.has(existingPlayerId) : false;
-            const isRaidReconnect = profile.phase === 'RAID' && existingPlayer && existingPlayer.status === 'ALIVE';
-            const isGraceReconnect = Boolean(existingPlayer && hasPendingCleanup);
+            if (existingPlayerId) {
+              log('CLEANUP_OLD_PLAYER', {
+                room: room.id,
+                player: existingPlayerId,
+                accountId: accountId,
+                tick: room.tick,
+              });
 
-            // ✅ 修复：在玩家加入时，先清理所有相同 accountId 的玩家实体（防止重复玩家bug）
-            // 如果是重连场景，保留要重连的玩家实体
-            const playerIdToKeep = (isRaidReconnect || isGraceReconnect) ? existingPlayerId : undefined;
-            cleanupPlayersByAccountId(accountId, playerIdToKeep);
+              // 清理旧玩家实体和所有相关数据
+              room.removePlayer(existingPlayerId);
+              inputQueues.delete(existingPlayerId);
+              pickupQueues.delete(existingPlayerId);
+              useItemQueues.delete(existingPlayerId);
+              throwQueues.delete(existingPlayerId);
+              playerLatencies.delete(existingPlayerId);
+              accountIdToPlayerId.delete(accountId);
 
-            // 清理后重新检查 existingPlayer（确保它仍然存在）
-            const playerIdAfterCleanup = accountIdToPlayerId.get(accountId);
-            const playerAfterCleanup = playerIdAfterCleanup ? room.players.get(playerIdAfterCleanup) : null;
-            
-            // 重新判断是否应该重连（清理后玩家可能不存在了）
-            const shouldReconnect = (isRaidReconnect || isGraceReconnect) && playerIdAfterCleanup && playerAfterCleanup;
-
-            if (shouldReconnect) {
-              // 玩家在 RAID 中且活着，复用旧的 playerId（刷新页面重连）
-              playerId = playerIdAfterCleanup!;
-              cancelPendingNonRaidCleanup(playerId);
-
-              // 重连时重置序号，避免新客户端的 seq 被当作"旧值"丢弃
-              playerAfterCleanup!.lastInputSeq = 0;
-              playerAfterCleanup!.lastInputTick = 0;
-
-              // 断开旧的 WebSocket 连接（如果还存在）
+              // 断开旧的WebSocket连接（如果还存在）
               for (const [oldWs, oldPid] of connections.entries()) {
-                if (oldPid === playerId && oldWs !== ws) {
+                if (oldPid === existingPlayerId) {
                   oldWs.close();
                   connections.delete(oldWs);
+                  wsToAccountId.delete(oldWs);
+                  playerIdToAccountId.delete(oldPid);
                   break;
                 }
               }
-
-              // 重新绑定新的 WebSocket 到旧的 playerId
-              connections.set(ws, playerId);
-              wsToAccountId.set(ws, accountId);
-              playerIdToAccountId.set(playerId, accountId);
-
-              // ✅ 确保 input queues 等已初始化（可能在断线时被清理了）
-              if (!inputQueues.has(playerId)) inputQueues.set(playerId, []);
-              if (!pickupQueues.has(playerId)) pickupQueues.set(playerId, []);
-              if (!useItemQueues.has(playerId)) useItemQueues.set(playerId, []);
-              if (!throwQueues.has(playerId)) throwQueues.set(playerId, []);
-
-              log(isRaidReconnect ? 'RECONNECT_TO_RAID' : 'RECONNECT_AFTER_GRACE', {
-                room: room.id,
-                player: playerId,
-                accountId: accountId,
-                tick: room.tick,
-                playerStatus: playerAfterCleanup!.status,
-                playerPos: `(${playerAfterCleanup!.x.toFixed(1)},${playerAfterCleanup!.y.toFixed(1)})`,
-              });
-            } else {
-              // ✅ 关键：如果有旧的玩家实体但 phase 不是 'RAID'，清理它（防止旧实体干扰）
-              if (existingPlayer) {
-                log('CLEANUP_STALE_PLAYER', {
-                  room: room.id,
-                  player: existingPlayerId,
-                  accountId: accountId,
-                  phase: profile.phase,
-                  tick: room.tick,
-                });
-                room.removePlayer(existingPlayerId!);
-                inputQueues.delete(existingPlayerId!);
-                pickupQueues.delete(existingPlayerId!);
-                useItemQueues.delete(existingPlayerId!);
-                throwQueues.delete(existingPlayerId!);
-                playerLatencies.delete(existingPlayerId!);
-                accountIdToPlayerId.delete(accountId);
-              }
-
-              // 正常连接：分配新的 playerId
-              playerId = `p${Date.now()}_${Math.random().toString(36).substring(2, 11)}`;
-              connections.set(ws, playerId);
-              wsToAccountId.set(ws, accountId);
-              playerIdToAccountId.set(playerId, accountId);
-              accountIdToPlayerId.set(accountId, playerId); // ✅ 记录映射
-
-              room.addPlayer(playerId, accountId);
-              inputQueues.set(playerId, []);
-              pickupQueues.set(playerId, []); // P2-3: 初始化 pickup 队列
-              useItemQueues.set(playerId, []); // 新增: 初始化使用物品队列
-              throwQueues.set(playerId, []); // 新增: 投掷队列
-
-              log('CONNECT', {
-                room: room.id,
-                player: playerId,
-                accountId: accountId,
-                tick: room.tick,
-              });
             }
 
-        // Day4-1: 发送WELCOME消息，告知客户端自己的playerId和世界配置
+            // 总是创建新的玩家实体
+            playerId = `p${Date.now()}_${Math.random().toString(36).substring(2, 11)}`;
+            connections.set(ws, playerId);
+            wsToAccountId.set(ws, accountId);
+            playerIdToAccountId.set(playerId, accountId);
+            accountIdToPlayerId.set(accountId, playerId);
+
+            room.addPlayer(playerId, accountId);
+            inputQueues.set(playerId, []);
+            pickupQueues.set(playerId, []);
+            useItemQueues.set(playerId, []);
+            throwQueues.set(playerId, []);
+
+            log('CONNECT', {
+              room: room.id,
+              player: playerId,
+              accountId: accountId,
+              tick: room.tick,
+            });
+
+            // Day4-1: 发送WELCOME消息，告知客户端自己的playerId和世界配置
         ws.send(
           JSON.stringify(
             S2C_WELCOME_SCHEMA.parse({
@@ -834,8 +671,27 @@ ws.on('message', (data: Buffer) => {
           return;
         }
         
+        const profileBefore = room.profileManager.getProfileData(accountId);
+        log('MOVE_STASH_TO_PREP_REQUEST', {
+          room: room.id,
+          player: playerId,
+          accountId,
+          iid: parsed.iid,
+          qty: parsed.qty,
+          phase: profileBefore.phase,
+          prepItemsBefore: profileBefore.prep.length,
+          tick: room.tick,
+        });
+
         const result = room.profileManager.moveStashToPrep(accountId, parsed.iid, parsed.qty);
         if (!result.success) {
+          log('MOVE_STASH_TO_PREP_FAILED', {
+            room: room.id,
+            player: playerId,
+            accountId,
+            message: result.message,
+            tick: room.tick,
+          });
           ws.send(
             JSON.stringify(
               S2C_ERROR_SCHEMA.parse({
@@ -847,6 +703,13 @@ ws.on('message', (data: Buffer) => {
           );
         } else {
           const updatedProfile = room.profileManager.getProfileData(accountId);
+          log('MOVE_STASH_TO_PREP_SUCCESS', {
+            room: room.id,
+            player: playerId,
+            accountId,
+            prepItemsAfter: updatedProfile.prep.length,
+            tick: room.tick,
+          });
           const phase = updatedProfile.displayName === null ? 'NAME' : 'HIDEOUT';
           sendProfile(ws, accountId, phase);
         }
@@ -1070,21 +933,31 @@ ws.on('message', (data: Buffer) => {
         }
         
         const profile = room.profileManager.getProfileData(accountId);
-        
+
+        log('ENTER_RAID_REQUEST', {
+          room: room.id,
+          player: playerId,
+          accountId,
+          phase: profile.phase,
+          prepItems: profile.prep.length,
+          stashItems: profile.stash.length,
+          tick: room.tick,
+        });
+
         // 修复: 允许空整备进入（MVP 阶段先跑通流程）
         // 不再检查 prep 是否为空，允许玩家空手进入战局
-        
-        // 修复: 幂等操作 - 如果玩家已经在 raid 中且状态是 ALIVE，直接返回 profile 而不是错误
+
+        // 修复: 幂等操作 - 如果玩家已经在 raid 中且 phase 是 RAID，直接返回 profile
         const existingPlayer = room.players.get(playerId);
-        if (existingPlayer && existingPlayer.status === 'ALIVE') {
-          // 玩家已经在 raid 中且活着，直接返回当前 profile（phase=RAID）
-          const currentProfile = room.profileManager.getProfileData(accountId);
+        if (existingPlayer && existingPlayer.status === 'ALIVE' && profile.phase === 'RAID') {
+          // 玩家已经在 raid 中且活着，且phase已经是RAID，直接返回当前 profile
           sendProfile(ws, accountId, 'RAID');
           log('ENTER_RAID_IDEMPOTENT', {
             room: room.id,
             player: playerId,
             accountId: accountId,
             status: existingPlayer.status,
+            phase: profile.phase,
           });
           return;
         }
@@ -1093,8 +966,8 @@ ws.on('message', (data: Buffer) => {
         let player = existingPlayer;
         if (!player) {
           player = room.addPlayer(playerId, accountId);
-        } else {
-          // 如果玩家已存在（DEAD 或 EXTRACTED 状态），重新 spawn 并复活
+        } else if (player.status !== 'ALIVE') {
+          // 如果玩家已存在但不是ALIVE状态（DEAD 或 EXTRACTED），重新 spawn 并复活
           const oldStatus = player.status; // 保存旧状态用于日志
           const spawn = room.findSpawnPoint();
           player.x = spawn.x;
@@ -1163,8 +1036,18 @@ ws.on('message', (data: Buffer) => {
             newStatus: 'ALIVE',
             tick: room.tick,
           });
+        } else {
+          // 玩家已存在且是ALIVE（首次进入对局，phase不是RAID）
+          log('ENTER_RAID_FIRST_TIME', {
+            room: room.id,
+            player: playerId,
+            accountId: accountId,
+            currentPhase: profile.phase,
+            playerStatus: player.status,
+            tick: room.tick,
+          });
         }
-        
+
         // 进入战局前重置局内背包/护甲状态
         room.updatePlayerGearFromProfile(playerId, accountId);
 
@@ -1186,6 +1069,16 @@ ws.on('message', (data: Buffer) => {
         // 修复：使用 player.addItem() 正确处理堆叠和容量，避免物品丢失
         const prepItems = profile.prep.filter(item => !equippedIids.has(item.iid));
         const itemsNotAdded: typeof prepItems = [];
+
+        log('LOAD_PREP_TO_INVENTORY', {
+          room: room.id,
+          player: playerId,
+          accountId,
+          prepItemsTotal: profile.prep.length,
+          prepItemsToLoad: prepItems.length,
+          equippedCount: equippedIids.size,
+          tick: room.tick,
+        });
 
         for (const prepItem of prepItems) {
           const result = player.addItem(prepItem.typeId, prepItem.qty);
@@ -1209,6 +1102,15 @@ ws.on('message', (data: Buffer) => {
 
         // 只清空成功添加的物品，保留未添加的物品在 prep 中
         room.profileManager.updateProfile(accountId, { prep: itemsNotAdded });
+
+        log('PREP_LOADED_TO_INVENTORY', {
+          room: room.id,
+          player: playerId,
+          accountId,
+          inventoryItemCount: player.inventory.items.length,
+          itemsNotAdded: itemsNotAdded.length,
+          tick: room.tick,
+        });
 
         // ✅ 关键：进入 RAID 时更新 phase 为 'RAID'（持久化）
         room.profileManager.updatePhase(accountId, 'RAID');
@@ -1296,21 +1198,6 @@ ws.on('message', (data: Buffer) => {
           return;
         }
 
-        // 节流日志：每200ms打印一次
-        const lastLog = messageLogThrottle.get(ws) || 0;
-        const now = Date.now();
-        if (now - lastLog >= 200) {
-          log('RECV_INPUT', {
-            room: room.id,
-            player: playerId,
-            tick: room.tick,
-            seq: parsed.seq,
-            inputTick: parsed.tick,
-            keys: `${parsed.keys.up ? 'U' : ''}${parsed.keys.down ? 'D' : ''}${parsed.keys.left ? 'L' : ''}${parsed.keys.right ? 'R' : ''}`,
-          });
-          messageLogThrottle.set(ws, now);
-        }
-
         // 将输入加入队列（tick循环会处理）
         const queue = inputQueues.get(playerId);
         if (queue) {
@@ -1357,28 +1244,28 @@ ws.on('message', (data: Buffer) => {
 
   ws.on('close', () => {
     if (playerId) {
-      // ✅ 关键：只有在非 RAID 阶段才删除玩家实体（RAID 中断线允许重连）
       const accountId = wsToAccountId.get(ws);
-      const profile = accountId ? room.profileManager.getProfileData(accountId) : null;
-      const isInRaid = profile?.phase === 'RAID';
 
-      if (!isInRaid) {
-        // 非 RAID 阶段断线：延迟清理，给客户端一点时间重连
-        scheduleNonRaidPlayerCleanup(playerId, accountId);
-      } else {
-        // RAID 阶段断线：保留玩家实体和映射，允许重连
-        log('DISCONNECT_IN_RAID', {
-          room: room.id,
-          player: playerId,
-          accountId: accountId,
-          tick: room.tick,
-        });
+      // 简化逻辑：断线即死亡
+      // 如果在RAID中，处理死亡逻辑（清空prep，phase改为HIDEOUT）
+      if (accountId) {
+        room.profileManager.handleDisconnectDeath(accountId);
       }
 
-      // 无论如何都要清理 WebSocket 相关的映射
+      // 清理玩家实体
+      room.removePlayer(playerId);
+
+      // 清理所有映射
       connections.delete(ws);
       wsToAccountId.delete(ws);
       playerIdToAccountId.delete(playerId);
+
+      log('PLAYER_DISCONNECT', {
+        room: room.id,
+        player: playerId,
+        accountId: accountId,
+        tick: room.tick,
+      });
     }
   });
 
@@ -1400,10 +1287,6 @@ setInterval(() => {
   const MAX_STEPS = 4; // 每 tick 最多追 4 步，避免被恶意灌爆
   for (const [playerId, queue] of inputQueues.entries()) {
     if (queue.length === 0) {
-      // 修复: 记录队列为空的情况，便于诊断
-      if (room.tick % 100 === 0) { // 每 5 秒记录一次，避免日志过多
-        log('NO_INPUT_THIS_TICK', { player: playerId, tick: room.tick });
-      }
       continue;
     }
     
@@ -1773,16 +1656,6 @@ setInterval(() => {
     }
   }
 
-  // 每10个tick打印一次汇总（约0.5秒）
-  if (room.tick % 10 === 0) {
-    log('TICK', {
-      room: room.id,
-      tick: room.tick,
-      players: room.players.size,
-      bullets: room.bullets.length,
-      items: room.items.length,
-    });
-  }
 }, TICK_INTERVAL_MS);
 
 // Snapshot 广播循环（10Hz）

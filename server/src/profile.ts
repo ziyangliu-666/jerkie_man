@@ -521,6 +521,30 @@ export class ProfileManager {
   }
 
   /**
+   * 处理断线死亡：清空prep区物品，重置phase为HIDEOUT
+   * @param accountId 账号 ID
+   */
+  handleDisconnectDeath(accountId: string): void {
+    const profile = this.getProfileData(accountId);
+    if (profile.phase !== 'RAID') {
+      // 不在RAID中，无需处理死亡
+      return;
+    }
+
+    // 清空整备区（丢失所有raid物品）
+    profile.prep = [];
+
+    // 重置phase为HIDEOUT
+    profile.phase = 'HIDEOUT';
+
+    this.markDirty();
+    log('DISCONNECT_DEATH', {
+      accountId,
+      message: 'Player disconnected during RAID, all items lost'
+    });
+  }
+
+  /**
    * 更新玩家 Profile
    * @param accountId 账号 ID
    */

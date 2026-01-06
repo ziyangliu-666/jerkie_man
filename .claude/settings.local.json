@@ -5,7 +5,8 @@
       "Bash(git add:*)",
       "Bash(git commit:*)",
       "Bash(npm run dev:all:*)",
-      "Bash(ping:*)"
+      "Bash(ping:*)",
+      "Bash(cat:*)"
     ]
   }
 }

@@ -849,19 +849,36 @@ export class Room {
           player.extractProgress += 50; // 每 tick 50ms（20Hz = 50ms/tick）
           if (player.extractProgress >= 2000) {
             // 进度满了，撤离成功
-            player.status = 'EXTRACTED';
-            player.extractProgress = 0;
-            
-            // 新增: 处理玩家撤离（inventory -> stash）
-            this.handlePlayerExtract(playerId);
-            
-            log('EXTRACT', {
+            const accountId = this.playerToAccount.get(playerId) ?? playerId;
+            const profile = this.profileManager.getProfileData(accountId);
+
+            log('EXTRACT_START', {
               room: this.id,
               player: playerId,
+              accountId,
+              phase: profile.phase,
+              inventoryItems: player.inventory.items.length,
               loot: player.lootCount,
               pos: `(${player.x.toFixed(1)},${player.y.toFixed(1)})`,
               tick: this.tick,
             });
+
+            player.status = 'EXTRACTED';
+            player.extractProgress = 0;
+
+            // 新增: 处理玩家撤离（inventory -> stash）
+            const extractResult = this.handlePlayerExtract(playerId);
+
+            log('EXTRACT_COMPLETE', {
+              room: this.id,
+              player: playerId,
+              accountId,
+              success: extractResult.success ? 'true' : 'false',
+              lootItems: extractResult.loot?.length ?? 0,
+              moneyGained: extractResult.moneyGained ?? 0,
+              tick: this.tick,
+            });
+
             // 游戏化增强: 推送撤离事件
             this.pushEvent(`${playerId} extracted with loot=${player.lootCount}`);
           }
@@ -1498,15 +1515,6 @@ export class Room {
             }
             this.combatEvents.get(hitTarget.id)!.push({ kind: 'DAMAGE_TAKEN', direction });
             
-            log('MELEE_HIT', {
-              room: this.id,
-              player: playerId,
-              target: hitTarget.id,
-              tick: this.tick,
-              damage: weaponDef.damage,
-              hp: `${oldHp}->${hitTarget.hp}`,
-            });
-            
             // 推送命中事件
             this.pushEvent(`${playerId} melee hit ${hitTarget.id} (-${weaponDef.damage})`);
           }
@@ -1596,19 +1604,6 @@ export class Room {
       }
     }
 
-    // 节流日志：每200ms打印一次
-    const now = Date.now();
-    const lastLog = this.lastProcessLog.get(playerId) || 0;
-    if (now - lastLog >= 200) {
-      log('PROCESS_INPUT', {
-        room: this.id,
-        player: playerId,
-        tick: this.tick,
-        seq: input.seq,
-        pos: `(${oldX.toFixed(1)},${oldY.toFixed(1)})->(${player.x.toFixed(1)},${player.y.toFixed(1)})`,
-      });
-      this.lastProcessLog.set(playerId, now);
-    }
   }
 
   // Day2: 更新子弹位置并检测命中
@@ -1662,19 +1657,6 @@ export class Room {
       }
       const direction = Math.atan2(y - player.y, x - player.x);
       this.combatEvents.get(playerId)!.push({ kind: 'DAMAGE_TAKEN', direction });
-
-      log('EXPLOSION_HIT', {
-        room: this.id,
-        bullet: bullet.id,
-        owner: bullet.ownerId,
-        target: playerId,
-        tick: this.tick,
-        baseDamage: explosionDamage,
-        scaledDamage,
-        armorReduction: player.armorReduction,
-        finalDamage,
-        hp: `${oldHp}->${player.hp}`,
-      });
 
       if (isDead) {
         const attacker = this.players.get(bullet.ownerId);
@@ -1961,18 +1943,6 @@ export class Room {
             this.combatEvents.get(playerId)!.push({ kind: 'DAMAGE_TAKEN', direction });
           }
           
-            log('HIT', {
-              room: this.id,
-              bullet: bullet.id,
-              owner: bullet.ownerId,
-              target: playerId,
-              tick: this.tick,
-              baseDamage: baseDamage,
-              armorReduction: armorReduction,
-              finalDamage: finalDamage,
-              hp: `${oldHp}->${player.hp}`,
-            });
-          
           // 游戏化增强: 推送命中事件
           this.pushEvent(`${bullet.ownerId} hit ${playerId} (-${finalDamage})`);
           
@@ -2059,12 +2029,6 @@ export class Room {
       targetX,
       targetY,
     }));
-
-    // 日志：记录快照中的手雷
-    const grenadeCount = snapshotBullets.filter(b => b.weaponTypeId === 'frag_grenade' || b.weaponTypeId === 'w_grenade_launcher').length;
-    if (grenadeCount > 0) {
-      console.log('[Room] Snapshot包含手雷:', grenadeCount, '总子弹数:', snapshotBullets.length);
-    }
 
     return {
       players: visiblePlayers,
