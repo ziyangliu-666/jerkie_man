@@ -25,7 +25,7 @@ export interface HUDData {
     lastServerTick: number;
     reconnectAttempts?: number; // P1-2 修复: 重连尝试次数
     nextReconnectInMs?: number | null; // P1-2 修复: 下次重连倒计时（毫秒）
-    extractProgress?: number; // 游戏化增强: 本地玩家撤离进度（0-2000ms）
+    extractProgress?: number; // 游戏化增强: 本地玩家撤离进度（0-10000ms，10秒）
     accountId?: string; // 新增: 账号 ID（用于调试）
   };
   players: PLAYER_STATE[];
@@ -115,9 +115,9 @@ export class HUD {
       }
       let extractProgressHtml = '';
       if (data.connection.extractProgress !== undefined && data.connection.extractProgress > 0) {
-        const progressPercent = Math.min(100, (data.connection.extractProgress / 2000) * 100);
+        const progressPercent = Math.min(100, (data.connection.extractProgress / 10000) * 100);
         // 修复: 使用 escapeHtml 防止 XSS
-        extractProgressHtml = `<div><strong>撤离进度：</strong> ${escapeHtml(progressPercent.toFixed(1))}% (${escapeHtml(data.connection.extractProgress)}/2000ms)</div>`;
+        extractProgressHtml = `<div><strong>撤离进度：</strong> ${escapeHtml(progressPercent.toFixed(1))}% (${escapeHtml(data.connection.extractProgress)}/10000ms)</div>`;
       }
       // 修复: 使用 escapeHtml 防止 XSS（虽然 statusDisplay 是本地生成，但保持一致性）
       connectionEl.innerHTML = `
@@ -214,6 +214,25 @@ export class HUD {
           }
         }
 
+        // 新增: 道具读条提示（例如急救包使用中）
+        let usingItemLine = '';
+        if (local.usingItemTypeId && local.usingItemRemainingMs !== undefined && local.usingItemTotalMs !== undefined) {
+          try {
+            const itemType = getItemType(local.usingItemTypeId);
+            const percent = Math.max(
+              0,
+              Math.min(100, ((local.usingItemTotalMs - local.usingItemRemainingMs) / local.usingItemTotalMs) * 100)
+            );
+            usingItemLine = `<div><strong>道具：</strong> 正在使用 ${escapeHtml(
+              itemType.name
+            )}（${escapeHtml(percent.toFixed(0))}%）</div>`;
+          } catch {
+            usingItemLine = `<div><strong>道具：</strong> 正在使用 ${escapeHtml(
+              local.usingItemTypeId
+            )}</div>`;
+          }
+        }
+
         statusEl.innerHTML = `
           <div><strong>状态：</strong> ${escapeHtml(statusText)}</div>
           <div><strong>生命：</strong> ${escapeHtml(hp)}/100（${escapeHtml(hpLabel)}）</div>
@@ -221,6 +240,7 @@ export class HUD {
           ${ammoLine}
           ${reloadLine}
           ${cooldownLine}
+          ${usingItemLine}
           ${extraStatus}
         `;
       }

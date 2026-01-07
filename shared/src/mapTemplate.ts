@@ -29,17 +29,138 @@ export const ZONE_SCHEMA = z.object({
   description: z.string().optional(),
 });
 
+// AI角色类型定义
+export type AIRole = 'basic' | 'sniper' | 'heavy_gunner' | 'scout';
+
+// AI角色预设配置
+export interface AIRolePreset {
+  role: AIRole;
+  weaponTypeId: string;
+  hp: number;
+  maxHp: number;
+  armorReduction: number;
+  visionRange: number;
+  visionAngleDeg: number;
+  moveSpeed: number; // 移动速度倍率 (0.5 = 慢, 1.0 = 正常, 1.5 = 快)
+  aimErrorDeg: number; // 瞄准误差（度）
+  fireRateMultiplier: number; // 射速倍率
+  aggroRange: number; // 攻击距离
+  chaseRange: number; // 追击距离
+}
+
+// AI角色预设表
+export const AI_ROLE_PRESETS: Record<AIRole, AIRolePreset> = {
+  // 基础AI - 默认平衡型
+  basic: {
+    role: 'basic',
+    weaponTypeId: 'w_pistol',
+    hp: 100,
+    maxHp: 100,
+    armorReduction: 0,
+    visionRange: 300,
+    visionAngleDeg: 360,
+    moveSpeed: 1.0,
+    aimErrorDeg: 5,
+    fireRateMultiplier: 1.0,
+    aggroRange: 250,
+    chaseRange: 300,
+  },
+  // 狙击手 - 远程高精度
+  sniper: {
+    role: 'sniper',
+    weaponTypeId: 'w_sniper',
+    hp: 80,
+    maxHp: 80,
+    armorReduction: 0,
+    visionRange: 600, // 视野远
+    visionAngleDeg: 90, // 视野窄（聚焦）
+    moveSpeed: 0.8, // 移动慢
+    aimErrorDeg: 1, // 精准射击
+    fireRateMultiplier: 0.8, // 射速慢
+    aggroRange: 500, // 远距离攻击
+    chaseRange: 600,
+  },
+  // 重机枪手 - 高火力高防御
+  heavy_gunner: {
+    role: 'heavy_gunner',
+    weaponTypeId: 'w_smg', // 使用SMG模拟加特林高射速
+    hp: 400,
+    maxHp: 400,
+    armorReduction: 0.3, // 30%护甲减伤
+    visionRange: 350,
+    visionAngleDeg: 120,
+    moveSpeed: 0.6, // 移动很慢
+    aimErrorDeg: 8, // 精度低
+    fireRateMultiplier: 2.0, // 射速极快（疯狂射击）
+    aggroRange: 300,
+    chaseRange: 350,
+  },
+  // 侦察兵 - 高速低血
+  scout: {
+    role: 'scout',
+    weaponTypeId: 'w_pistol',
+    hp: 60,
+    maxHp: 60,
+    armorReduction: 0,
+    visionRange: 400,
+    visionAngleDeg: 360,
+    moveSpeed: 1.5, // 移动快
+    aimErrorDeg: 7,
+    fireRateMultiplier: 1.2,
+    aggroRange: 200,
+    chaseRange: 400,
+  },
+};
+
 // 新增: AI spawn点定义
 export const AI_SPAWN_SCHEMA = z.object({
   x: z.number().nonnegative(),
   y: z.number().nonnegative(),
   type: z.enum(['patrol', 'guard']),
-  weaponTypeId: z.string(),
+  role: z.enum(['basic', 'sniper', 'heavy_gunner', 'scout']).default('basic'), // 新增：AI角色类型
+  weaponTypeId: z.string().optional(), // 改为可选，如果未指定则使用角色预设
   count: z.number().int().positive().default(1),
   patrolPointIds: z.array(z.string()).optional(),
   guardRadius: z.number().positive().optional(),
-  visionRange: z.number().positive().default(300),
-  visionAngleDeg: z.number().min(0).max(360).default(360),
+  visionRange: z.number().positive().optional(), // 改为可选，未指定则使用角色预设
+  visionAngleDeg: z.number().min(0).max(360).optional(), // 改为可选
+  hp: z.number().int().positive().optional(), // 新增：自定义HP
+  armorReduction: z.number().min(0).max(1).optional(), // 新增：自定义护甲
+  moveSpeed: z.number().positive().optional(), // 新增：自定义移动速度
+});
+
+// 新增: 物品重刷配置
+// 说明：
+// - 支持按区域(zoneId)限制刷新范围
+// - 支持指定可刷新物品ID白名单 itemIds（逗号分隔）
+// - 支持自定义稀有度权重 rarityWeights，形如 "COMMON:60,RARE:30,EPIC:10"
+// - 支持 mode 字段区分作用阶段：initial / respawn / both
+export const ITEM_RESPAWN_SCHEMA = z.object({
+  // 可选规则ID（仅用于日志/调试，无逻辑含义）
+  id: z.string().optional(),
+  // 规则生效模式：仅初始生成(initial)、仅重刷(respawn)、或两者都生效(both)
+  mode: z.enum(['initial', 'respawn', 'both']).default('both'),
+  intervalTicks: z.number().int().positive(), // 重刷间隔（tick数）
+  count: z.number().int().nonnegative().default(1), // 每次重刷的物品数量
+  maxItems: z.number().int().positive().optional(), // 地图上最大物品数量（可选，用于限制）
+  zoneId: z.string().optional(), // 可选：只在指定区域内重刷
+  // 物品白名单（可选），如果存在则只会从这里列出的物品里随机
+  itemIds: z.array(z.string()).optional(),
+  // 稀有度权重（可选），如果存在则覆盖默认 60/30/10
+  rarityWeights: z
+    .object({
+      COMMON: z.number().nonnegative().optional(),
+      RARE: z.number().nonnegative().optional(),
+      EPIC: z.number().nonnegative().optional(),
+    })
+    .optional(),
+});
+
+// 新增: AI重刷配置
+export const AI_RESPAWN_SCHEMA = z.object({
+  intervalTicks: z.number().int().positive(), // 重刷间隔（tick数）
+  spawnId: z.string().optional(), // 可选：关联到特定的AI spawn点ID
+  maxAIs: z.number().int().positive().optional(), // 地图上最大AI数量（可选）
 });
 
 export const MAP_TEMPLATE_SCHEMA = z.object({
@@ -52,6 +173,9 @@ export const MAP_TEMPLATE_SCHEMA = z.object({
   pois: z.array(POI_SCHEMA).default([]), // 新增: POI 列表
   zones: z.array(ZONE_SCHEMA).default([]), // 新增: 区域列表
   aiSpawns: z.array(AI_SPAWN_SCHEMA).default([]), // 新增: AI spawn点列表
+  // 支持多条 itemRespawn 规则
+  itemRespawns: z.array(ITEM_RESPAWN_SCHEMA).default([]), // 新增: 物品重刷配置列表
+  aiRespawn: AI_RESPAWN_SCHEMA.optional(), // 新增: AI重刷配置
 });
 
 export type MapTemplate = z.infer<typeof MAP_TEMPLATE_SCHEMA>;
@@ -59,6 +183,8 @@ export type SpawnPoint = z.infer<typeof SPAWN_POINT_SCHEMA>;
 export type POI = z.infer<typeof POI_SCHEMA>;
 export type Zone = z.infer<typeof ZONE_SCHEMA>;
 export type AISpawn = z.infer<typeof AI_SPAWN_SCHEMA>;
+export type ItemRespawn = z.infer<typeof ITEM_RESPAWN_SCHEMA>;
+export type AIRespawn = z.infer<typeof AI_RESPAWN_SCHEMA>;
 
 type TokenizedLine = {
   directive: string;
@@ -191,6 +317,8 @@ export function createDefaultMapTemplate(id: string = 'default'): MapTemplate {
     pois: [],
     zones: [],
     aiSpawns: [],
+    itemRespawns: [],
+    aiRespawn: undefined,
   };
 }
 
@@ -297,6 +425,10 @@ export function parseMapTemplateText(text: string): MapTemplate {
     } else if (directive === '@aispawn' || directive === '@ai') {
       // 新增: 解析AI spawn点
       const { kv, positionals } = parseKeyValues(tokens);
+
+      // 解析角色类型
+      const role = (kv.role as AIRole) || 'basic';
+
       const aiSpawn: AISpawn = {
         x: positionals.length >= 2
           ? parseNumber(positionals[0], lineNumber, 'ai.x')
@@ -305,16 +437,89 @@ export function parseMapTemplateText(text: string): MapTemplate {
           ? parseNumber(positionals[1], lineNumber, 'ai.y')
           : parseNumber(kv.y ?? '', lineNumber, 'ai.y'),
         type: kv.type === 'guard' ? 'guard' : 'patrol',
-        weaponTypeId: kv.weapon || 'w_pistol',
+        role: role,
+        weaponTypeId: kv.weapon || undefined, // 改为可选，未指定则使用角色预设
         count: kv.count ? parseNumber(kv.count, lineNumber, 'ai.count') : 1,
-        visionRange: kv.vision ? parseNumber(kv.vision, lineNumber, 'ai.vision') : 300,
+        visionRange: kv.vision ? parseNumber(kv.vision, lineNumber, 'ai.vision') : undefined,
         visionAngleDeg: kv.visionangle || kv.visionAngle
           ? parseNumber(kv.visionangle || kv.visionAngle, lineNumber, 'ai.visionAngle')
-          : 360,
+          : undefined,
         guardRadius: kv.radius ? parseNumber(kv.radius, lineNumber, 'ai.radius') : undefined,
         patrolPointIds: kv.patrol ? kv.patrol.split(',').map((s: string) => s.trim()) : undefined,
+        hp: kv.hp ? parseNumber(kv.hp, lineNumber, 'ai.hp') : undefined,
+        armorReduction: kv.armor ? parseNumber(kv.armor, lineNumber, 'ai.armor') : undefined,
+        moveSpeed: kv.speed ? parseNumber(kv.speed, lineNumber, 'ai.speed') : undefined,
       };
       template.aiSpawns.push(aiSpawn);
+    } else if (directive === '@itemrespawn') {
+      // 新增: 解析物品重刷配置（支持多条规则）
+      const { kv } = parseKeyValues(tokens);
+
+      // 解析 itemIds（逗号分隔）
+      let itemIds: string[] | undefined;
+      if (kv.items || kv.itemids) {
+        const raw = kv.items || kv.itemids;
+        itemIds = raw
+          .split(',')
+          .map((s: string) => s.trim())
+          .filter((s: string) => s.length > 0);
+      }
+
+      // 解析 rarityWeights，形如 "COMMON:60,RARE:30,EPIC:10"
+      let rarityWeights: ItemRespawn['rarityWeights'] | undefined;
+      if (kv.rarityweights || kv.rarity || kv.lootweights) {
+        const raw = kv.rarityweights || kv.rarity || kv.lootweights;
+        const parts = raw.split(',');
+        const weights: any = {};
+        for (const part of parts) {
+          const [k, v] = part.split(':').map((s) => s.trim());
+          if (!k || !v) continue;
+          const upperK = k.toUpperCase();
+          const num = Number(v);
+          if (!Number.isFinite(num)) continue;
+          if (upperK === 'COMMON' || upperK === 'RARE' || upperK === 'EPIC') {
+            weights[upperK] = num;
+          }
+        }
+        if (Object.keys(weights).length > 0) {
+          rarityWeights = weights;
+        }
+      }
+
+      // 解析 mode 字段（兼容大小写和简写）
+      let mode: ItemRespawn['mode'] = 'both';
+      if (kv.mode) {
+        const m = kv.mode.toLowerCase();
+        if (m === 'initial' || m === 'init') mode = 'initial';
+        else if (m === 'respawn' || m === 're') mode = 'respawn';
+        else mode = 'both';
+      }
+
+      const config: ItemRespawn = {
+        id: kv.id,
+        mode,
+        intervalTicks: kv.interval
+          ? parseNumber(kv.interval, lineNumber, 'itemRespawn.interval')
+          : parseNumber(kv.intervalticks ?? '600', lineNumber, 'itemRespawn.intervalTicks'), // 默认600 ticks (30秒)
+        count: kv.count ? parseNumber(kv.count, lineNumber, 'itemRespawn.count') : 1,
+        maxItems:
+          kv.maxitems || kv.max
+            ? parseNumber(kv.maxitems || kv.max, lineNumber, 'itemRespawn.maxItems')
+            : undefined,
+        zoneId: kv.zoneid || kv.zone,
+        itemIds,
+        rarityWeights,
+      };
+
+      template.itemRespawns.push(config);
+    } else if (directive === '@airespawn') {
+      // 新增: 解析AI重刷配置
+      const { kv } = parseKeyValues(tokens);
+      template.aiRespawn = {
+        intervalTicks: kv.interval ? parseNumber(kv.interval, lineNumber, 'aiRespawn.interval') : parseNumber(kv.intervalticks ?? '1200', lineNumber, 'aiRespawn.intervalTicks'), // 默认1200 ticks (60秒)
+        spawnId: kv.spawnid || kv.spawn,
+        maxAIs: kv.maxais || kv.max ? parseNumber(kv.maxais || kv.max, lineNumber, 'aiRespawn.maxAIs') : undefined,
+      };
     } else if (directive === '@note' || directive === '@comment') {
       continue;
     } else {
@@ -397,6 +602,49 @@ export function formatMapTemplateText(template: MapTemplate): string {
       if (zone.description) zoneLine += ` desc=${quoteIfNeeded(zone.description)}`;
       lines.push(zoneLine);
     }
+  }
+  
+  // 物品重刷配置
+  if (template.itemRespawns && template.itemRespawns.length > 0) {
+    lines.push('');
+    lines.push('# Item respawn configuration');
+    for (const cfg of template.itemRespawns) {
+      let itemRespawnLine = '@itemrespawn';
+      if (cfg.id) itemRespawnLine += ` id=${quoteIfNeeded(cfg.id)}`;
+      if (cfg.mode && cfg.mode !== 'both') itemRespawnLine += ` mode=${cfg.mode}`;
+      itemRespawnLine += ` intervalTicks=${cfg.intervalTicks} count=${cfg.count}`;
+      if (cfg.maxItems) itemRespawnLine += ` maxItems=${cfg.maxItems}`;
+      if (cfg.zoneId) itemRespawnLine += ` zoneId=${quoteIfNeeded(cfg.zoneId)}`;
+      if (cfg.itemIds && cfg.itemIds.length > 0) {
+        itemRespawnLine += ` items=${cfg.itemIds.join(',')}`;
+      }
+      if (cfg.rarityWeights) {
+        const parts: string[] = [];
+        if (cfg.rarityWeights.COMMON !== undefined) {
+          parts.push(`COMMON:${cfg.rarityWeights.COMMON}`);
+        }
+        if (cfg.rarityWeights.RARE !== undefined) {
+          parts.push(`RARE:${cfg.rarityWeights.RARE}`);
+        }
+        if (cfg.rarityWeights.EPIC !== undefined) {
+          parts.push(`EPIC:${cfg.rarityWeights.EPIC}`);
+        }
+        if (parts.length > 0) {
+          itemRespawnLine += ` rarityWeights=${parts.join(',')}`;
+        }
+      }
+      lines.push(itemRespawnLine);
+    }
+  }
+  
+  // AI重刷配置
+  if (template.aiRespawn) {
+    lines.push('');
+    lines.push('# AI respawn configuration');
+    let aiRespawnLine = `@airespawn intervalTicks=${template.aiRespawn.intervalTicks}`;
+    if (template.aiRespawn.spawnId) aiRespawnLine += ` spawnId=${quoteIfNeeded(template.aiRespawn.spawnId)}`;
+    if (template.aiRespawn.maxAIs) aiRespawnLine += ` maxAIs=${template.aiRespawn.maxAIs}`;
+    lines.push(aiRespawnLine);
   }
   
   return lines.join('\n');

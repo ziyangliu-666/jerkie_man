@@ -78,6 +78,20 @@ const DEFAULT_MELEE_ARC_DEG = 60;
 const MELEE_SWING_TTL_MS = 160;
 let meleeSwings: MeleeSwing[] = [];
 
+// 闪光弹致盲总时长（从共享物品配置读取，避免写死）
+const FLASH_GRENADE_DURATION_MS: number = (() => {
+  try {
+    const flashItem = getItemType('flash_grenade');
+    const props = (flashItem as any).consumableProps;
+    if (props && typeof props.flashDurationMs === 'number') {
+      return props.flashDurationMs;
+    }
+  } catch {
+    // 忽略配置读取错误，回退到 3000ms 以保证不崩溃
+  }
+  return 3000;
+})();
+
 type ExplosionEffect = {
   x: number;
   y: number;
@@ -295,6 +309,10 @@ if (window.visualViewport) {
 
 // Step3: 输入管理器接收 worldCanvas，开火输入只在 worldCanvas 上监听
 const inputManager = new InputManager(worldCanvas);
+
+// 新增: 设置耐力检查回调（用于UI限制）
+inputManager.setStaminaCheckCallback(() => getCurrentStaminaPercent());
+inputManager.setStaminaShakeCallback(() => shakeStaminaHud());
 
 // 初始化HUD（使用 debugPanel 作为容器，右侧调试面板）
 const hud = new HUD('debugPanel');
@@ -1611,6 +1629,9 @@ function updateStaminaHud(localPlayer: PLAYER_STATE | null): void {
   const isSprinting = localPlayer.isSprinting ?? false;
   const staminaPercent = (stamina / maxStamina) * 100;
   
+  // 新增: 更新InputManager的耐力耗尽状态
+  inputManager.updateStaminaExhaustedState(staminaPercent);
+  
   // 设置颜色类
   let colorClass = '';
   if (staminaPercent < 30) {
@@ -1643,6 +1664,35 @@ function updateStaminaHud(localPlayer: PLAYER_STATE | null): void {
   } else {
     staminaHud.classList.remove('sprinting');
   }
+}
+
+// 新增: 触发耐力UI摇晃效果
+function shakeStaminaHud(): void {
+  getStaminaHudElements();
+  if (!staminaHud) {
+    return;
+  }
+  
+  // 添加摇晃类
+  staminaHud.classList.add('shake');
+  
+  // 300ms后移除摇晃类
+  setTimeout(() => {
+    if (staminaHud) {
+      staminaHud.classList.remove('shake');
+    }
+  }, 300);
+}
+
+// 新增: 获取当前耐力百分比（用于InputManager检查）
+function getCurrentStaminaPercent(): number {
+  if (!predictedLocalPlayer || currentPhase !== 'RAID') {
+    return 100; // 默认返回100%，允许冲刺
+  }
+  
+  const stamina = Math.max(0, Math.min(predictedLocalPlayer.maxStamina ?? 100, predictedLocalPlayer.stamina ?? 100));
+  const maxStamina = predictedLocalPlayer.maxStamina ?? 100;
+  return (stamina / maxStamina) * 100;
 }
 
 // 新增: 更新左下角 Buff HUD
@@ -3386,6 +3436,7 @@ function renderLoop(): void {
     // 修复: 每帧把 renderLocalPlayer 平滑追向 predictedLocalPlayer
     if (predictedLocalPlayer) {
       if (!renderLocalPlayer) {
+        // 初次创建时完整拷贝（包括 usingItem 等可选字段）
         renderLocalPlayer = { ...predictedLocalPlayer };
       } else {
         const dx = predictedLocalPlayer.x - renderLocalPlayer.x;
@@ -3422,6 +3473,10 @@ function renderLoop(): void {
         renderLocalPlayer.weaponRuntime = predictedLocalPlayer.weaponRuntime; // 修复: 更新武器运行时状态（包括弹药数）
         renderLocalPlayer.inventory = predictedLocalPlayer.inventory;
         renderLocalPlayer.raidEquipment = predictedLocalPlayer.raidEquipment;
+        // 新增: 同步道具读条状态（例如急救包使用中）
+        (renderLocalPlayer as any).usingItemTypeId = (predictedLocalPlayer as any).usingItemTypeId;
+        (renderLocalPlayer as any).usingItemRemainingMs = (predictedLocalPlayer as any).usingItemRemainingMs;
+        (renderLocalPlayer as any).usingItemTotalMs = (predictedLocalPlayer as any).usingItemTotalMs;
       }
       
       // 使用平滑后的 renderLocalPlayer 渲染本地玩家
@@ -3490,6 +3545,7 @@ function renderLoop(): void {
             y: smoke.y,
             radius: smoke.radius,
             age: (nowPerf2 - smoke.spawnTimeMs) / smoke.durationMs,
+            durationMs: smoke.durationMs,
           }))
           .filter((smoke) => smoke.age >= 0 && smoke.age <= 1);
         smokeEffects = smokeEffects.filter(
@@ -3567,7 +3623,7 @@ function renderLoop(): void {
           uiOverlay.updateState({
             extractProgress: {
               enabled: true,
-              progress: (localPlayer.extractProgress as number) / 2000,
+              progress: (localPlayer.extractProgress as number) / 10000, // 10秒撤离时间
             },
           });
         } else {
@@ -3579,7 +3635,8 @@ function renderLoop(): void {
           const now = Date.now();
           const flashEndTime = localPlayer.flashEndTime ?? 0;
           const remainingMs = Math.max(0, flashEndTime - now);
-          const progress = remainingMs / 3000; // 3秒总时长
+          const totalMs = FLASH_GRENADE_DURATION_MS || 3000;
+          const progress = remainingMs / totalMs;
           uiOverlay.updateState({
             flash: {
               enabled: true,
@@ -3649,10 +3706,17 @@ function renderLoop(): void {
       // 修复: 检查是否可控（非 ALIVE 时禁用输入发送和预测）
       const localPlayer = predictedLocalPlayer ?? state.players.find((p) => p.id === localPlayerId) ?? null;
       const canControl = !!localPlayer && localPlayer.status === 'ALIVE';
+      // 新增: 如果正在使用需要读条的道具（例如急救包），客户端本地也禁止一切操作
+      const isUsingItemNow =
+        !!localPlayer &&
+        (localPlayer as any).usingItemTypeId &&
+        (localPlayer as any).usingItemRemainingMs !== undefined &&
+        (localPlayer as any).usingItemRemainingMs > 0;
+      const canControlInputs = canControl && !isUsingItemNow;
       
-      // 1. 读取输入（非 ALIVE 时清零）
+      // 1. 读取输入（非 ALIVE 或正在读条时清零）
       const rawKeys = inputManager.getKeys();
-      const tickKeys = canControl ? rawKeys : { up: false, down: false, left: false, right: false };
+      const tickKeys = canControlInputs ? rawKeys : { up: false, down: false, left: false, right: false };
       const tickAim = (() => {
         if (localPlayerId && localPlayer) {
           const playerScreenPos = renderer.worldToScreen(localPlayer.x, localPlayer.y);
@@ -3660,7 +3724,8 @@ function renderLoop(): void {
         }
         return inputManager.getAimAngle(worldCanvas);
       })();
-      const rawShoot = canControl && !isThrowingMode ? inputManager.getShoot() : false; // 投掷模式下禁用开火
+      // 投掷模式下禁用开火；读条中也禁用开火
+      const rawShoot = canControlInputs && !isThrowingMode ? inputManager.getShoot() : false;
       const shootPressed = rawShoot && !lastLocalShoot;
       const weaponDef = (() => {
         if (localPlayer?.weaponRuntime?.weaponTypeId) {
@@ -3679,22 +3744,22 @@ function renderLoop(): void {
         : rawShoot;
       const tickShoot = isBurstWeapon ? justPressed : rawShoot;
       lastLocalShoot = rawShoot;
-      const tickExtractHeld = canControl ? inputManager.getExtractHeld() : false;
-      const tickSprint = canControl ? inputManager.getSprintHeld() : false; // 新增: 获取冲刺输入
+      const tickExtractHeld = canControlInputs ? inputManager.getExtractHeld() : false;
+      const tickSprint = canControlInputs ? inputManager.getSprintHeld() : false; // 新增: 获取冲刺输入
       
       // 本地预测子弹已在发送 input 时由 BulletTrackManager 生成（通过 shotId 对齐）
       
       // P2-2: 合并 interact 脉冲（使用 TTL，不再无限期保留）
-      // 非 ALIVE 时清零 interact
-      if (!canControl) {
+      // 非 ALIVE 或正在读条时清零 interact
+      if (!canControlInputs) {
         interactUntil = 0;
       } else if (inputManager.consumeInteract()) {
         interactUntil = performance.now() + INTERACT_TTL_MS;
         dbg.push('INTERACT_PRESS', { until: interactUntil });
       }
       
-      // 新增: 消费换弹脉冲事件（edge-trigger）
-      const manualReload = canControl ? inputManager.consumeReload() : false;
+      // 新增: 消费换弹脉冲事件（edge-trigger），读条中不允许手动换弹
+      const manualReload = canControlInputs ? inputManager.consumeReload() : false;
       const weaponRuntime = localPlayer?.weaponRuntime;
       const ammoInMag = localPredictedAmmo ?? weaponRuntime?.ammoInMag ?? 0;
       const isReloadingNow =
@@ -3751,9 +3816,10 @@ function renderLoop(): void {
       }
       
       // 新增: 处理快捷栏使用物品（1-5键）
-      if (canControl && connState.connected) {
+      if (canControlInputs && connState.connected) {
         for (let slot = 1; slot <= 5; slot++) {
-          if (inputManager.consumeUseItem(slot)) {
+          // 正在读条期间，忽略新的使用物品输入
+          if (!isUsingItemNow && inputManager.consumeUseItem(slot)) {
             // 检查是否是手雷
             const localPlayer = predictedLocalPlayer ?? state.players.find((p) => p.id === localPlayerId) ?? null;
             if (localPlayer) {
@@ -3778,8 +3844,8 @@ function renderLoop(): void {
         }
       }
       
-      // 新增: 处理投掷模式
-      if (isThrowingMode && canControl) {
+      // 新增: 处理投掷模式（读条期间也禁止投掷）
+      if (isThrowingMode && canControlInputs) {
         const localPlayer = predictedLocalPlayer ?? state.players.find((p) => p.id === localPlayerId) ?? null;
         if (localPlayer) {
           // 更新瞄准目标（自动跟随玩家位置）
@@ -3825,7 +3891,8 @@ function renderLoop(): void {
         }
       }
       
-      if (connState.connected && canControl) {
+      // 读条期间不发送移动/开火等输入，完全交给服务器读条
+      if (connState.connected && canControlInputs) {
         // 修复: 提前计算射击逻辑（边缘触发，只在实际射击时发送）
         const nowPerf2 = performance.now();
         let shotIdToSend: number | undefined = undefined;
@@ -4119,6 +4186,21 @@ function renderLoop(): void {
       if (localPlayer && localPlayer.extractProgress !== undefined) {
         localPlayerExtractProgress = localPlayer.extractProgress;
         hudLocalPlayer = localPlayer;
+      }
+
+      // 调试: 打印一次本地玩家的 usingItem 状态（每次 HUD 更新，只要有就打印）
+      if (
+        localPlayer &&
+        localPlayer.usingItemTypeId &&
+        localPlayer.usingItemRemainingMs !== undefined &&
+        localPlayer.usingItemTotalMs !== undefined
+      ) {
+        // eslint-disable-next-line no-console
+        console.log('[HUD] local using item', {
+          typeId: localPlayer.usingItemTypeId,
+          remainingMs: localPlayer.usingItemRemainingMs,
+          totalMs: localPlayer.usingItemTotalMs,
+        });
       }
     }
     

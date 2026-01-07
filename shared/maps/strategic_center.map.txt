@@ -1,0 +1,225 @@
+# MAPTEXT v1
+# 重新设计：Strategic Center (No-Overlap Edition)
+# 目标：保持“中心撤离最危险 + 外围资源争夺”，并且所有“建筑/障碍物”尽量不重叠
+# 说明：中心撤离区(450~550)内部完全空旷；草丛围绕中心；箱子以“成群”放置；水域少量点缀
+
+@meta id=strategic_center_v2 name="Strategic Center v2" desc="中央撤离点被AI守护，外围资源点散布；中心空旷但被草丛环绕；箱子成群堆放；所有障碍物尽量不重叠。"
+@map width=1000 height=1000 seed=888888
+
+# === 撤离点：地图中心（保持空旷）===
+@extract x=450 y=450 w=100 h=100
+
+# === 出生点（4个角落）===
+@spawn x=100 y=100
+@spawn x=900 y=100
+@spawn x=100 y=900
+@spawn x=900 y=900
+
+# === 兴趣点（POI）：中心 + 外围资源点 ===
+@poi x=500 y=500 id=center_extract type=landmark name="Center Extract" desc="中央撤离点：最危险但最直接（撤离区内部空旷）"
+@poi x=200 y=200 id=nw_resource type=resource name="Northwest Resource" desc="西北资源点"
+@poi x=800 y=200 id=ne_resource type=resource name="Northeast Resource" desc="东北资源点"
+@poi x=200 y=800 id=sw_resource type=resource name="Southwest Resource" desc="西南资源点"
+@poi x=800 y=800 id=se_resource type=resource name="Southeast Resource" desc="东南资源点"
+@poi x=500 y=200 id=north_resource type=resource name="North Resource" desc="北部资源点"
+@poi x=500 y=800 id=south_resource type=resource name="South Resource" desc="南部资源点"
+@poi x=200 y=500 id=west_resource type=resource name="West Resource" desc="西部资源点"
+@poi x=800 y=500 id=east_resource type=resource name="East Resource" desc="东部资源点"
+
+# === 区域定义 ===
+@zone x=350 y=350 w=300 h=300 id=center_zone type=danger name="Center Zone" desc="中央危险区：AI巡逻密集（撤离区内部仍空旷）"
+@zone x=0 y=0 w=500 h=500 id=northwest_zone type=loot name="Northwest Zone" desc="西北资源区"
+@zone x=500 y=0 w=500 h=500 id=northeast_zone type=loot name="Northeast Zone" desc="东北资源区"
+@zone x=0 y=500 w=500 h=500 id=southwest_zone type=loot name="Southwest Zone" desc="西南资源区"
+@zone x=500 y=500 w=500 h=500 id=southeast_zone type=loot name="Southeast Zone" desc="东南资源区"
+
+# === 少量水域：边缘点缀（不封路，不与箱群/草丛重叠）===
+@obstacle x=460 y=60  w=80  h=50  type=water   # 上
+@obstacle x=60  y=460 w=50  h=80  type=water   # 左
+@obstacle x=890 y=460 w=50  h=80  type=water   # 右
+@obstacle x=460 y=900 w=80  h=50  type=water   # 下
+
+# === 中心：草丛“环绕撤离点”（撤离区内部保持空旷）===
+# 注意：这些 bush 都在撤离区(450..550)之外，避免重叠
+@obstacle x=430 y=360 w=140 h=60 type=bush   # 北侧草带
+@obstacle x=430 y=580 w=140 h=60 type=bush   # 南侧草带
+@obstacle x=360 y=430 w=60  h=140 type=bush  # 西侧草带
+@obstacle x=580 y=430 w=60  h=140 type=bush  # 东侧草带
+
+@obstacle x=360 y=360 w=70 h=70 type=bush    # 西北角草
+@obstacle x=570 y=360 w=70 h=70 type=bush    # 东北角草
+@obstacle x=360 y=570 w=70 h=70 type=bush    # 西南角草
+@obstacle x=570 y=570 w=70 h=70 type=bush    # 东南角草
+
+# === 少量石墙：仅切视线，不围成封闭建筑（并避免与其它障碍重叠）===
+@obstacle x=490 y=300 w=20 h=120 type=wall   # 中心上方竖墙（不进撤离区）
+@obstacle x=300 y=490 w=120 h=20 type=wall   # 中心左方横墙（不进撤离区）
+@obstacle x=680 y=490 w=120 h=20 type=wall   # 中心右方横墙（不进撤离区）
+@obstacle x=490 y=680 w=20 h=120 type=wall   # 中心下方竖墙（不进撤离区）
+
+# === 外围资源点：箱子群（成群堆放；与草丛/石墙/水域尽量不重叠）===
+# 规则：箱群用 30x30，步长 32（留2px缝），避免“轻微重叠”
+
+# 西北箱子群（靠近 nw_resource）
+@obstacle x=140 y=140 w=30 h=30 type=crate
+@obstacle x=172 y=140 w=30 h=30 type=crate
+@obstacle x=204 y=140 w=30 h=30 type=crate
+@obstacle x=236 y=140 w=30 h=30 type=crate
+@obstacle x=140 y=172 w=30 h=30 type=crate
+@obstacle x=172 y=172 w=30 h=30 type=crate
+@obstacle x=204 y=172 w=30 h=30 type=crate
+@obstacle x=236 y=172 w=30 h=30 type=crate
+@obstacle x=156 y=204 w=30 h=30 type=crate
+@obstacle x=188 y=204 w=30 h=30 type=crate
+@obstacle x=220 y=204 w=30 h=30 type=crate
+
+# 东北箱子群（靠近 ne_resource）
+@obstacle x=734 y=140 w=30 h=30 type=crate
+@obstacle x=766 y=140 w=30 h=30 type=crate
+@obstacle x=798 y=140 w=30 h=30 type=crate
+@obstacle x=830 y=140 w=30 h=30 type=crate
+@obstacle x=734 y=172 w=30 h=30 type=crate
+@obstacle x=766 y=172 w=30 h=30 type=crate
+@obstacle x=798 y=172 w=30 h=30 type=crate
+@obstacle x=830 y=172 w=30 h=30 type=crate
+@obstacle x=750 y=204 w=30 h=30 type=crate
+@obstacle x=782 y=204 w=30 h=30 type=crate
+@obstacle x=814 y=204 w=30 h=30 type=crate
+
+# 西南箱子群（靠近 sw_resource）
+@obstacle x=140 y=734 w=30 h=30 type=crate
+@obstacle x=172 y=734 w=30 h=30 type=crate
+@obstacle x=204 y=734 w=30 h=30 type=crate
+@obstacle x=236 y=734 w=30 h=30 type=crate
+@obstacle x=140 y=766 w=30 h=30 type=crate
+@obstacle x=172 y=766 w=30 h=30 type=crate
+@obstacle x=204 y=766 w=30 h=30 type=crate
+@obstacle x=236 y=766 w=30 h=30 type=crate
+@obstacle x=156 y=798 w=30 h=30 type=crate
+@obstacle x=188 y=798 w=30 h=30 type=crate
+@obstacle x=220 y=798 w=30 h=30 type=crate
+
+# 东南箱子群（靠近 se_resource）
+@obstacle x=734 y=734 w=30 h=30 type=crate
+@obstacle x=766 y=734 w=30 h=30 type=crate
+@obstacle x=798 y=734 w=30 h=30 type=crate
+@obstacle x=830 y=734 w=30 h=30 type=crate
+@obstacle x=734 y=766 w=30 h=30 type=crate
+@obstacle x=766 y=766 w=30 h=30 type=crate
+@obstacle x=798 y=766 w=30 h=30 type=crate
+@obstacle x=830 y=766 w=30 h=30 type=crate
+@obstacle x=750 y=798 w=30 h=30 type=crate
+@obstacle x=782 y=798 w=30 h=30 type=crate
+@obstacle x=814 y=798 w=30 h=30 type=crate
+
+# 北部箱子群（靠近 north_resource）
+@obstacle x=420 y=140 w=30 h=30 type=crate
+@obstacle x=452 y=140 w=30 h=30 type=crate
+@obstacle x=484 y=140 w=30 h=30 type=crate
+@obstacle x=516 y=140 w=30 h=30 type=crate
+@obstacle x=548 y=140 w=30 h=30 type=crate
+@obstacle x=420 y=172 w=30 h=30 type=crate
+@obstacle x=452 y=172 w=30 h=30 type=crate
+@obstacle x=484 y=172 w=30 h=30 type=crate
+@obstacle x=516 y=172 w=30 h=30 type=crate
+@obstacle x=548 y=172 w=30 h=30 type=crate
+
+# 南部箱子群（靠近 south_resource）
+@obstacle x=420 y=790 w=30 h=30 type=crate
+@obstacle x=452 y=790 w=30 h=30 type=crate
+@obstacle x=484 y=790 w=30 h=30 type=crate
+@obstacle x=516 y=790 w=30 h=30 type=crate
+@obstacle x=548 y=790 w=30 h=30 type=crate
+@obstacle x=420 y=822 w=30 h=30 type=crate
+@obstacle x=452 y=822 w=30 h=30 type=crate
+@obstacle x=484 y=822 w=30 h=30 type=crate
+@obstacle x=516 y=822 w=30 h=30 type=crate
+@obstacle x=548 y=822 w=30 h=30 type=crate
+
+# 西部箱子群（靠近 west_resource）
+@obstacle x=140 y=420 w=30 h=30 type=crate
+@obstacle x=172 y=420 w=30 h=30 type=crate
+@obstacle x=204 y=420 w=30 h=30 type=crate
+@obstacle x=140 y=452 w=30 h=30 type=crate
+@obstacle x=172 y=452 w=30 h=30 type=crate
+@obstacle x=204 y=452 w=30 h=30 type=crate
+@obstacle x=140 y=484 w=30 h=30 type=crate
+@obstacle x=172 y=484 w=30 h=30 type=crate
+@obstacle x=204 y=484 w=30 h=30 type=crate
+@obstacle x=156 y=516 w=30 h=30 type=crate
+@obstacle x=188 y=516 w=30 h=30 type=crate
+
+# 东部箱子群（靠近 east_resource）
+@obstacle x=766 y=420 w=30 h=30 type=crate
+@obstacle x=798 y=420 w=30 h=30 type=crate
+@obstacle x=830 y=420 w=30 h=30 type=crate
+@obstacle x=766 y=452 w=30 h=30 type=crate
+@obstacle x=798 y=452 w=30 h=30 type=crate
+@obstacle x=830 y=452 w=30 h=30 type=crate
+@obstacle x=766 y=484 w=30 h=30 type=crate
+@obstacle x=798 y=484 w=30 h=30 type=crate
+@obstacle x=830 y=484 w=30 h=30 type=crate
+@obstacle x=782 y=516 w=30 h=30 type=crate
+@obstacle x=814 y=516 w=30 h=30 type=crate
+
+# === 外围草丛：每个资源区再补两块草（与箱群错开）===
+# 西北草丛（避开 NW 箱群 y<=234）
+@obstacle x=110 y=260 w=120 h=80 type=bush
+@obstacle x=290 y=230 w=90  h=110 type=bush
+
+# 东北草丛（避开 NE 箱群 y<=234）
+@obstacle x=770 y=260 w=120 h=80 type=bush
+@obstacle x=620 y=230 w=90  h=110 type=bush
+
+# 西南草丛（避开 SW 箱群 y<=828）
+@obstacle x=110 y=860 w=120 h=80 type=bush
+@obstacle x=290 y=830 w=90  h=110 type=bush
+
+# 东南草丛（避开 SE 箱群 y<=828）
+@obstacle x=770 y=860 w=120 h=80 type=bush
+@obstacle x=620 y=830 w=90  h=110 type=bush
+
+# 北部草丛（避开北部箱群 y<=202）
+@obstacle x=400 y=240 w=110 h=90 type=bush
+@obstacle x=560 y=240 w=110 h=90 type=bush
+
+# 南部草丛（避开南部箱群 y>=790）
+@obstacle x=400 y=870 w=110 h=90 type=bush
+@obstacle x=560 y=870 w=110 h=90 type=bush
+
+# 西部草丛（避开西部箱群 x<=234）
+@obstacle x=260 y=420 w=90  h=110 type=bush
+@obstacle x=260 y=560 w=90  h=110 type=bush
+
+# 东部草丛（避开东部箱群 x>=766）
+@obstacle x=650 y=420 w=90  h=110 type=bush
+@obstacle x=650 y=560 w=90  h=110 type=bush
+
+# === AI生成点（新角色系统）：围绕中心但不落在撤离区、也不落在障碍物里 ===
+
+# 中心防守：重机枪手 + 基础AI（最危险的中心区域，高火力守护）
+@aispawn x=500 y=420 type=guard role=heavy_gunner count=1 radius=90
+@aispawn x=500 y=580 type=guard role=basic       count=1 radius=90
+
+# 四向快速巡逻：侦察兵（南北） + 基础AI（东西）
+@aispawn x=500 y=320 type=patrol role=scout count=1 patrol=north_resource,center_extract
+@aispawn x=500 y=680 type=patrol role=scout count=1 patrol=south_resource,center_extract
+@aispawn x=320 y=500 type=patrol role=basic count=1 patrol=west_resource,center_extract
+@aispawn x=680 y=500 type=patrol role=basic count=1 patrol=east_resource,center_extract
+
+# 四角资源点：狙击手远程守卫（600px视野，500px射程，精准射击）
+@aispawn x=290 y=220 type=guard role=sniper count=1 radius=100
+@aispawn x=710 y=220 type=guard role=sniper count=1 radius=100
+@aispawn x=290 y=780 type=guard role=sniper count=1 radius=100
+@aispawn x=710 y=780 type=guard role=sniper count=1 radius=100
+
+# === 重刷配置 ===
+@itemrespawn intervalTicks=600 count=3 maxItems=40
+@airespawn intervalTicks=1800 count=1 maxAIs=8
+
+@note "v3 AI角色系统升级："
+@note "- 中心：1个重机枪手(红色26px,200HP,30%护甲,2倍射速) + 1个基础AI(橙色20px)"
+@note "- 巡逻：2个侦察兵(青色16px,1.5倍速度) + 2个基础AI"
+@note "- 四角：4个狙击手(紫色18px,600视野,500射程,±1°精度)"
+@note "- AI重刷会保持角色类型，重刷后继承spawn点的role配置"
+@comment "如果你们引擎会把相邻(贴边)也判定为重叠，把 crate 的步长从 32 改成 34（或把每个箱子 w/h 从30改成28）。"

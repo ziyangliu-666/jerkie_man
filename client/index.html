@@ -612,7 +612,8 @@
       height: 6px;
       border-radius: 3px;
       background: rgba(255, 255, 255, 0.08);
-      overflow: hidden;
+      overflow: visible;
+      position: relative;
     }
 
     #staminaHud .stamina-hud-bar-fill {
@@ -621,6 +622,21 @@
       background: #0088ff;
       box-shadow: 0 0 10px rgba(0, 136, 255, 0.5);
       transition: width 0.08s linear, background 0.08s linear;
+      position: relative;
+      z-index: 1;
+    }
+
+    /* 35%标记线 */
+    #staminaHud .stamina-hud-bar-marker {
+      position: absolute;
+      left: 35%;
+      top: 0;
+      width: 2px;
+      height: 100%;
+      background: rgba(255, 255, 255, 0.6);
+      z-index: 2;
+      pointer-events: none;
+      box-shadow: 0 0 4px rgba(255, 255, 255, 0.8);
     }
 
     /* 耐力条颜色变化 */
@@ -637,6 +653,11 @@
     /* 冲刺时的闪烁动画 */
     #staminaHud.sprinting .stamina-hud-bar-fill {
       animation: staminaPulse 0.8s ease-in-out infinite alternate;
+    }
+
+    /* 耐力不足时的摇晃动画 */
+    #staminaHud.shake {
+      animation: staminaShake 0.3s ease-in-out;
     }
 
     /* 左下角 Buff HUD */
@@ -734,6 +755,12 @@
     @keyframes staminaPulse {
       from { opacity: 0.7; }
       to { opacity: 1.0; }
+    }
+
+    @keyframes staminaShake {
+      0%, 100% { transform: translateX(0); }
+      10%, 30%, 50%, 70%, 90% { transform: translateX(-8px); }
+      20%, 40%, 60%, 80% { transform: translateX(8px); }
     }
 
     /* NAME Modal 样式 */
@@ -1929,6 +1956,7 @@
         </div>
         <div class="stamina-hud-bar">
           <div class="stamina-hud-bar-fill" id="staminaHudFill"></div>
+          <div class="stamina-hud-bar-marker" id="staminaHudMarker"></div>
         </div>
       </div>
 

@@ -18,6 +18,9 @@ export class Renderer {
   private worldWidth: number = 0;
   private worldHeight: number = 0;
   
+  // 新增: 允许屏幕超出地图边界的像素值（用于避免 DOM UI 挡住操作）
+  private cameraOverflowPixels: number = 300;
+  
   // P2 优化: 缓存 canvas rect，避免每帧 getBoundingClientRect()
   private cachedRectLeft: number = 0;
   private cachedRectTop: number = 0;
@@ -305,13 +308,38 @@ export class Renderer {
   /**
    * 新增: 绘制AI实体
    */
-  drawAI(ai: any, debug: boolean = false): void {
-    const size = 20;
+  drawAI(ai: any, debug: boolean = false, currentServerTick?: number): void {
+    // 根据AI角色调整大小和颜色
+    let size = 20;
+    let color = '#ff8800'; // 默认橙色
+    const role = ai.role || 'basic';
+
+    // 角色特定的视觉效果
+    switch (role) {
+      case 'sniper':
+        size = 18; // 狙击手稍小
+        color = '#9966ff'; // 紫色
+        break;
+      case 'heavy_gunner':
+        size = 26; // 重机枪手更大
+        color = '#ff3333'; // 红色
+        break;
+      case 'scout':
+        size = 16; // 侦察兵最小
+        color = '#00ff99'; // 青色
+        break;
+      case 'basic':
+      default:
+        size = 20;
+        color = '#ff8800'; // 橙色
+        break;
+    }
+
     const screenX = Math.round(ai.x - this.camX);
     const screenY = Math.round(ai.y - this.camY);
 
-    // AI颜色: 橙色（区别于蓝色本地玩家/红色敌对玩家）
-    this.ctx.fillStyle = ai.status === 'ALIVE' ? '#ff8800' : '#666666';
+    // AI颜色（根据角色类型）
+    this.ctx.fillStyle = ai.status === 'ALIVE' ? color : '#666666';
     this.ctx.fillRect(screenX - size / 2, screenY - size / 2, size, size);
 
     // 白色边框
@@ -347,12 +375,118 @@ export class Renderer {
       this.ctx.stroke();
     }
 
-    // Debug: 状态标签
+    // 新增: 绘制换弹进度条（AI下方，蓝色，与玩家一致）
+    if (ai.weaponRuntime && ai.status === 'ALIVE' && currentServerTick !== undefined) {
+      const wr = ai.weaponRuntime;
+      if (wr.reloadingUntilTick > 0 && currentServerTick < wr.reloadingUntilTick) {
+        // 正在换弹，计算进度
+        try {
+          const weaponDef = getWeaponDef(wr.weaponTypeId);
+          const reloadTicks = msToTicks(weaponDef.reloadMs);
+          const startTick = wr.reloadingUntilTick - reloadTicks;
+          const progress = Math.min(1, (currentServerTick - startTick) / reloadTicks);
+          
+          // 在AI下方绘制蓝色进度条
+          const reloadBarWidth = size;
+          const reloadBarHeight = 3;
+          const reloadBarX = screenX - reloadBarWidth / 2;
+          const reloadBarY = screenY + size / 2 + 4; // AI下方4px
+          
+          // 背景
+          this.ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
+          this.ctx.fillRect(reloadBarX, reloadBarY, reloadBarWidth, reloadBarHeight);
+          
+          // 进度条（蓝色）
+          this.ctx.fillStyle = '#00aaff';
+          this.ctx.fillRect(reloadBarX, reloadBarY, reloadBarWidth * progress, reloadBarHeight);
+        } catch (e) {
+          // 忽略武器定义获取失败
+        }
+      }
+    }
+
+    // AI状态标签（总是显示，类似"隐蔽"标签的样式）
+    if (ai.behaviorState) {
+      let stateText = '';
+      let bgColor = 'rgba(0, 0, 0, 0.8)'; // 背景色
+      let borderColor = '#fff'; // 边框色
+
+      switch (ai.behaviorState) {
+        case 'IDLE':
+          stateText = '💤 摸鱼';
+          bgColor = 'rgba(100, 100, 100, 0.8)';
+          borderColor = '#aaa';
+          break;
+        case 'PATROL':
+          stateText = '🚶 巡逻';
+          bgColor = 'rgba(70, 130, 180, 0.85)';
+          borderColor = '#87CEEB';
+          break;
+        case 'SPOTTING':
+          stateText = '⚠️ 发现';
+          bgColor = 'rgba(255, 165, 0, 0.85)'; // 橙色背景
+          borderColor = '#FFD700'; // 金色边框
+          break;
+        case 'CHASE':
+          stateText = '🏃 追击';
+          bgColor = 'rgba(255, 215, 0, 0.85)';
+          borderColor = '#FFD700';
+          break;
+        case 'ATTACK':
+          stateText = '🔥 攻击';
+          bgColor = 'rgba(220, 20, 60, 0.85)';
+          borderColor = '#FF6347';
+          break;
+        case 'SEARCH':
+          stateText = '🔍 搜索';
+          bgColor = 'rgba(255, 140, 0, 0.85)';
+          borderColor = '#FFA500';
+          break;
+        case 'RETURN':
+          stateText = '↩ 返回';
+          bgColor = 'rgba(50, 205, 50, 0.85)';
+          borderColor = '#90EE90';
+          break;
+      }
+
+      if (stateText) {
+        this.ctx.save();
+
+        // 使用与"隐蔽"标签相同的样式
+        this.ctx.font = 'bold 12px monospace';
+        this.ctx.textAlign = 'center';
+        this.ctx.textBaseline = 'middle';
+
+        const metrics = this.ctx.measureText(stateText);
+        const textWidth = metrics.width;
+        const padding = 6;
+        const boxWidth = textWidth + padding * 2;
+        const boxHeight = 20;
+        const textY = screenY + size / 2 + 15; // AI下方15px
+
+        // 绘制背景框
+        this.ctx.fillStyle = bgColor;
+        this.ctx.fillRect(screenX - boxWidth / 2, textY - boxHeight / 2, boxWidth, boxHeight);
+
+        // 绘制边框（类似"隐蔽"标签）
+        this.ctx.strokeStyle = borderColor;
+        this.ctx.lineWidth = 1.5;
+        this.ctx.strokeRect(screenX - boxWidth / 2, textY - boxHeight / 2, boxWidth, boxHeight);
+
+        // 绘制文字（白色）
+        this.ctx.fillStyle = '#FFFFFF';
+        this.ctx.fillText(stateText, screenX, textY);
+
+        this.ctx.restore();
+      }
+    }
+
+    // Debug模式：显示原始状态名称
     if (debug && ai.behaviorState) {
-      this.ctx.font = '10px monospace';
-      this.ctx.fillStyle = '#fff';
+      this.ctx.font = '9px monospace';
+      this.ctx.fillStyle = '#0ff';
       this.ctx.textAlign = 'center';
-      this.ctx.fillText(ai.behaviorState, screenX, screenY - size / 2 - 18);
+      this.ctx.fillText(`[${ai.behaviorState}]`, screenX, screenY - size / 2 - 28);
     }
   }
 
@@ -655,21 +789,49 @@ export class Renderer {
     this.ctx.restore();
   }
 
-  // 新增: 绘制烟雾（偏灰白色圆形 + 中央进度条）
-  private drawSmoke(smoke: { x: number; y: number; radius: number; age: number }): void {
+  // 新增: 绘制烟雾（带出现/消失过渡动画）
+  private drawSmoke(smoke: { x: number; y: number; radius: number; age: number; durationMs?: number }): void {
     const screenX = smoke.x - this.camX;
     const screenY = smoke.y - this.camY;
 
+    // age: 0 -> 1 代表整段生命周期
+    const clampedAge = Math.max(0, Math.min(1, smoke.age));
+    const totalMs = smoke.durationMs ?? 15000; // 默认15秒
+    const lifeMs = clampedAge * totalMs;
+
+    // 出现阶段：前 0.2s 内从小到大快速膨胀
+    const APPEAR_MS = 200;
+    const appearPhase = Math.max(0, Math.min(1, lifeMs / APPEAR_MS));
+
+    // 消失阶段：最后 1s 内慢慢淡出
+    const FADE_MS = 1000;
+    const fadeStartMs = Math.max(0, totalMs - FADE_MS);
+    const disappearPhase =
+      lifeMs <= fadeStartMs ? 0 : Math.max(0, Math.min(1, (lifeMs - fadeStartMs) / FADE_MS));
+
+    // 半径动画：从 30% -> 100%
+    const baseRadius = smoke.radius;
+    const radiusScale = 0.3 + 0.7 * appearPhase;
+    const animatedRadius = baseRadius * radiusScale;
+
+    // 透明度动画：出现/消失阶段渐变，中间保持最浓
+    const alpha =
+      lifeMs <= APPEAR_MS
+        ? 0.4 + 0.6 * appearPhase // 进入时从 0.4 -> 1.0
+        : lifeMs >= fadeStartMs
+        ? 1.0 - 0.8 * disappearPhase // 结束时从 1.0 -> 0.2
+        : 1.0; // 中段保持 1.0
+
     this.ctx.save();
 
-    // 烟雾圆形（黑灰色，完全不透明）
-    this.ctx.fillStyle = 'rgba(100, 100, 100, 1.0)';
+    // 烟雾圆形（黑灰色，带透明度）
+    this.ctx.fillStyle = `rgba(100, 100, 100, ${alpha})`;
     this.ctx.beginPath();
-    this.ctx.arc(screenX, screenY, smoke.radius, 0, Math.PI * 2);
+    this.ctx.arc(screenX, screenY, animatedRadius, 0, Math.PI * 2);
     this.ctx.fill();
 
-    // 中央进度条
-    const progress = Math.max(0, Math.min(1, 1 - smoke.age)); // 剩余时间百分比
+    // 中央进度条（显示剩余时间：0~1）
+    const progress = Math.max(0, Math.min(1, 1 - clampedAge));
     const barWidth = 80;
     const barHeight = 8;
     const barX = screenX - barWidth / 2;
@@ -1137,6 +1299,138 @@ export class Renderer {
     this.ctx.restore();
   }
 
+  /**
+   * 新增: 绘制本地玩家使用道具读条指示（例如急救包）
+   * 以玩家为中心绘制圆环进度条和道具名称
+   */
+  private drawUsingItemIndicator(player: PLAYER_STATE): void {
+    if (
+      !player.usingItemTypeId ||
+      player.usingItemRemainingMs === undefined ||
+      player.usingItemTotalMs === undefined
+    ) {
+      return;
+    }
+
+    // 如果总时间异常，直接返回
+    if (player.usingItemTotalMs <= 0) return;
+
+    const screenX = Math.round(player.x - this.camX);
+    const screenY = Math.round(player.y - this.camY);
+
+    // 调试日志：只对本地玩家调用时在外面包一层，这里打印原始数据一次
+    // 为避免刷屏，这里只在 10%/50%/90% 等关键进度附近打印
+    const usedMs = player.usingItemTotalMs - player.usingItemRemainingMs;
+    const progress = Math.max(0, Math.min(1, usedMs / player.usingItemTotalMs));
+    const debugPercent = Math.round(progress * 100);
+    if (debugPercent === 10 || debugPercent === 50 || debugPercent === 90) {
+      // eslint-disable-next-line no-console
+      console.log('[Render] using item progress', {
+        typeId: player.usingItemTypeId,
+        remainingMs: player.usingItemRemainingMs,
+        totalMs: player.usingItemTotalMs,
+        percent: debugPercent,
+      });
+    }
+
+    // 圆环参数
+    const radius = 26;
+    const lineWidth = 4;
+
+    this.ctx.save();
+
+    // 背景圆环（灰色底）
+    this.ctx.strokeStyle = 'rgba(0, 0, 0, 0.55)';
+    this.ctx.lineWidth = lineWidth;
+    this.ctx.beginPath();
+    this.ctx.arc(screenX, screenY, radius, 0, Math.PI * 2);
+    this.ctx.stroke();
+
+    // 前景进度圆弧（绿色，从上方向顺时针）
+    const startAngle = -Math.PI / 2;
+    const endAngle = startAngle + progress * Math.PI * 2;
+    this.ctx.strokeStyle = '#4CAF50';
+    this.ctx.lineWidth = lineWidth;
+    this.ctx.beginPath();
+    this.ctx.arc(screenX, screenY, radius, startAngle, endAngle);
+    this.ctx.stroke();
+
+    // 百分比文字
+    const percent = Math.round(progress * 100);
+    this.ctx.fillStyle = '#ffffff';
+    this.ctx.font = 'bold 10px monospace';
+    this.ctx.textAlign = 'center';
+    this.ctx.textBaseline = 'middle';
+    this.ctx.fillText(`${percent}%`, screenX, screenY);
+
+    // 道具名称放在玩家上方一点
+    let itemName = player.usingItemTypeId;
+    try {
+      const itemType = getItemType(player.usingItemTypeId);
+      itemName = itemType.name;
+    } catch {
+      // ignore, fallback to id
+    }
+    this.ctx.font = 'bold 12px monospace';
+    this.ctx.textAlign = 'center';
+    this.ctx.textBaseline = 'bottom';
+    this.ctx.fillStyle = '#ffffff';
+    const nameY = screenY - radius - 4;
+    if (nameY >= 0) {
+      this.ctx.fillText(itemName, screenX, nameY);
+    }
+
+    this.ctx.restore();
+  }
+
+  // 绘制致盲状态提示（当玩家或AI被闪光弹致盲时）
+  private drawFlashIndicator(entityX: number, entityY: number, progress: number = 1.0): void {
+    // 将世界坐标转换为屏幕坐标
+    const screenX = Math.round(entityX - this.camX);
+    const screenY = Math.round(entityY - this.camY);
+    
+    // 在实体下方显示小型"致盲"提示（与隐蔽类似位置）
+    const textY = screenY + 25;
+    
+    this.ctx.save();
+    
+    const text = '⚡ 致盲';
+    this.ctx.font = 'bold 12px monospace';
+    this.ctx.textAlign = 'center';
+    this.ctx.textBaseline = 'middle';
+    
+    const metrics = this.ctx.measureText(text);
+    const textWidth = metrics.width;
+    const padding = 6;
+    const boxWidth = textWidth + padding * 2;
+    const boxHeight = 20;
+    const boxX = screenX - boxWidth / 2;
+    const boxY = textY - boxHeight / 2;
+    
+    // 背景框：白色半透明
+    this.ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
+    this.ctx.fillRect(boxX, boxY, boxWidth, boxHeight);
+    
+    // 进度条：黑色，从左到右表示剩余时间（进度越小，黑条越短）
+    const clampedProgress = Math.max(0, Math.min(1, progress));
+    const progressWidth = boxWidth * clampedProgress;
+    if (progressWidth > 0) {
+      this.ctx.fillStyle = '#000000';
+      this.ctx.fillRect(boxX, boxY, progressWidth, boxHeight);
+    }
+    
+    // 边框：中性灰色
+    this.ctx.strokeStyle = '#666666';
+    this.ctx.lineWidth = 1.5;
+    this.ctx.strokeRect(boxX, boxY, boxWidth, boxHeight);
+    
+    // 文字：灰色，在白色背景上更清晰可读
+    this.ctx.fillStyle = '#333333';
+    this.ctx.fillText(text, screenX, textY);
+    
+    this.ctx.restore();
+  }
+
   // 渲染所有玩家和子弹
   // P0-3: 计算camera让本地玩家居中，保证玩家永远可见
   // Step5: bullets参数类型改为BULLET_STATE[]，类型明确且可扩展
@@ -1172,10 +1466,12 @@ export class Renderer {
         let targetCamX = localPlayer.x - this.cssWidth / 2;
         let targetCamY = localPlayer.y - this.cssHeight / 2;
         
-        // P0-3 修复: Clamp camera 到世界边界（避免看到出界空白）
+        // P0-3 修复: Clamp camera 到世界边界（允许超出一定像素值，避免 DOM UI 挡住操作）
         if (this.worldWidth > 0 && this.worldHeight > 0) {
-          targetCamX = Math.max(0, Math.min(targetCamX, this.worldWidth - this.cssWidth));
-          targetCamY = Math.max(0, Math.min(targetCamY, this.worldHeight - this.cssHeight));
+          // 允许相机位置超出边界 cameraOverflowPixels 像素
+          // 这样当玩家在地图边缘时，屏幕可以超出地图一部分，避免 DOM UI 挡住操作
+          targetCamX = Math.max(-this.cameraOverflowPixels, Math.min(targetCamX, this.worldWidth - this.cssWidth + this.cameraOverflowPixels));
+          targetCamY = Math.max(-this.cameraOverflowPixels, Math.min(targetCamY, this.worldHeight - this.cssHeight + this.cameraOverflowPixels));
         }
         
         this.camX = targetCamX;
@@ -1307,7 +1603,7 @@ export class Renderer {
       // TODO: 服务端需要为AI添加inSmoke字段
       
       // 绘制AI
-      this.drawAI(ai, debug);
+      this.drawAI(ai, debug, currentServerTick);
     }
 
     // Day2: 绘制所有子弹
@@ -1395,12 +1691,58 @@ export class Renderer {
     if (isLocalPlayerInBush && localPlayer) {
       this.drawConcealmentIndicator(localPlayer.x, localPlayer.y);
     }
+
+    // 绘制本地玩家使用道具读条指示（例如急救包）
+    if (localPlayer) {
+      this.drawUsingItemIndicator(localPlayer);
+    }
+
+    // 绘制致盲状态提示（所有被闪的玩家和AI）
+    const now = Date.now();
+    // 从配置读取闪光弹持续时间
+    let flashGrenadeDurationMs = 5000; // 默认值
+    try {
+      const flashItem = getItemType('flash_grenade');
+      const props = (flashItem as any).consumableProps;
+      if (props && typeof props.flashDurationMs === 'number') {
+        flashGrenadeDurationMs = props.flashDurationMs;
+      }
+    } catch {
+      // 配置读取失败，使用默认值
+    }
+    
+    for (const p of players) {
+      if ((p as any).isFlashed) {
+        const flashEndTime = (p as any).flashEndTime ?? 0;
+        const remainingMs = Math.max(0, flashEndTime - now);
+        const progress = remainingMs / flashGrenadeDurationMs;
+        this.drawFlashIndicator(p.x, p.y, progress);
+      }
+    }
+    for (const ai of ais) {
+      if (ai.status === 'ALIVE' && (ai as any).isFlashed) {
+        const flashEndTime = (ai as any).flashEndTime ?? 0;
+        const remainingMs = Math.max(0, flashEndTime - now);
+        const progress = remainingMs / flashGrenadeDurationMs;
+        this.drawFlashIndicator(ai.x, ai.y, progress);
+      }
+    }
   }
 
   // P0-3 修复: 设置世界边界（用于 camera clamp）
   setWorldBounds(width: number, height: number): void {
     this.worldWidth = width;
     this.worldHeight = height;
+  }
+  
+  // 新增: 设置相机超出地图边界的像素值（用于避免 DOM UI 挡住操作）
+  setCameraOverflowPixels(pixels: number): void {
+    this.cameraOverflowPixels = Math.max(0, pixels); // 确保不为负数
+  }
+  
+  // 新增: 获取当前相机超出地图边界的像素值
+  getCameraOverflowPixels(): number {
+    return this.cameraOverflowPixels;
   }
 
   // Resize方法：由外部调用，负责所有canvas尺寸和transform设置

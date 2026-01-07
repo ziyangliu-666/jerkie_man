@@ -29,7 +29,7 @@ export class Player {
   public lastInputSeq: number;
   public lastInputTick: number;
   public lootCount: number; // Day3: 战利品计数（已废弃，保留兼容）
-  public extractProgress: number = 0; // 游戏化增强: 撤离进度（毫秒，0-2000）
+  public extractProgress: number = 0; // 游戏化增强: 撤离进度（毫秒，0-10000，10秒）
   public inventory: PlayerInventory; // 新增: 背包系统
   public name: string | undefined; // 新增: 玩家昵称（用于显示）
   public weaponRuntime: WeaponRuntime | undefined; // 新增: 武器运行时状态（局内状态）
@@ -48,11 +48,16 @@ export class Player {
   // 新增: 短效 Buff 列表（仅服务端运行时使用）
   private activeBuffs: InternalBuff[] = [];
   public flashedUntil: number = 0; // 新增: 闪光弹致盲结束时间（毫秒时间戳，0表示未被闪）
+  // 新增: 道具读条状态（例如急救包使用中）
+  public usingItemTypeId: string | null = null;
+  public usingItemIid: string | null = null;
+  public usingItemEndTick: number = 0;
+  public usingItemTotalDurationTicks: number = 0;
 
   // 修复: 移动速度已移至 shared/sim.ts，这里不再需要（保留注释用于文档）
   // SPEED = 200 (在 shared/sim.ts 中定义)
   
-  private readonly EXTRACT_DURATION_MS = 2000; // 游戏化增强: 撤离需要持续2秒
+  private readonly EXTRACT_DURATION_MS = 10000; // 游戏化增强: 撤离需要持续10秒
 
   constructor(id: string, x: number = 0, y: number = 0, bagCap: number = 4, name?: string, weaponRuntime?: WeaponRuntime) {
     this.id = id;
@@ -73,6 +78,35 @@ export class Player {
     this.name = name; // 新增: 设置玩家昵称
     this.weaponRuntime = weaponRuntime; // 新增: 设置武器运行时状态
     this.positionHistory = new PositionHistory(50); // 延迟补偿: 保留50帧（2.5秒@20Hz）
+  }
+
+  /**
+   * 新增: 开始使用一个需要读条的道具（例如急救包）
+   */
+  startUsingItem(typeId: string, iid: string, durationMs: number, currentTick: number): void {
+    const durationTicks = msToTicks(durationMs);
+    this.usingItemTypeId = typeId;
+    this.usingItemIid = iid;
+    this.usingItemTotalDurationTicks = durationTicks;
+    // 结束 tick 使用“开区间”，这样 currentTick < usingItemEndTick 表示仍在读条中
+    this.usingItemEndTick = currentTick + durationTicks;
+  }
+
+  /**
+   * 新增: 取消当前道具读条（例如玩家死亡/道具失效）
+   */
+  cancelUsingItem(): void {
+    this.usingItemTypeId = null;
+    this.usingItemIid = null;
+    this.usingItemEndTick = 0;
+    this.usingItemTotalDurationTicks = 0;
+  }
+
+  /**
+   * 新增: 当前是否正在使用需要读条的道具
+   */
+  isUsingItem(currentTick: number): boolean {
+    return !!this.usingItemTypeId && currentTick < this.usingItemEndTick;
   }
 
   // 新增: 计算玩家的速度倍数（基于装备 buff）
@@ -395,6 +429,17 @@ export class Player {
     // 确保 hp 始终为整数并在 0-100 之间，避免 Zod 验证错误
     const safeHp = Math.min(100, Math.max(0, Math.round(this.hp)));
 
+    // 新增: 计算道具读条 HUD 信息（如果存在）
+    let usingItemTypeId: string | null = null;
+    let usingItemRemainingMs: number | undefined;
+    let usingItemTotalMs: number | undefined;
+    if (this.usingItemTypeId && currentTick < this.usingItemEndTick) {
+      usingItemTypeId = this.usingItemTypeId;
+      const remainingTicks = Math.max(0, this.usingItemEndTick - currentTick);
+      usingItemRemainingMs = ticksToMs(remainingTicks);
+      usingItemTotalMs = ticksToMs(this.usingItemTotalDurationTicks);
+    }
+
     return {
       id: this.id,
       x: this.x,
@@ -425,6 +470,9 @@ export class Player {
       killedBy: this.killedBy, // 新增: 击杀者名字
       killedByWeaponName: this.killedByWeaponName, // 新增: 击杀使用的武器名称
       buffs: this.getPublicBuffs(currentTick), // 新增: 短效 Buff 列表
+      usingItemTypeId,
+      usingItemRemainingMs,
+      usingItemTotalMs,
     };
   }
 

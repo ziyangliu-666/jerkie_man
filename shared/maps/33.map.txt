@@ -149,5 +149,12 @@
 @zone x=120 y=480 w=220 h=200 id=west_wet type=generic name="West Wet" desc="西侧浅水区：不致命但会拖节奏。"
 @zone x=860 y=520 w=220 h=200 id=east_wet type=generic name="East Wet" desc="东侧浅水区：逼迫绕行或抢点。"
 
-@note "箱子是成群堆放：每群都留了边缘缝隙，保证路径不会被堵死。中心草丛环会让撤离更像‘最后一波’。"
-@comment 如果你想让撤离更‘纯危险’，把中心内环四个 bush 再各扩大 10~20 像素（或把 extract 改成 50x50），否则太容易被草丛贴脸秒。"
+@note "箱子是成群堆放：每群都留了边缘缝隙，保证路径不会被堵死。中心草丛环会让撤离更像'最后一波'。"
+@comment 如果你想让撤离更'纯危险'，把中心内环四个 bush 再各扩大 10~20 像素（或把 extract 改成 50x50），否则太容易被草丛贴脸秒。"
+
+# === 重刷配置 ===
+# 物品重刷：每5秒（600 ticks）重刷1个物品，最多保持50个物品在地图上
+@itemrespawn intervalTicks=100 count=1 maxItems=50
+
+# AI重刷：每10秒（1200 ticks）重刷1个AI，最多保持10个AI在地图上
+@airespawn intervalTicks=200 maxAIs=10

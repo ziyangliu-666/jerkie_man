@@ -1,145 +1,320 @@
 # MAPTEXT v1
-# 精美小图：运河破碎区（中轴运河 + 双桥 + 多区块建筑群 + 货场迷宫）
-# 玩法关键词：两条主线转移路线（北桥/中桥），多个侧翼小巷，视野长短交替，掩体密度分层
+# Strategic Center v3（大地图 2000x2000）
+# 目标：
+# - 中央撤离点（最危险），撤离区本体保持“无障碍物覆盖”
+# - 草丛更多：撤离点外侧做“灌木环”，外围也有大量草丛带
+# - 箱子成群堆放：8个资源点各一群 + 4条主路节点箱群
+# - 水域少量：四边中段小水池，不封路
+# - 少封闭硬障碍：仅中心“视线切割”细墙（不围房间，不重叠）
 
-@meta id=canal_splinter name="Canal Splinter" desc="中轴运河切开城区；双桥强控点；市场/公寓/货场三大资源区；撤离在地图中心。"
-@map width=1800 height=1400 seed=160106
+@meta id=strategic_center_v3_2k name="Strategic Center v3 (2K)" desc="2000x2000：中心撤离点极危险（AI守卫/巡逻）；外围8个资源点箱群成堆；草丛多且围绕中心；少量水域；硬障碍极少且不封闭。"
+@map width=2000 height=2000 seed=888888
 
-# 撤离区：地图中心（中桥区域，高风险高回报）
-@extract x=790 y=590 w=220 h=220
+# === 撤离点：地图中心（撤离区本体不要放任何 obstacle 覆盖）===
+@extract x=950 y=950 w=100 h=100
 
-# === 出生点（环形分布 + 两侧中点，便于开局分流） ===
-@spawn x=120 y=120
-@spawn x=1680 y=140
-@spawn x=140 y=1260
-@spawn x=1700 y=1260
-@spawn x=80 y=700
-@spawn x=1720 y=720
+# === 出生点（4个角落，略内缩）===
+@spawn x=200 y=200
+@spawn x=1800 y=200
+@spawn x=200 y=1800
+@spawn x=1800 y=1800
 
-# === 水域（运河：上下两段 + 北桥 / 中桥两处实际可通行的“桥面”） ===
-# 上游水域（在北桥位置留出一段可通行带：y ∈ [420, 500]）
-@obstacle x=830 y=0 w=160 h=420 type=water
-@obstacle x=830 y=500 w=160 h=20 type=water
+# === 兴趣点（POI）：中心 + 外围资源点（8个）===
+@poi x=1000 y=1000 id=center_extract type=landmark name="Center Extract" desc="中央撤离点：最危险但最直接"
+@poi x=350 y=350 id=nw_resource type=resource name="Northwest Resource" desc="西北资源点"
+@poi x=1650 y=350 id=ne_resource type=resource name="Northeast Resource" desc="东北资源点"
+@poi x=350 y=1650 id=sw_resource type=resource name="Southwest Resource" desc="西南资源点"
+@poi x=1650 y=1650 id=se_resource type=resource name="Southeast Resource" desc="东南资源点"
+@poi x=1000 y=350 id=north_resource type=resource name="North Resource" desc="北部资源点"
+@poi x=1000 y=1650 id=south_resource type=resource name="South Resource" desc="南部资源点"
+@poi x=220 y=1000 id=west_resource type=resource name="West Resource" desc="西部资源点（箱群外侧）"
+@poi x=1780 y=1000 id=east_resource type=resource name="East Resource" desc="东部资源点（箱群外侧）"
 
-# 下游水域（保持中桥区域 y ∈ [520, 720] 为陆地，用护栏引导而不是完全封死）
-@obstacle x=830 y=720 w=160 h=680 type=water
+# === 区域定义 ===
+@zone x=700 y=700 w=600 h=600 id=center_zone type=danger name="Center Zone" desc="中央危险区：AI巡逻密集"
+@zone x=0 y=0 w=1000 h=1000 id=northwest_zone type=loot name="Northwest Zone" desc="西北资源区"
+@zone x=1000 y=0 w=1000 h=1000 id=northeast_zone type=loot name="Northeast Zone" desc="东北资源区"
+@zone x=0 y=1000 w=1000 h=1000 id=southwest_zone type=loot name="Southwest Zone" desc="西南资源区"
+@zone x=1000 y=1000 w=1000 h=1000 id=southeast_zone type=loot name="Southeast Zone" desc="东南资源区"
 
-# 西北沼泽洼地（绕行惩罚，适合埋伏）
-@obstacle x=120 y=40 w=220 h=140 type=water
-@obstacle x=90 y=210 w=260 h=120 type=bush
+# === 少量水域（四边中段小水池，不封路）===
+@obstacle x=120 y=860 w=120 h=280 type=water
+@obstacle x=1760 y=860 w=120 h=280 type=water
+@obstacle x=860 y=120 w=280 h=120 type=water
+@obstacle x=860 y=1760 w=280 h=120 type=water
 
-# === 桥与运河护栏（制造两个硬拐点/卡口） ===
-# 中桥护栏（可穿插但不能直冲）——中段各留一处桥口，保证 y≈610 方向可从两岸走上桥
-@obstacle 820 540 10 60 type=wall   # 左侧上段护栏
-@obstacle 820 640 10 60 type=wall   # 左侧下段护栏（中间 40px 缺口）
-@obstacle 980 540 10 60 type=wall   # 右侧上段护栏
-@obstacle 980 640 10 60 type=wall   # 右侧下段护栏
-@obstacle 830 540 150 10 type=wall
-@obstacle 830 690 150 10 type=wall
+# === 中心硬障碍（仅视线切割，不封闭，不重叠，不触碰撤离区）===
+@obstacle x=995 y=760 w=10 h=170 type=wall
+@obstacle x=995 y=1070 w=10 h=170 type=wall
+@obstacle x=760 y=995 w=170 h=10 type=wall
+@obstacle x=1070 y=995 w=170 h=10 type=wall
 
-# 北桥（更宽、更“快”，但暴露）——在中段打出“桥口”供玩家真正过河
-@obstacle 820 380 10 40 type=wall   # 左侧上段桥柱
-@obstacle 820 460 10 40 type=wall   # 左侧下段桥柱（中间留 40px 走廊）
-@obstacle 980 380 10 40 type=wall   # 右侧上段桥柱
-@obstacle 980 460 10 40 type=wall   # 右侧下段桥柱
+# === 草丛：中心"灌木环"（不覆盖撤离区 950..1050）===
+# 四边
+@obstacle x=930 y=880 w=140 h=50 type=bush
+@obstacle x=930 y=1070 w=140 h=50 type=bush
+@obstacle x=880 y=930 w=50 h=140 type=bush
+@obstacle x=1070 y=930 w=50 h=140 type=bush
+# 四角
+@obstacle x=880 y=880 w=45 h=45 type=bush
+@obstacle x=1075 y=880 w=45 h=45 type=bush
+@obstacle x=880 y=1075 w=45 h=45 type=bush
+@obstacle x=1075 y=1075 w=45 h=45 type=bush
 
-# === 中桥两侧检查站（强掩体，必争点） ===
-@obstacle x=580 y=560 w=180 h=120 type=wall
-@obstacle x=1040 y=560 w=180 h=120 type=wall
-@obstacle x=750 y=585 w=60 h=60 type=crate
-@obstacle x=990 y=585 w=60 h=60 type=crate
+# === 外围草丛（减少数量，保留关键位置）===
+# 北带（减少到2块）
+@obstacle x=760 y=260 w=180 h=120 type=bush
+@obstacle x=1100 y=260 w=180 h=120 type=bush
 
-@poi x=640 y=610 id=west_checkpoint type=building name="West Checkpoint" desc="西侧检查站：掩体强，适合卡中桥。"
-@poi x=1100 y=610 id=east_checkpoint type=building name="East Checkpoint" desc="东侧检查站：能反控中桥，常见交火点。"
+# 南带（减少到2块）
+@obstacle x=760 y=1620 w=180 h=120 type=bush
+@obstacle x=1100 y=1620 w=180 h=120 type=bush
 
-# === 西北：旧市场（多房间 + 小巷） ===
-@obstacle x=180 y=180 w=320 h=220 type=wall
-# 市场内隔断（形成三条走廊）
-@obstacle 200 240 280 18 type=wall
-@obstacle 200 300 280 18 type=wall
-@obstacle 330 198 18 190 type=wall
-# 摊位与箱堆（可破坏）
-@obstacle x=210 y=410 w=70 h=70 type=crate
-@obstacle x=310 y=420 w=70 h=70 type=crate
-@obstacle x=410 y=410 w=70 h=70 type=crate
-@obstacle x=520 y=260 w=80 h=120 type=bush
+# 西带（减少到2块，注意避开左水池 x=120..240）
+@obstacle x=300 y=760 w=180 h=140 type=bush
+@obstacle x=300 y=1120 w=180 h=140 type=bush
 
-@poi x=260 y=230 id=old_market type=building name="Old Market" desc="旧市场：走廊多、转角多，近距离优势明显。"
-@zone x=120 y=140 w=520 h=420 id=market_quarter type=loot name="Market Quarter" desc="高密度小房间与箱堆，资源多但很容易被夹。"
+# 东带（减少到2块，注意避开右水池 x=1760..1880）
+@obstacle x=1520 y=760 w=180 h=140 type=bush
+@obstacle x=1520 y=1120 w=180 h=140 type=bush
 
-# === 东北：公寓带（长走廊 + 后巷绕行） ===
-# 主公寓楼（分两栋留出中间巷）
-@obstacle x=1160 y=160 w=190 h=260 type=wall
-@obstacle x=1390 y=160 w=190 h=260 type=wall
-# 连接楼道（把战斗拉成“长直线”）
-@obstacle 1160 290 420 18 type=wall
-# 后巷围墙（逼迫拐点）
-@obstacle 1120 120 520 20 type=wall
-@obstacle 1120 440 520 20 type=wall
+# 象限块状（只保留4个角落的大块）
+@obstacle x=520 y=520 w=220 h=160 type=bush
+@obstacle x=1240 y=1240 w=220 h=160 type=bush
+@obstacle x=520 y=1240 w=220 h=160 type=bush
+@obstacle x=1240 y=520 w=220 h=160 type=bush
 
-# 小型庭院草丛（提供“软掩体”）
-@obstacle x=1260 y=460 w=220 h=120 type=bush
+# === 外围石墙（增加视线切割墙，不封闭）===
+# 北部石墙（切割视线）
+@obstacle x=600 y=400 w=15 h=200 type=wall
+@obstacle x=800 y=400 w=15 h=200 type=wall
+@obstacle x=1200 y=400 w=15 h=200 type=wall
+@obstacle x=1400 y=400 w=15 h=200 type=wall
 
-@poi x=1280 y=220 id=apartment_a type=building name="Apartment A" desc="公寓A：长走廊，适合中远距离压制。"
-@poi x=1510 y=220 id=apartment_b type=building name="Apartment B" desc="公寓B：侧翼入口多，容易被绕。"
-@zone x=1100 y=120 w=640 h=520 id=apartment_block type=loot name="Apartment Block" desc="公寓区：长线对枪+后巷绕行并存，节奏变化大。"
+# 南部石墙（切割视线）
+@obstacle x=600 y=1400 w=15 h=200 type=wall
+@obstacle x=800 y=1400 w=15 h=200 type=wall
+@obstacle x=1200 y=1400 w=15 h=200 type=wall
+@obstacle x=1400 y=1400 w=15 h=200 type=wall
 
-# === 西南：货场迷宫（围墙 + 入口缺口 + 箱阵） ===
-# 货场外围墙（留两个缺口：北口/东口）
-@obstacle 120 860 520 22 type=wall     # 上墙
-@obstacle 120 1220 520 22 type=wall    # 下墙
-@obstacle 120 860 22 382 type=wall     # 左墙
-@obstacle 618 860 22 250 type=wall     # 右墙上半（下方留口）
+# 西部石墙（切割视线）
+@obstacle x=400 y=600 w=200 h=15 type=wall
+@obstacle x=400 y=800 w=200 h=15 type=wall
+@obstacle x=400 y=1200 w=200 h=15 type=wall
+@obstacle x=400 y=1400 w=200 h=15 type=wall
 
-# 货场内部箱阵（可破坏，形成“网格战斗”）
-@obstacle x=200 y=940 w=70 h=70 type=crate
-@obstacle x=300 y=940 w=70 h=70 type=crate
-@obstacle x=400 y=940 w=70 h=70 type=crate
-@obstacle x=200 y=1040 w=70 h=70 type=crate
-@obstacle x=320 y=1060 w=70 h=70 type=crate
-@obstacle x=460 y=1040 w=70 h=70 type=crate
-@obstacle x=240 y=1140 w=90 h=60 type=crate
-@obstacle x=380 y=1140 w=90 h=60 type=crate
+# 东部石墙（切割视线）
+@obstacle x=1400 y=600 w=200 h=15 type=wall
+@obstacle x=1400 y=800 w=200 h=15 type=wall
+@obstacle x=1400 y=1200 w=200 h=15 type=wall
+@obstacle x=1400 y=1400 w=200 h=15 type=wall
 
-# 货场外侧草带（绕行但不稳）
-@obstacle x=40 y=980 w=70 h=220 type=bush
+# === 箱子群：8个资源点（全部成群堆放）===
+# 西北资源点箱群（4x3 + 2 尾箱）
+@obstacle x=260 y=260 w=30 h=30 type=crate
+@obstacle x=294 y=260 w=30 h=30 type=crate
+@obstacle x=328 y=260 w=30 h=30 type=crate
+@obstacle x=362 y=260 w=30 h=30 type=crate
+@obstacle x=260 y=294 w=30 h=30 type=crate
+@obstacle x=294 y=294 w=30 h=30 type=crate
+@obstacle x=328 y=294 w=30 h=30 type=crate
+@obstacle x=362 y=294 w=30 h=30 type=crate
+@obstacle x=260 y=328 w=30 h=30 type=crate
+@obstacle x=294 y=328 w=30 h=30 type=crate
+@obstacle x=328 y=328 w=30 h=30 type=crate
+@obstacle x=362 y=328 w=30 h=30 type=crate
+@obstacle x=311 y=362 w=30 h=30 type=crate
+@obstacle x=345 y=362 w=30 h=30 type=crate
 
-@poi x=260 y=900 id=cargo_gate type=landmark name="Cargo Gate" desc="货场入口：常见蹲点，打进去/打出来都很难。"
-@poi x=430 y=1080 id=cargo_stacks type=landmark name="Cargo Stacks" desc="箱阵核心：近中距离交火最密集。"
-@zone x=60 y=820 w=700 h=520 id=cargo_yard type=pvp name="Cargo Yard" desc="货场迷宫：短线掩体多，适合推进与反推。"
+# 东北资源点箱群
+@obstacle x=1608 y=260 w=30 h=30 type=crate
+@obstacle x=1642 y=260 w=30 h=30 type=crate
+@obstacle x=1676 y=260 w=30 h=30 type=crate
+@obstacle x=1710 y=260 w=30 h=30 type=crate
+@obstacle x=1608 y=294 w=30 h=30 type=crate
+@obstacle x=1642 y=294 w=30 h=30 type=crate
+@obstacle x=1676 y=294 w=30 h=30 type=crate
+@obstacle x=1710 y=294 w=30 h=30 type=crate
+@obstacle x=1608 y=328 w=30 h=30 type=crate
+@obstacle x=1642 y=328 w=30 h=30 type=crate
+@obstacle x=1676 y=328 w=30 h=30 type=crate
+@obstacle x=1710 y=328 w=30 h=30 type=crate
+@obstacle x=1659 y=362 w=30 h=30 type=crate
+@obstacle x=1693 y=362 w=30 h=30 type=crate
 
-# === 东南：诊所 + 船坞撤离（可控但会被“桥点”卡） ===
-# 诊所主体（两段墙制造“L形”转角）
-@obstacle x=1120 y=860 w=260 h=160 type=wall
-@obstacle x=1320 y=1020 w=260 h=160 type=wall
-# 诊所外箱堆
-@obstacle x=1100 y=1060 w=60 h=60 type=crate
-@obstacle x=1180 y=1140 w=60 h=60 type=crate
-@obstacle x=1260 y=1060 w=60 h=60 type=crate
+# 西南资源点箱群
+@obstacle x=260 y=1608 w=30 h=30 type=crate
+@obstacle x=294 y=1608 w=30 h=30 type=crate
+@obstacle x=328 y=1608 w=30 h=30 type=crate
+@obstacle x=362 y=1608 w=30 h=30 type=crate
+@obstacle x=260 y=1642 w=30 h=30 type=crate
+@obstacle x=294 y=1642 w=30 h=30 type=crate
+@obstacle x=328 y=1642 w=30 h=30 type=crate
+@obstacle x=362 y=1642 w=30 h=30 type=crate
+@obstacle x=260 y=1676 w=30 h=30 type=crate
+@obstacle x=294 y=1676 w=30 h=30 type=crate
+@obstacle x=328 y=1676 w=30 h=30 type=crate
+@obstacle x=362 y=1676 w=30 h=30 type=crate
+@obstacle x=311 y=1710 w=30 h=30 type=crate
+@obstacle x=345 y=1710 w=30 h=30 type=crate
 
-# 船坞护栏（引导到撤离区，避免一条直线跑完）
-@obstacle 1460 1080 22 300 type=wall
-@obstacle 1460 1080 180 22 type=wall
+# 东南资源点箱群
+@obstacle x=1608 y=1608 w=30 h=30 type=crate
+@obstacle x=1642 y=1608 w=30 h=30 type=crate
+@obstacle x=1676 y=1608 w=30 h=30 type=crate
+@obstacle x=1710 y=1608 w=30 h=30 type=crate
+@obstacle x=1608 y=1642 w=30 h=30 type=crate
+@obstacle x=1642 y=1642 w=30 h=30 type=crate
+@obstacle x=1676 y=1642 w=30 h=30 type=crate
+@obstacle x=1710 y=1642 w=30 h=30 type=crate
+@obstacle x=1608 y=1676 w=30 h=30 type=crate
+@obstacle x=1642 y=1676 w=30 h=30 type=crate
+@obstacle x=1676 y=1676 w=30 h=30 type=crate
+@obstacle x=1710 y=1676 w=30 h=30 type=crate
+@obstacle x=1659 y=1710 w=30 h=30 type=crate
+@obstacle x=1693 y=1710 w=30 h=30 type=crate
 
-@poi x=1200 y=900 id=field_clinic type=building name="Field Clinic" desc="诊所：拐角多，适合清点补给。"
-@poi x=900 y=700 id=center_extract type=landmark name="Center Extraction" desc="中心撤离：位于地图中心，所有路线汇聚于此，高风险高回报。"
-@zone x=1080 y=820 w=680 h=560 id=clinic_dock type=loot name="Clinic & Dock" desc="诊所+船坞：资源不错，适合补给。"
+# 北部资源点箱群（6x2）
+@obstacle x=880 y=260 w=30 h=30 type=crate
+@obstacle x=914 y=260 w=30 h=30 type=crate
+@obstacle x=948 y=260 w=30 h=30 type=crate
+@obstacle x=982 y=260 w=30 h=30 type=crate
+@obstacle x=1016 y=260 w=30 h=30 type=crate
+@obstacle x=1050 y=260 w=30 h=30 type=crate
+@obstacle x=880 y=294 w=30 h=30 type=crate
+@obstacle x=914 y=294 w=30 h=30 type=crate
+@obstacle x=948 y=294 w=30 h=30 type=crate
+@obstacle x=982 y=294 w=30 h=30 type=crate
+@obstacle x=1016 y=294 w=30 h=30 type=crate
+@obstacle x=1050 y=294 w=30 h=30 type=crate
 
-# === 运河两岸：中距离对枪带（视野长） ===
-# 两岸零散掩体（压迫“直线过河”）
-@obstacle x=700 y=420 w=90 h=60 type=crate
-@obstacle x=620 y=720 w=90 h=60 type=crate
-@obstacle x=1020 y=420 w=90 h=60 type=crate
-@obstacle x=1100 y=720 w=90 h=60 type=crate
-@obstacle x=720 y=260 w=110 h=90 type=bush
-@obstacle x=980 y=260 w=110 h=90 type=bush
+# 南部资源点箱群（6x2）
+@obstacle x=880 y=1706 w=30 h=30 type=crate
+@obstacle x=914 y=1706 w=30 h=30 type=crate
+@obstacle x=948 y=1706 w=30 h=30 type=crate
+@obstacle x=982 y=1706 w=30 h=30 type=crate
+@obstacle x=1016 y=1706 w=30 h=30 type=crate
+@obstacle x=1050 y=1706 w=30 h=30 type=crate
+@obstacle x=880 y=1740 w=30 h=30 type=crate
+@obstacle x=914 y=1740 w=30 h=30 type=crate
+@obstacle x=948 y=1740 w=30 h=30 type=crate
+@obstacle x=982 y=1740 w=30 h=30 type=crate
+@obstacle x=1016 y=1740 w=30 h=30 type=crate
+@obstacle x=1050 y=1740 w=30 h=30 type=crate
 
-@poi x=900 y=460 id=north_bridge type=landmark name="North Bridge" desc="北桥：更快的过河线，但很空旷。"
-@poi x=900 y=610 id=mid_bridge type=landmark name="Mid Bridge" desc="中桥：更慢但更可控，掩体多。"
-@zone x=520 y=300 w=760 h=560 id=canal_crossing type=pvp name="Canal Crossing" desc="双桥+检查站：全图节奏的“时钟源”。"
+# 西部资源点箱群（3x4）
+@obstacle x=260 y=920 w=30 h=30 type=crate
+@obstacle x=294 y=920 w=30 h=30 type=crate
+@obstacle x=328 y=920 w=30 h=30 type=crate
+@obstacle x=260 y=954 w=30 h=30 type=crate
+@obstacle x=294 y=954 w=30 h=30 type=crate
+@obstacle x=328 y=954 w=30 h=30 type=crate
+@obstacle x=260 y=988 w=30 h=30 type=crate
+@obstacle x=294 y=988 w=30 h=30 type=crate
+@obstacle x=328 y=988 w=30 h=30 type=crate
+@obstacle x=260 y=1022 w=30 h=30 type=crate
+@obstacle x=294 y=1022 w=30 h=30 type=crate
+@obstacle x=328 y=1022 w=30 h=30 type=crate
 
-# === 撤离安全区（与 @extract 呼应）===
-@zone x=770 y=570 w=260 h=260 id=extract_safe type=safe name="Center Safe Zone" desc="中心撤离区：位于地图核心，所有方向都可能来敌，需要团队配合。"
+# 东部资源点箱群（3x4）
+@obstacle x=1640 y=920 w=30 h=30 type=crate
+@obstacle x=1674 y=920 w=30 h=30 type=crate
+@obstacle x=1708 y=920 w=30 h=30 type=crate
+@obstacle x=1640 y=954 w=30 h=30 type=crate
+@obstacle x=1674 y=954 w=30 h=30 type=crate
+@obstacle x=1708 y=954 w=30 h=30 type=crate
+@obstacle x=1640 y=988 w=30 h=30 type=crate
+@obstacle x=1674 y=988 w=30 h=30 type=crate
+@obstacle x=1708 y=988 w=30 h=30 type=crate
+@obstacle x=1640 y=1022 w=30 h=30 type=crate
+@obstacle x=1674 y=1022 w=30 h=30 type=crate
+@obstacle x=1708 y=1022 w=30 h=30 type=crate
 
-@note "可在 cargo_yard 或 canal_crossing 增加 Boss/事件点；也可加第二撤离点（同语法扩展后再做）。"
-@comment 建议：北桥更适合“快速转点”，中桥更适合“稳推进”；让两条路线都有人玩。
+# === 主路节点箱群（4群：让大图不空，但仍然“开放”）===
+# 北->中 节点箱群
+@obstacle x=960 y=620 w=30 h=30 type=crate
+@obstacle x=994 y=620 w=30 h=30 type=crate
+@obstacle x=1028 y=620 w=30 h=30 type=crate
+@obstacle x=960 y=654 w=30 h=30 type=crate
+@obstacle x=994 y=654 w=30 h=30 type=crate
+@obstacle x=1028 y=654 w=30 h=30 type=crate
+@obstacle x=994 y=688 w=30 h=30 type=crate
+@obstacle x=1028 y=688 w=30 h=30 type=crate
+
+# 南->中 节点箱群
+@obstacle x=960 y=1340 w=30 h=30 type=crate
+@obstacle x=994 y=1340 w=30 h=30 type=crate
+@obstacle x=1028 y=1340 w=30 h=30 type=crate
+@obstacle x=960 y=1374 w=30 h=30 type=crate
+@obstacle x=994 y=1374 w=30 h=30 type=crate
+@obstacle x=1028 y=1374 w=30 h=30 type=crate
+@obstacle x=994 y=1408 w=30 h=30 type=crate
+@obstacle x=1028 y=1408 w=30 h=30 type=crate
+
+# 西->中 节点箱群
+@obstacle x=620 y=960 w=30 h=30 type=crate
+@obstacle x=654 y=960 w=30 h=30 type=crate
+@obstacle x=688 y=960 w=30 h=30 type=crate
+@obstacle x=620 y=994 w=30 h=30 type=crate
+@obstacle x=654 y=994 w=30 h=30 type=crate
+@obstacle x=688 y=994 w=30 h=30 type=crate
+@obstacle x=654 y=1028 w=30 h=30 type=crate
+@obstacle x=688 y=1028 w=30 h=30 type=crate
+
+# 东->中 节点箱群
+@obstacle x=1340 y=960 w=30 h=30 type=crate
+@obstacle x=1374 y=960 w=30 h=30 type=crate
+@obstacle x=1408 y=960 w=30 h=30 type=crate
+@obstacle x=1340 y=994 w=30 h=30 type=crate
+@obstacle x=1374 y=994 w=30 h=30 type=crate
+@obstacle x=1408 y=994 w=30 h=30 type=crate
+@obstacle x=1374 y=1028 w=30 h=30 type=crate
+@obstacle x=1408 y=1028 w=30 h=30 type=crate
+
+# === AI生成点（新角色系统）===
+
+# 中心守卫：2个重机枪手（最危险区域，高火力高防御）
+# 位置已避开墙(y=760-930,1070-1240,x=760-930,1070-1240)和箱群
+@aispawn x=900 y=700 type=guard role=heavy_gunner count=1 radius=120
+@aispawn x=900 y=1300 type=guard role=heavy_gunner count=1 radius=120
+
+# 四向快速巡逻（中心 <-> 边中资源点）
+# 南北：侦察兵（青色，1.5倍速度，快速穿梭）
+# 东西：基础AI（橙色，标准配置）
+# 位置已避开主路节点箱群
+@aispawn x=1000 y=580 type=patrol role=scout count=1 patrol=north_resource,center_extract
+@aispawn x=1000 y=1500 type=patrol role=scout count=1 patrol=south_resource,center_extract
+@aispawn x=750 y=1080 type=patrol role=basic count=1 patrol=west_resource,center_extract
+@aispawn x=1250 y=1080 type=patrol role=basic count=1 patrol=east_resource,center_extract
+
+# 四角资源点：狙击手远程守卫（紫色，600px视野，500px射程，±1°精度）
+# 刷在箱群外侧，覆盖整个资源区
+@aispawn x=470 y=470 type=guard role=sniper count=1 radius=160
+@aispawn x=1530 y=470 type=guard role=sniper count=1 radius=160
+@aispawn x=470 y=1530 type=guard role=sniper count=1 radius=160
+@aispawn x=1530 y=1530 type=guard role=sniper count=1 radius=160
+
+# === 重刷配置 ===
+# 规则1：全图公共物资（初始 + 重刷），偏向普通品质，偶尔有稀有
+@itemrespawn id=global_common mode=both intervalTicks=900 count=2 maxItems=80 rarityWeights=COMMON:85,RARE:14,EPIC:1
+
+# 规则2：四个外围资源象限，各自少量公共物资（更集中在资源区）
+@itemrespawn id=nw_common mode=both intervalTicks=900 count=1 maxItems=10 zoneId=northwest_zone rarityWeights=COMMON:85,RARE:14,EPIC:1
+@itemrespawn id=ne_common mode=both intervalTicks=900 count=1 maxItems=10 zoneId=northeast_zone rarityWeights=COMMON:85,RARE:14,EPIC:1
+@itemrespawn id=sw_common mode=both intervalTicks=900 count=1 maxItems=10 zoneId=southwest_zone rarityWeights=COMMON:85,RARE:14,EPIC:1
+@itemrespawn id=se_common mode=both intervalTicks=900 count=1 maxItems=10 zoneId=southeast_zone rarityWeights=COMMON:85,RARE:14,EPIC:1
+
+# 规则3：中心危险区高价值物资点（机枪兵附近），减少数量但保持高价值
+# - 只在 center_zone 内刷新
+# - 数量明显低于外围总量，保证中心是“少量但优质”
+@itemrespawn id=center_high mode=both intervalTicks=900 count=1 maxItems=8 zoneId=center_zone items=w_minigun,w_grenade_launcher,w_sniper,armor_heavy,bag_military rarityWeights=COMMON:10,RARE:40,EPIC:70
+
+@airespawn intervalTicks=1800 maxAIs=10
+
+@note "v4 AI角色系统升级（2K大图）："
+@note "- 中心：2个重机枪手(红色26px,200HP,30%护甲,2倍射速疯狂扫射)"
+@note "- 巡逻南北：2个侦察兵(青色16px,1.5倍速度快速穿梭)"
+@note "- 巡逻东西：2个基础AI(橙色20px,标准配置)"
+@note "- 四角：4个狙击手(紫色18px,600视野,500射程,±1°精度远程狙杀)"
+@note "- AI重刷保持角色类型，maxAIs=10，每1800 ticks(90秒)重刷1个"
+@comment "战术建议：接近中心前先清理外围狙击手，侦察兵移动快需快速击杀，重机枪手硬刚需掩体。"

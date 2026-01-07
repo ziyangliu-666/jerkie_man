@@ -1,7 +1,7 @@
 import { Player } from './player.js';
 import { ProfileManager } from './profile.js';
-import type { PLAYER_STATE, BULLET_STATE, ITEM_STATE, C2S_INPUT, MAP_CONFIG, OBSTACLE_STATE, WorldItem, LootBag, ItemInstance, WeaponRuntime, WeaponDef, MapTemplate, SpawnPoint, AI_STATE } from '@jerkie-man/shared';
-import { loadMapConfig, loadItemTypes, circleVsAABB, createRng, rectIntersects, segmentIntersectsCircle, getItemType, getAllItemTypes, getItemTypesByRarity, getWeaponDef, getArmorDef, getBagDef, applySpread, msToTicks, getFireSchedule, shouldStartBurst, canFireTick, advanceFireCooldown, PLAYER_HIT_RADIUS, getBulletPenetration, isObstacleDestructible, isUsableItem, doesObstacleBlockPlayer } from '@jerkie-man/shared';
+import type { PLAYER_STATE, BULLET_STATE, ITEM_STATE, C2S_INPUT, MAP_CONFIG, OBSTACLE_STATE, WorldItem, LootBag, ItemInstance, WeaponRuntime, WeaponDef, MapTemplate, SpawnPoint, AI_STATE, AISpawn } from '@jerkie-man/shared';
+import { loadMapConfig, loadItemTypes, circleVsAABB, createRng, rectIntersects, segmentIntersectsCircle, getItemType, getAllItemTypes, getItemTypesByRarity, getWeaponDef, getArmorDef, getBagDef, applySpread, msToTicks, getFireSchedule, shouldStartBurst, canFireTick, advanceFireCooldown, PLAYER_HIT_RADIUS, getBulletPenetration, isObstacleDestructible, isUsableItem, doesObstacleBlockPlayer, AI_ROLE_PRESETS } from '@jerkie-man/shared';
 import { log } from './logger.js';
 import { AI, type PatrolConfig, type GuardConfig } from './ai.js';
 import { NavigationGrid, Pathfinder } from './pathfinding.js';
@@ -58,6 +58,12 @@ export class Room {
   private aiBehaviorController!: AIBehaviorController;
   private aiIdCounter = 0;
 
+  // 重刷系统字段
+  private mapTemplate?: MapTemplate; // 保存地图模板引用
+  private lastItemRespawnTick: number = 0; // 上次物品重刷的tick
+  private lastAIRespawnTick: number = 0; // 上次AI重刷的tick
+  private aiSpawnMap: Map<string, AISpawn> = new Map(); // AI spawn点映射（用于重刷）
+
   constructor(id: string, options?: { seed?: number; mapTemplate?: MapTemplate }) {
     this.id = id;
     this.players = new Map();
@@ -87,6 +93,7 @@ export class Room {
 
     this.mapConfig = mapTemplate ? { ...mapTemplate.mapConfig, seed: this.seed } : loadMapConfig(this.seed);
     this.mapTemplateId = mapTemplate?.id;
+    this.mapTemplate = mapTemplate; // 保存模板引用用于重刷
     this.spawnPoints = mapTemplate?.spawns ? mapTemplate.spawns.map((s) => ({ ...s })) : [];
 
     this.tick = 0;
@@ -111,6 +118,12 @@ export class Room {
 
     // 从地图模板生成AI（如果有）
     if (mapTemplate?.aiSpawns) {
+      // 建立AI spawn点映射（用于重刷时查找）
+      for (const aiSpawn of mapTemplate.aiSpawns) {
+        // 为每个spawn点生成唯一ID（如果没有的话）
+        const spawnId = `spawn_${this.aiSpawnMap.size}`;
+        this.aiSpawnMap.set(spawnId, aiSpawn);
+      }
       this.spawnAIsFromTemplate(mapTemplate);
     }
   }
@@ -197,87 +210,211 @@ export class Room {
     });
   }
 
-  // 新增: 生成世界物品（使用新的物品系统）
-  private generateWorldItems(count: number): void {
-    const allItemTypes = getAllItemTypes();
+  // 根据配置选择一个物品类型（支持 itemIds 白名单和稀有度权重）
+  private pickItemTypeForSpawn(
+    rng: () => number,
+    allItemTypes = getAllItemTypes(),
+    config?: { itemIds?: string[]; rarityWeights?: { COMMON?: number; RARE?: number; EPIC?: number } }
+  ) {
+    let pool = allItemTypes;
+
+    // 如果有 itemIds 白名单，先过滤
+    if (config?.itemIds && config.itemIds.length > 0) {
+      const idSet = new Set(config.itemIds);
+      pool = allItemTypes.filter((it) => idSet.has(it.id));
+    }
+
+    if (pool.length === 0) {
+      // 兜底：回退到所有物品
+      pool = allItemTypes;
+    }
+
+    const commonItems = pool.filter((it) => it.rarity === 'COMMON');
+    const rareItems = pool.filter((it) => it.rarity === 'RARE');
+    const epicItems = pool.filter((it) => it.rarity === 'EPIC');
+
+    // 默认权重：60/30/10
+    const wCommon = config?.rarityWeights?.COMMON ?? 60;
+    const wRare = config?.rarityWeights?.RARE ?? 30;
+    const wEpic = config?.rarityWeights?.EPIC ?? 10;
+    const totalW = wCommon + wRare + wEpic;
+
+    if (totalW <= 0) {
+      // 权重非法时，回退到均匀随机
+      return pool[Math.floor(rng() * pool.length)];
+    }
+
+    const roll = rng() * totalW;
+    let acc = 0;
+
+    acc += wCommon;
+    if (roll < acc && commonItems.length > 0) {
+      return commonItems[Math.floor(rng() * commonItems.length)];
+    }
+
+    acc += wRare;
+    if (roll < acc && rareItems.length > 0) {
+      return rareItems[Math.floor(rng() * rareItems.length)];
+    }
+
+    if (epicItems.length > 0) {
+      return epicItems[Math.floor(rng() * epicItems.length)];
+    }
+
+    // 如果某个稀有度池子是空的，回退到整体池子
+    return pool[Math.floor(rng() * pool.length)];
+  }
+
+  // 使用单条物资规则在地图上尝试生成一个物资
+  private spawnOneWorldItemWithConfig(
+    rng: () => number,
+    config: {
+      zoneId?: string;
+      itemIds?: string[];
+      rarityWeights?: { COMMON?: number; RARE?: number; EPIC?: number };
+      maxItems?: number;
+      ruleId?: string;
+    }
+  ): void {
     const minDistance = 32;
-    // 使用 seed + 固定偏移作为 worldItems 的 RNG seed
-    const itemsRng = createRng(this.seed + 2000000);
-    
-    // 按稀有度权重分组物品
-    const commonItems = getItemTypesByRarity('COMMON');
-    const rareItems = getItemTypesByRarity('RARE');
-    const epicItems = getItemTypesByRarity('EPIC');
-    
-    for (let i = 0; i < count; i++) {
-      let attempts = 0;
-      let x: number, y: number;
-      let valid = false;
-      
-      while (!valid && attempts < 50) {
-        x = itemsRng() * this.mapConfig.width;
-        y = itemsRng() * this.mapConfig.height;
-        
-        if (this.isInExtractZone(x, y)) {
-          attempts++;
-          continue;
-        }
-        
-        const ITEM_RADIUS = 8;
-        let collidedWithObstacle = false;
-        for (const obstacle of this.obstacles) {
-          if (circleVsAABB(x, y, ITEM_RADIUS, obstacle)) {
-            collidedWithObstacle = true;
-            break;
-          }
-        }
-        if (collidedWithObstacle) {
-          attempts++;
-          continue;
-        }
-        
-        // 检查和其他 worldItems 的距离
-        valid = true;
-        for (const existing of this.worldItems.values()) {
-          const dx = x - existing.x;
-          const dy = y - existing.y;
-          const dist = Math.sqrt(dx * dx + dy * dy);
-          if (dist < minDistance) {
-            valid = false;
-            break;
-          }
-        }
-        attempts++;
-      }
-      
-      if (valid) {
-        // 按权重选择物品类型（60% COMMON, 30% RARE, 10% EPIC）
-        const roll = itemsRng();
-        let itemType;
-        if (roll < 0.6 && commonItems.length > 0) {
-          itemType = commonItems[Math.floor(itemsRng() * commonItems.length)];
-        } else if (roll < 0.9 && rareItems.length > 0) {
-          itemType = rareItems[Math.floor(itemsRng() * rareItems.length)];
-        } else if (epicItems.length > 0) {
-          itemType = epicItems[Math.floor(itemsRng() * epicItems.length)];
-        } else {
-          itemType = allItemTypes[Math.floor(itemsRng() * allItemTypes.length)];
-        }
-        
-          const wid = `wid_${this.seed}_${this.worldItemIdCounter++}_${itemsRng().toString(36).substring(2, 11)}`;
-          const maxSpawnQty = Math.min(3, itemType.stackMax);
-          const qty = maxSpawnQty > 1 ? Math.floor(itemsRng() * maxSpawnQty) + 1 : 1;
-        
-        this.worldItems.set(wid, {
-          wid,
-          typeId: itemType.id,
-          qty,
-          x: x!,
-          y: y!,
-        });
+
+    let zoneBounds: { x: number; y: number; w: number; h: number } | undefined;
+    if (config.zoneId && this.mapTemplate?.zones) {
+      const zone = this.mapTemplate.zones.find((z) => z.id === config.zoneId);
+      if (zone) {
+        zoneBounds = { x: zone.x, y: zone.y, w: zone.w, h: zone.h };
       }
     }
-    
+
+    // 计算当前该规则“作用区域”内已经存在的物资数量（有 zoneId 则按区域统计，没 zoneId 则全图统计）
+    if (config.maxItems && config.maxItems > 0) {
+      let currentInRegion = 0;
+      if (zoneBounds) {
+        for (const existing of this.worldItems.values()) {
+          if (
+            existing.x >= zoneBounds.x &&
+            existing.x <= zoneBounds.x + zoneBounds.w &&
+            existing.y >= zoneBounds.y &&
+            existing.y <= zoneBounds.y + zoneBounds.h
+          ) {
+            currentInRegion++;
+          }
+        }
+      } else {
+        currentInRegion = this.worldItems.size;
+      }
+      if (currentInRegion >= config.maxItems) {
+        return;
+      }
+    }
+
+    let attempts = 0;
+    let x: number, y: number;
+    let valid = false;
+
+    while (!valid && attempts < 50) {
+      if (zoneBounds) {
+        x = zoneBounds.x + rng() * zoneBounds.w;
+        y = zoneBounds.y + rng() * zoneBounds.h;
+      } else {
+        x = rng() * this.mapConfig.width;
+        y = rng() * this.mapConfig.height;
+      }
+
+      if (this.isInExtractZone(x, y)) {
+        attempts++;
+        continue;
+      }
+
+      const ITEM_RADIUS = 8;
+      let collidedWithObstacle = false;
+      for (const obstacle of this.obstacles) {
+        if (circleVsAABB(x, y, ITEM_RADIUS, obstacle)) {
+          collidedWithObstacle = true;
+          break;
+        }
+      }
+      if (collidedWithObstacle) {
+        attempts++;
+        continue;
+      }
+
+      // 检查和其他 worldItems 的距离
+      valid = true;
+      for (const existing of this.worldItems.values()) {
+        const dx = x - existing.x;
+        const dy = y - existing.y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        if (dist < minDistance) {
+          valid = false;
+          break;
+        }
+      }
+      attempts++;
+    }
+
+    if (!valid) return;
+
+    const itemType = this.pickItemTypeForSpawn(rng, undefined, {
+      itemIds: config.itemIds,
+      rarityWeights: config.rarityWeights,
+    });
+
+    const wid = `wid_${this.seed}_${this.worldItemIdCounter++}_${rng()
+      .toString(36)
+      .substring(2, 11)}`;
+    const maxSpawnQty = Math.min(3, itemType.stackMax);
+    const qty = maxSpawnQty > 1 ? Math.floor(rng() * maxSpawnQty) + 1 : 1;
+
+    this.worldItems.set(wid, {
+      wid,
+      typeId: itemType.id,
+      qty,
+      x: x!,
+      y: y!,
+    });
+
+    // 调试日志：记录每次刷新的位置与规则
+    log('WORLD_ITEM_SPAWNED', {
+      room: this.id,
+      ruleId: config.ruleId ?? 'unknown',
+      zoneId: config.zoneId ?? 'global',
+      typeId: itemType.id,
+      x: x!,
+      y: y!,
+      totalWorldItems: this.worldItems.size,
+      tick: this.tick,
+    });
+  }
+
+  // 新增: 生成世界物品（使用新的物品系统，支持多条地图配置）
+  private generateWorldItems(count: number): void {
+    const itemsRng = createRng(this.seed + 2000000);
+
+    const configs = this.mapTemplate?.itemRespawns ?? [];
+    // 仅用于初始生成的规则：mode=initial 或 both
+    const initialConfigs = configs.filter((c) => c.mode === 'initial' || c.mode === 'both');
+
+    // 如果地图没写规则，回退到一个默认规则，等价于旧行为
+    const effectiveConfigs =
+      initialConfigs.length > 0
+        ? initialConfigs
+        : [
+            {
+              ruleId: 'default_initial',
+              zoneId: undefined,
+              itemIds: undefined,
+              rarityWeights: undefined,
+              maxItems: undefined,
+            },
+          ];
+
+    for (let i = 0; i < count; i++) {
+      const cfg =
+        effectiveConfigs[Math.floor(itemsRng() * effectiveConfigs.length)];
+      this.spawnOneWorldItemWithConfig(itemsRng, cfg);
+    }
+
     log('WORLD_ITEMS_GENERATED', {
       count: this.worldItems.size,
       tick: this.tick,
@@ -907,8 +1044,8 @@ export class Room {
         if (this.isInExtractZone(player.x, player.y)) {
           // 在撤离区内，自动增加进度（不需要按F）
           player.extractProgress += 50; // 每 tick 50ms（20Hz = 50ms/tick）
-          if (player.extractProgress >= 2000) {
-            // 进度满了，撤离成功
+          if (player.extractProgress >= 10000) {
+            // 进度满了，撤离成功（10秒）
             const accountId = this.playerToAccount.get(playerId) ?? playerId;
             const profile = this.profileManager.getProfileData(accountId);
 
@@ -968,8 +1105,8 @@ export class Room {
     return false;
   }
 
-  // 新增: 检查玩家是否在烟雾内
-  private isPlayerInSmoke(x: number, y: number): boolean {
+  // 新增: 检查某个点是否在烟雾内（玩家/AI 通用）
+  public isPointInSmoke(x: number, y: number): boolean {
     for (const smoke of this.smokes) {
       // 检查玩家是否在烟雾圆形区域内
       const dx = x - smoke.x;
@@ -1438,6 +1575,11 @@ export class Room {
     const wasShooting = player.lastShoot;
     player.lastShoot = shootNow;
 
+    // 新增: 如果正在读条使用道具（例如急救包），本 tick 不处理任何行动
+    if (player.isUsingItem(this.tick)) {
+      return;
+    }
+
     // 更新玩家位置（20Hz tick = 50ms = 0.05s）
     // P0-1 修复: 传入 obstacles 参数，使碰撞检测生效
     // 新增: 支持冲刺
@@ -1531,9 +1673,9 @@ export class Room {
       try {
         const weaponDef = getWeaponDef(wr.weaponTypeId);
         
-        // 检查是否是 FISTS（近战武器）
-        if (wr.weaponTypeId === 'w_fists') {
-          // 近战攻击：检测范围内是否有敌人
+        // 近战武器统一使用近战判定逻辑（拳头、链锯等）
+        if (weaponDef.weaponKind === 'melee') {
+          // 近战攻击：检测范围内是否有敌人/AI/可破坏障碍物
           const baseRange = weaponDef.meleeRange ?? 35; // 近战范围（像素）
           const baseArcRad = ((weaponDef.meleeArcDeg ?? 60) * Math.PI) / 180; // 扇形角度（弧度）
           const hitRadius = PLAYER_HIT_RADIUS; // 目标半径（用于边缘命中修正）
@@ -1542,7 +1684,8 @@ export class Room {
           const visualRange = baseRange + hitRadius;
           const visualExtraAngle = Math.asin(Math.min(1, hitRadius / Math.max(visualRange, 0.001)));
           const visualArcRad = baseArcRad + visualExtraAngle * 2;
-          let hitTarget: Player | null = null;
+          let hitPlayer: Player | null = null;
+          let hitAI: AI | null = null;
           let minDist = meleeRange + 1;
 
           // 广播近战挥击（用于客户端显示其他玩家挥击）
@@ -1555,6 +1698,7 @@ export class Room {
             arcRad: visualArcRad,
           });
           
+          // 先检测玩家
           for (const [targetId, target] of this.players.entries()) {
             if (targetId === playerId || target.status !== 'ALIVE') continue;
             
@@ -1569,43 +1713,88 @@ export class Room {
               const normalizedDiff = Math.min(aimDiff, Math.PI * 2 - aimDiff);
               const extraAngle = dist > 0.001 ? Math.asin(Math.min(1, hitRadius / dist)) : 0;
               if (normalizedDiff < meleeArcRad / 2 + extraAngle) {
-                hitTarget = target;
+                hitPlayer = target;
                 minDist = dist;
               }
             }
           }
           
-          if (hitTarget) {
-            // 命中！造成伤害
-            const oldHp = hitTarget.hp;
-            hitTarget.takeDamage(weaponDef.damage);
-            const isDead = hitTarget.hp <= 0;
-            
-            if (isDead) {
-              hitTarget.killedBy = player.name || playerId;
-              hitTarget.killedByWeaponName = weaponDef.name;
-              this.handlePlayerDeath(hitTarget.id);
+          // 再检测AI（如果还没命中玩家）
+          if (!hitPlayer) {
+            for (const [aiId, ai] of this.ais.entries()) {
+              if (ai.status !== 'ALIVE') continue;
+              
+              const dx = ai.x - player.x;
+              const dy = ai.y - player.y;
+              const dist = Math.sqrt(dx * dx + dy * dy);
+              
+              if (dist <= meleeRange + hitRadius && dist < minDist) {
+                // 检查是否在瞄准方向
+                const aimDir = Math.atan2(dy, dx);
+                const aimDiff = Math.abs(aimDir - input.aim);
+                const normalizedDiff = Math.min(aimDiff, Math.PI * 2 - aimDiff);
+                const extraAngle = dist > 0.001 ? Math.asin(Math.min(1, hitRadius / dist)) : 0;
+                if (normalizedDiff < meleeArcRad / 2 + extraAngle) {
+                  hitAI = ai;
+                  minDist = dist;
+                }
+              }
             }
+          }
+          
+          if (hitPlayer || hitAI) {
+            // 命中！造成伤害
+            const damage = weaponDef.damage;
             
-            // 新增: 发送战斗事件（命中反馈给攻击者，受伤反馈给被攻击者）
-            const dx = hitTarget.x - player.x;
-            const dy = hitTarget.y - player.y;
-            const direction = Math.atan2(dy, dx);
+            if (hitPlayer) {
+              // 攻击玩家
+              hitPlayer.takeDamage(damage);
+              const isDead = hitPlayer.hp <= 0;
+              
+              if (isDead) {
+                hitPlayer.killedBy = player.name || playerId;
+                hitPlayer.killedByWeaponName = weaponDef.name;
+                this.handlePlayerDeath(hitPlayer.id);
+              }
+              
+              // 给被攻击者发送受伤事件
+              if (!this.combatEvents.has(hitPlayer.id)) {
+                this.combatEvents.set(hitPlayer.id, []);
+              }
+              const dx = hitPlayer.x - player.x;
+              const dy = hitPlayer.y - player.y;
+              const direction = Math.atan2(dy, dx);
+              this.combatEvents.get(hitPlayer.id)!.push({ kind: 'DAMAGE_TAKEN', direction });
+              
+              // 推送命中事件
+              this.pushEvent(`${playerId} melee hit ${hitPlayer.id} (-${damage})`);
+            } else if (hitAI) {
+              // 攻击AI
+              hitAI.takeDamage(damage, player.x, player.y);
+              const isDead = hitAI.hp <= 0;
+              
+              if (isDead) {
+                this.handleAIDeath(hitAI.id);
+              }
+              
+              // 推送命中事件
+              this.pushEvent(`${playerId} melee hit AI ${hitAI.id} (-${damage})`);
+              
+              log('AI_MELEE_HIT', {
+                room: this.id,
+                ai: hitAI.id,
+                attacker: playerId,
+                damage: damage,
+                aiHpRemaining: hitAI.hp,
+                tick: this.tick,
+              });
+            }
             
             // 给攻击者发送命中事件
             if (!this.combatEvents.has(playerId)) {
               this.combatEvents.set(playerId, []);
             }
             this.combatEvents.get(playerId)!.push({ kind: 'HIT' });
-            
-            // 给被攻击者发送受伤事件
-            if (!this.combatEvents.has(hitTarget.id)) {
-              this.combatEvents.set(hitTarget.id, []);
-            }
-            this.combatEvents.get(hitTarget.id)!.push({ kind: 'DAMAGE_TAKEN', direction });
-            
-            // 推送命中事件
-            this.pushEvent(`${playerId} melee hit ${hitTarget.id} (-${weaponDef.damage})`);
           } else {
             // 没有命中玩家，检查是否命中可破坏障碍物
             for (const obstacle of this.obstacles) {
@@ -1803,6 +1992,48 @@ export class Room {
         }
       }
     }
+
+    // 对范围内的AI造成伤害
+    for (const [aiId, ai] of this.ais.entries()) {
+      if (ai.status !== 'ALIVE') continue;
+      const dx = ai.x - x;
+      const dy = ai.y - y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      if (dist > radius) continue;
+
+      const scaledDamage = Math.floor(explosionDamage * (1 - dist / radius));
+      if (scaledDamage <= 0) continue;
+      const finalDamage = Math.floor(scaledDamage * (1 - ai.armorReduction));
+      if (finalDamage <= 0) continue;
+
+      const oldHp = ai.hp;
+      // 传递爆炸位置作为攻击者位置，让AI能够响应
+      const attacker = this.players.get(bullet.ownerId);
+      ai.takeDamage(finalDamage, attacker ? attacker.x : x, attacker ? attacker.y : y);
+      const isDead = ai.hp <= 0;
+
+      if (isDead) {
+        this.handleAIDeath(aiId);
+      }
+
+      // 发送战斗事件
+      if (bullet.ownerId) {
+        if (!this.combatEvents.has(bullet.ownerId)) {
+          this.combatEvents.set(bullet.ownerId, []);
+        }
+        this.combatEvents.get(bullet.ownerId)!.push({ kind: 'HIT' });
+      }
+
+      log('AI_EXPLOSION_HIT', {
+        room: this.id,
+        ai: aiId,
+        shooter: bullet.ownerId || 'unknown',
+        damage: finalDamage,
+        aiHpRemaining: ai.hp,
+        distance: Math.round(dist),
+        tick: this.tick,
+      });
+    }
   }
 
   // 新增: 创建手雷爆炸（不依赖武器定义）
@@ -1909,6 +2140,55 @@ export class Room {
       // HP为0时会在 updateBullets 结束时清理
     }
 
+    // 对范围内的AI造成伤害
+    for (const [aiId, ai] of this.ais.entries()) {
+      if (ai.status !== 'ALIVE') continue;
+      
+      const dx = ai.x - x;
+      const dy = ai.y - y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      if (dist > radius) continue;
+
+      // 距离越近伤害越高
+      const scaledDamage = Math.floor(damage * (1 - dist / radius));
+      if (scaledDamage <= 0) continue;
+      
+      // 应用防具减伤
+      const finalDamage = Math.floor(scaledDamage * (1 - ai.armorReduction));
+      if (finalDamage <= 0) continue;
+
+      const oldHp = ai.hp;
+      // 传递爆炸位置作为攻击者位置，让AI能够响应
+      const attacker = ownerId ? this.players.get(ownerId) : null;
+      ai.takeDamage(finalDamage, attacker ? attacker.x : x, attacker ? attacker.y : y);
+      const isDead = ai.hp <= 0;
+
+      if (isDead) {
+        this.handleAIDeath(aiId);
+      }
+
+      // 发送战斗事件（如果有投掷者）
+      if (ownerId) {
+        if (!this.combatEvents.has(ownerId)) {
+          this.combatEvents.set(ownerId, []);
+        }
+        this.combatEvents.get(ownerId)!.push({ kind: 'HIT' });
+      }
+
+      log('AI_GRENADE_EXPLOSION_HIT', {
+        room: this.id,
+        owner: ownerId || 'unknown',
+        target: aiId,
+        tick: this.tick,
+        baseDamage: damage,
+        scaledDamage,
+        armorReduction: ai.armorReduction,
+        finalDamage,
+        hp: `${oldHp}->${ai.hp}`,
+        distance: Math.round(dist),
+      });
+    }
+
     // 记录爆炸事件
     this.pushEvent(`Grenade exploded at (${Math.round(x)}, ${Math.round(y)})`);
     log('GRENADE_EXPLOSION', {
@@ -1960,6 +2240,29 @@ export class Room {
           room: this.id,
           owner: ownerId || 'unknown',
           target: playerId,
+          distance: Math.round(dist),
+          durationMs,
+          tick: this.tick,
+        });
+      }
+    }
+
+    // 对范围内所有存活的AI施加致盲效果
+    for (const [aiId, ai] of this.ais.entries()) {
+      if (ai.status !== 'ALIVE') continue;
+
+      const dx = ai.x - x;
+      const dy = ai.y - y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+
+      if (dist <= radius) {
+        // 在范围内，设置致盲时间
+        ai.flashedUntil = flashEndTime;
+
+        log('FLASHBANG_HIT_AI', {
+          room: this.id,
+          owner: ownerId || 'unknown',
+          target: aiId,
           distance: Math.round(dist),
           durationMs,
           tick: this.tick,
@@ -2439,7 +2742,8 @@ export class Room {
             const baseDamage = bullet.damage;
             const armorReduction = ai.armorReduction;
             const finalDamage = Math.floor(baseDamage * (1 - armorReduction));
-            ai.takeDamage(finalDamage);
+            // 传递攻击者位置（子弹发射位置），让AI能够响应攻击
+            ai.takeDamage(finalDamage, bullet.spawnX, bullet.spawnY);
 
             if (ai.hp <= 0) {
               this.handleAIDeath(aiId);
@@ -2510,6 +2814,10 @@ export class Room {
       for (let i = 0; i < aiSpawn.count; i++) {
         const aiId = `ai_${this.aiIdCounter++}`;
 
+        // 获取角色预设（默认为'basic'）
+        const role = aiSpawn.role || 'basic';
+        const rolePreset = AI_ROLE_PRESETS[role];
+
         // 构建巡逻配置
         let patrolConfig: PatrolConfig | undefined;
         if (aiSpawn.type === 'patrol' && aiSpawn.patrolPointIds) {
@@ -2534,25 +2842,36 @@ export class Room {
           guardConfig = {
             centerX: aiSpawn.x,
             centerY: aiSpawn.y,
-            radius: aiSpawn.guardRadius ?? 150,
+            radius: aiSpawn.guardRadius ?? rolePreset.visionRange / 4,
           };
         }
 
+        // 应用角色预设，允许地图配置覆盖
         const ai = new AI({
           id: aiId,
           x: aiSpawn.x,
           y: aiSpawn.y,
           behaviorType: aiSpawn.type === 'patrol' ? 'PATROL' : 'GUARD',
-          weaponTypeId: aiSpawn.weaponTypeId,
-          visionRange: aiSpawn.visionRange,
-          visionAngleDeg: aiSpawn.visionAngleDeg,
+          weaponTypeId: aiSpawn.weaponTypeId ?? rolePreset.weaponTypeId, // 优先使用地图指定的武器
+          visionRange: aiSpawn.visionRange ?? rolePreset.visionRange,
+          visionAngleDeg: aiSpawn.visionAngleDeg ?? rolePreset.visionAngleDeg,
           patrolConfig,
           guardConfig,
           currentTick: this.tick,
+          // 角色属性（使用预设或地图覆盖）
+          role: role,
+          hp: aiSpawn.hp ?? rolePreset.hp,
+          maxHp: aiSpawn.hp ?? rolePreset.maxHp,
+          armorReduction: aiSpawn.armorReduction ?? rolePreset.armorReduction,
+          moveSpeed: aiSpawn.moveSpeed ?? rolePreset.moveSpeed,
+          aimErrorDeg: rolePreset.aimErrorDeg,
+          fireRateMultiplier: rolePreset.fireRateMultiplier,
+          aggroRange: rolePreset.aggroRange,
+          chaseRange: rolePreset.chaseRange,
         });
 
         this.ais.set(aiId, ai);
-        log('AI_SPAWNED', { room: this.id, aiId, type: aiSpawn.type, weapon: aiSpawn.weaponTypeId });
+        log('AI_SPAWNED', { room: this.id, aiId, type: aiSpawn.type, role, weapon: ai.weaponRuntime.weaponTypeId });
       }
     }
   }
@@ -2560,12 +2879,10 @@ export class Room {
   public updateAIs(currentTick: number): void {
     if (!this.aiBehaviorController) return;
 
-    // 性能优化: 分批更新（每tick更新1/4的AI）
+    // 临时调整：每tick更新所有AI（更快响应，但CPU占用更高）
     const aisArray = Array.from(this.ais.values());
-    const updateIndex = currentTick % 4;
 
-    for (let i = updateIndex; i < aisArray.length; i += 4) {
-      const ai = aisArray[i];
+    for (const ai of aisArray) {
       if (ai.status !== 'ALIVE') continue;
       this.aiBehaviorController.updateAI(ai, currentTick);
       ai.positionHistory.add(currentTick, Date.now(), ai.x, ai.y);
@@ -2579,11 +2896,243 @@ export class Room {
     const weaponDef = getWeaponDef(wr.weaponTypeId);
 
     wr.ammoInMag--;
+
+    // 应用射速倍率（fireRateMultiplier）
     advanceFireCooldown(wr, weaponDef, currentTick);
+    if (ai.fireRateMultiplier !== 1.0) {
+      // 调整nextFireTick以应用射速倍率
+      // 倍率越高，冷却时间越短（射速越快）
+      const baseCooldown = wr.nextFireTick - currentTick;
+      const adjustedCooldown = Math.ceil(baseCooldown / ai.fireRateMultiplier);
+      wr.nextFireTick = currentTick + adjustedCooldown;
+    }
 
     // 复用现有子弹生成逻辑（需要转换AI为兼容格式）
     const aiAsPlayer: any = { id: ai.id, x: ai.x, y: ai.y };
     this.spawnBullet(ai.id, aiAsPlayer, aimRad, weaponDef, undefined);
+  }
+
+  // ===== 重刷系统方法 =====
+
+  // 检查并执行物品重刷
+  public checkAndRespawnItems(): void {
+    const configs = this.mapTemplate?.itemRespawns ?? [];
+    if (configs.length === 0) return;
+
+    // 如果还没有初始化 per-config 计时器，初始化为房间创建 tick
+    if (!Array.isArray((this as any).lastItemRespawnTicks)) {
+      (this as any).lastItemRespawnTicks = configs.map(() => this.tick);
+    }
+    const lastTicks: number[] = (this as any).lastItemRespawnTicks;
+
+    configs.forEach((cfg, idx) => {
+      // 仅对 mode 为 respawn 或 both 的规则进行重刷
+      if (cfg.mode === 'initial') {
+        return;
+      }
+
+      const lastTick = lastTicks[idx] ?? this.tick;
+      const ticksSinceLastRespawn = this.tick - lastTick;
+
+      if (ticksSinceLastRespawn < cfg.intervalTicks) {
+        return;
+      }
+
+      // 计算该规则作用区域当前已有物资数量（用于 maxItems 判定）
+      let currentInRegion = 0;
+      let zoneBounds: { x: number; y: number; w: number; h: number } | undefined;
+      if (cfg.zoneId && this.mapTemplate?.zones) {
+        const zone = this.mapTemplate.zones.find((z) => z.id === cfg.zoneId);
+        if (zone) {
+          zoneBounds = { x: zone.x, y: zone.y, w: zone.w, h: zone.h };
+        }
+      }
+      if (zoneBounds) {
+        for (const existing of this.worldItems.values()) {
+          if (
+            existing.x >= zoneBounds.x &&
+            existing.x <= zoneBounds.x + zoneBounds.w &&
+            existing.y >= zoneBounds.y &&
+            existing.y <= zoneBounds.y + zoneBounds.h
+          ) {
+            currentInRegion++;
+          }
+        }
+      } else {
+        currentInRegion = this.worldItems.size;
+      }
+
+      // 如果已经达到该规则的区域上限，则不再生成
+      if (cfg.maxItems && currentInRegion >= cfg.maxItems) {
+        return;
+      }
+
+      // 这次最多还能补多少（基于规则自己的 maxItems）
+      const targetCount = cfg.maxItems || Infinity;
+      const toSpawn = Math.min(cfg.count, targetCount - currentInRegion);
+
+      if (toSpawn <= 0) {
+        return;
+      }
+
+      this.respawnWorldItems(toSpawn, idx);
+      lastTicks[idx] = this.tick;
+
+      log('ITEMS_RESPAWNED', {
+        room: this.id,
+        ruleId: cfg.id ?? `rule_${idx}`,
+        count: toSpawn,
+        totalItems: this.worldItems.size,
+        tick: this.tick,
+      });
+    });
+  }
+
+  // 执行物品重刷（生成新物品），按单条配置执行
+  private respawnWorldItems(count: number, configIndex: number): void {
+    const configs = this.mapTemplate?.itemRespawns ?? [];
+    const cfg = configs[configIndex];
+    if (!cfg) return;
+
+    // 使用 tick 作为随机种子的一部分，确保每次重刷位置不同
+    const itemsRng = createRng(
+      this.seed + 2000000 + this.tick + configIndex * 1000
+    );
+
+    for (let i = 0; i < count; i++) {
+      this.spawnOneWorldItemWithConfig(itemsRng, {
+        zoneId: cfg.zoneId,
+        itemIds: cfg.itemIds,
+        rarityWeights: cfg.rarityWeights,
+        maxItems: cfg.maxItems,
+        ruleId: cfg.id ?? `rule_${configIndex}`,
+      });
+    }
+  }
+
+  // 检查并执行AI重刷
+  public checkAndRespawnAIs(): void {
+    if (!this.mapTemplate?.aiRespawn) return;
+
+    const respawnConfig = this.mapTemplate.aiRespawn;
+    const ticksSinceLastRespawn = this.tick - this.lastAIRespawnTick;
+
+    if (ticksSinceLastRespawn >= respawnConfig.intervalTicks) {
+      // 检查最大AI数量限制
+      const aliveAICount = Array.from(this.ais.values()).filter(ai => ai.status === 'ALIVE').length;
+      if (respawnConfig.maxAIs && aliveAICount >= respawnConfig.maxAIs) {
+        return; // 已达到最大AI数量
+      }
+
+      // 计算需要生成的数量
+      const targetCount = respawnConfig.maxAIs || Infinity;
+      const toSpawn = Math.min(1, targetCount - aliveAICount); // 每次重刷1个AI
+
+      if (toSpawn > 0) {
+        this.respawnAIs(toSpawn, respawnConfig.spawnId);
+        this.lastAIRespawnTick = this.tick;
+        
+        log('AIS_RESPAWNED', {
+          room: this.id,
+          count: toSpawn,
+          totalAIs: aliveAICount + toSpawn,
+          tick: this.tick,
+        });
+      }
+    }
+  }
+
+  // 执行AI重刷（生成新AI）
+  private respawnAIs(count: number, spawnId?: string): void {
+    if (!this.mapTemplate?.aiSpawns || this.mapTemplate.aiSpawns.length === 0) return;
+
+    let spawnsToUse: AISpawn[] = [];
+    
+    if (spawnId) {
+      // 如果指定了spawnId，尝试从aiSpawnMap中查找
+      const mappedSpawn = this.aiSpawnMap.get(spawnId);
+      if (mappedSpawn) {
+        spawnsToUse = [mappedSpawn];
+      } else {
+        // 如果没找到，尝试按索引查找
+        const index = parseInt(spawnId.replace('spawn_', ''), 10);
+        if (!isNaN(index) && index >= 0 && index < this.mapTemplate.aiSpawns.length) {
+          spawnsToUse = [this.mapTemplate.aiSpawns[index]];
+        }
+      }
+    } else {
+      // 随机选择一个spawn点
+      spawnsToUse = this.mapTemplate.aiSpawns;
+    }
+
+    if (spawnsToUse.length === 0) return;
+
+    // 随机选择一个spawn点
+    const rng = createRng(this.seed + 3000000 + this.tick);
+    const selectedSpawn = spawnsToUse[Math.floor(rng() * spawnsToUse.length)];
+
+    for (let i = 0; i < count; i++) {
+      const aiId = `ai_${this.aiIdCounter++}`;
+
+      // 构建巡逻配置
+      let patrolConfig: PatrolConfig | undefined;
+      if (selectedSpawn.type === 'patrol' && selectedSpawn.patrolPointIds) {
+        const points = selectedSpawn.patrolPointIds
+          .map(id => this.mapTemplate!.pois?.find(p => p.id === id))
+          .filter(poi => poi !== undefined)
+          .map(poi => ({ x: poi!.x, y: poi!.y }));
+
+        if (points.length > 0) {
+          patrolConfig = {
+            points,
+            currentIndex: 0,
+            waitTimeMs: 2000,
+            waitUntil: 0,
+          };
+        }
+      }
+
+      // 构建防守配置
+      let guardConfig: GuardConfig | undefined;
+      if (selectedSpawn.type === 'guard') {
+        guardConfig = {
+          centerX: selectedSpawn.x,
+          centerY: selectedSpawn.y,
+          radius: selectedSpawn.guardRadius ?? 150,
+        };
+      }
+
+      // 获取角色预设（重刷系统也使用角色系统）
+      const role = selectedSpawn.role || 'basic';
+      const rolePreset = AI_ROLE_PRESETS[role];
+
+      // 应用角色预设，允许地图配置覆盖
+      const ai = new AI({
+        id: aiId,
+        x: selectedSpawn.x,
+        y: selectedSpawn.y,
+        behaviorType: selectedSpawn.type === 'patrol' ? 'PATROL' : 'GUARD',
+        weaponTypeId: selectedSpawn.weaponTypeId ?? rolePreset.weaponTypeId,
+        visionRange: selectedSpawn.visionRange ?? rolePreset.visionRange,
+        visionAngleDeg: selectedSpawn.visionAngleDeg ?? rolePreset.visionAngleDeg,
+        patrolConfig,
+        guardConfig,
+        currentTick: this.tick,
+        // 角色属性
+        role: role,
+        hp: selectedSpawn.hp ?? rolePreset.hp,
+        maxHp: selectedSpawn.hp ?? rolePreset.maxHp,
+        armorReduction: selectedSpawn.armorReduction ?? rolePreset.armorReduction,
+        moveSpeed: selectedSpawn.moveSpeed ?? rolePreset.moveSpeed,
+        aimErrorDeg: rolePreset.aimErrorDeg,
+        fireRateMultiplier: rolePreset.fireRateMultiplier,
+        aggroRange: rolePreset.aggroRange,
+        chaseRange: rolePreset.chaseRange,
+      });
+
+      this.ais.set(aiId, ai);
+      log('AI_RESPAWNED', { room: this.id, aiId, type: selectedSpawn.type, weapon: selectedSpawn.weaponTypeId });
+    }
   }
 
   private handleAIDeath(aiId: string): void {
@@ -2631,7 +3180,7 @@ export class Room {
         // 计算玩家是否在草丛内
         state.inBush = this.isPlayerInBush(p.x, p.y);
         // 计算玩家是否在烟雾内
-        state.inSmoke = this.isPlayerInSmoke(p.x, p.y);
+        state.inSmoke = this.isPointInSmoke(p.x, p.y);
         // 计算玩家是否被闪光弹致盲
         const now = Date.now();
         state.isFlashed = p.flashedUntil > now;
@@ -2662,6 +3211,91 @@ export class Room {
       obstacles: this.getObstacles(), // 新增: 障碍物（可破坏，需要同步）
       ais: aiStates, // 新增: AI实体
     };
+  }
+
+  /**
+   * 新增: 每 tick 更新需要读条的道具效果（例如急救包）
+   * 当读条结束时才真正应用效果并消耗物品
+   */
+  updateItemUsages(): void {
+    for (const [playerId, player] of this.players.entries()) {
+      if (!player.usingItemTypeId) continue;
+
+      // 如果玩家已经死亡或撤离，直接取消读条
+      if (player.status !== 'ALIVE') {
+        player.cancelUsingItem();
+        continue;
+      }
+
+      // 尚未读条完成
+      if (this.tick < player.usingItemEndTick) {
+        continue;
+      }
+
+      const typeId = player.usingItemTypeId;
+      const iid = player.usingItemIid;
+
+      // 先清理读条状态，避免重复触发
+      player.cancelUsingItem();
+
+      if (!typeId || !iid) {
+        continue;
+      }
+
+      try {
+        const itemType = getItemType(typeId);
+
+        if (typeId === 'medkit' || typeId === 'advanced_medkit') {
+          // 读条结束时应用治疗效果
+          if (player.hp <= 0 || player.status !== 'ALIVE') {
+            // 已死亡则不再治疗
+            return;
+          }
+
+          const healAmount = Math.min(itemType.consumableProps?.healAmount ?? 50, 100 - player.hp);
+
+          // 如果已经是满血，允许读条结束但不再加血，只消耗道具
+          if (healAmount > 0) {
+            player.hp += healAmount;
+          }
+
+          // 消耗一个对应实例的医疗包
+          const removed = player.removeItem(iid, 1);
+          if (!removed) {
+            // 找不到该实例，记录日志但不中断游戏
+            log('USE_MEDKIT_CONSUME_FAILED', {
+              room: this.id,
+              player: playerId,
+              itemType: typeId,
+              iid,
+              tick: this.tick,
+            });
+            continue;
+          }
+
+          // 清理背包中可能的无效物品
+          player.cleanupInventory();
+
+          this.pushEvent(`Player ${playerId} used ${itemType.name} (+${healAmount} HP)`);
+          log('USE_MEDKIT_FINISH', {
+            room: this.id,
+            player: playerId,
+            itemType: typeId,
+            healAmount,
+            newHp: player.hp,
+            tick: this.tick,
+          });
+        }
+      } catch (err) {
+        log('USE_ITEM_FINISH_ERROR', {
+          room: this.id,
+          player: playerId,
+          typeId,
+          tick: this.tick,
+          error: (err as Error).message,
+        });
+      }
+    }
   }
   
   // 修复: 获取静态障碍物列表（用于 WORLD_INIT）
@@ -3307,6 +3941,11 @@ export class Room {
       return { success: false, message: 'Player not alive' };
     }
 
+    // 如果正在读条使用道具，则本次请求直接失败，避免叠加
+    if (player.isUsingItem(this.tick)) {
+      return { success: false, message: 'Already using item' };
+    }
+
     // 获取可使用的物品列表（使用统一的定义）
     const usableItems = player.inventory.items.filter(item => {
       return isUsableItem(item.typeId);
@@ -3323,35 +3962,24 @@ export class Room {
       const itemType = getItemType(item.typeId);
       
       if (item.typeId === 'medkit' || item.typeId === 'advanced_medkit') {
-        // 使用医疗包：恢复生命值
+        // 使用医疗包：先启动 1 秒读条，期间禁止一切行动，读条结束时再真正回复生命并消耗道具
         if (player.hp >= 100) {
           return { success: false, message: 'Already at full health' };
         }
-        
-        const itemType = getItemType(item.typeId);
-        const healAmount = Math.min(itemType.consumableProps?.healAmount ?? 50, 100 - player.hp);
-        player.hp += healAmount;
-        
-        // 消耗一个医疗包
-        const removed = player.removeItem(item.iid, 1);
-        if (!removed) {
-          return { success: false, message: 'Failed to consume item' };
-        }
-        
-        // 清理背包中可能的无效物品
-        player.cleanupInventory();
-        
-        const itemName = itemType.name;
-        this.pushEvent(`Player ${playerId} used ${itemName} (+${healAmount} HP)`);
-        log('USE_MEDKIT', {
+
+        // 1 秒使用时间
+        const DURATION_MS = 1000;
+        player.startUsingItem(item.typeId, item.iid, DURATION_MS, this.tick);
+
+        this.pushEvent(`Player ${playerId} started using ${itemType.name}`);
+        log('USE_MEDKIT_START', {
           room: this.id,
           player: playerId,
           itemType: item.typeId,
-          healAmount,
-          newHp: player.hp,
+          durationMs: DURATION_MS,
           tick: this.tick,
         });
-        
+
         return { success: true, itemType: item.typeId };
         
       } else if (item.typeId === 'combat_stim') {
@@ -3380,7 +4008,7 @@ export class Room {
 
         player.cleanupInventory();
 
-        this.pushEvent(`Player ${playerId} used combat stim (+100% speed for 15s)`);
+        this.pushEvent(`Player ${playerId} used combat stim (+40% speed for 15s)`);
         log('USE_COMBAT_STIM', {
           room: this.id,
           player: playerId,

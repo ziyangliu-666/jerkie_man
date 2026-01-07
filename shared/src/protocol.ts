@@ -242,7 +242,7 @@ export const PLAYER_STATE_SCHEMA = z.object({
   lastInputSeq: z.number().int(),
   lastInputTick: z.number().int(),
   lootCount: z.number().int().min(0).default(0).optional(), // Day3: 战利品计数（已废弃，保留兼容）
-  extractProgress: z.number().int().min(0).max(2000).default(0), // 游戏化增强: 撤离进度（毫秒，0-2000）
+  extractProgress: z.number().int().min(0).max(10000).default(0), // 游戏化增强: 撤离进度（毫秒，0-10000，10秒）
   inventory: PLAYER_INVENTORY_SCHEMA.optional(), // 新增: 背包系统
   name: z.string().optional(), // 新增: 玩家昵称（用于显示）
   weaponRuntime: WEAPON_RUNTIME_SCHEMA.optional(), // 新增: 武器运行时状态（局内状态）
@@ -254,6 +254,10 @@ export const PLAYER_STATE_SCHEMA = z.object({
   killedBy: z.string().optional(), // 新增: 击杀者名字
   killedByWeaponName: z.string().optional(), // 新增: 击杀使用的武器名称
   buffs: z.array(PLAYER_BUFF_SCHEMA).optional(), // 新增: 局内短效 Buff 列表
+  // 新增: 正在使用的道具（读条）状态，用于 HUD 提示（例如急救包）
+  usingItemTypeId: z.string().nullable().optional(),
+  usingItemRemainingMs: z.number().int().nonnegative().optional(),
+  usingItemTotalMs: z.number().int().positive().optional(),
 });
 
 // AI实体状态 schema（用于服务端AI系统）
@@ -261,12 +265,17 @@ export const AI_STATE_SCHEMA = z.object({
   id: z.string(),
   x: z.number(),
   y: z.number(),
-  hp: z.number().int().min(0).max(100),
+  hp: z.number().int().min(0).max(500), // 修改：支持重甲AI的高HP
   maxHp: z.number().int().positive(),
   status: z.enum(['ALIVE', 'DEAD']),
   weaponRuntime: WEAPON_RUNTIME_SCHEMA.optional(),
   aimRad: z.number(),
-  behaviorState: z.enum(['IDLE', 'PATROL', 'CHASE', 'ATTACK', 'SEARCH', 'RETURN']),
+  behaviorState: z.enum(['IDLE', 'PATROL', 'SPOTTING', 'CHASE', 'ATTACK', 'SEARCH', 'RETURN']),
+  role: z.enum(['basic', 'sniper', 'heavy_gunner', 'scout']).optional().default('basic'), // 新增：AI角色类型
+  currentTargetId: z.string().optional(), // 新增：当前目标ID（用于显示"瞄准中"状态）
+  // 新增: 闪光弹状态（与玩家字段对齐）
+  isFlashed: z.boolean().optional().default(false),
+  flashEndTime: z.number().optional().default(0),
 });
 
 export const BULLET_STATE_SCHEMA = z.object({

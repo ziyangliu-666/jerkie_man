@@ -161,7 +161,7 @@ export const WEAPONS: Record<string, WeaponDef> = {
     damage: 12,
     bulletLifeMs: 3000, // 3秒后爆炸
     explosionRadius: 120,
-    explosionDamage: 70,
+    explosionDamage: 300,
   },
   w_minigun: {
     typeId: 'w_minigun',
@@ -244,8 +244,7 @@ export const WEAPONS: Record<string, WeaponDef> = {
     bulletSpeed: 1400,
     damage: 65,          // 高伤害
     bulletLifeMs: 1800,
-    burstCount: 2,       // 二连发
-    burstIntervalMs: 80,
+    // 改为半自动单发，移除burstCount和burstIntervalMs
   },
   w_micro_smg: {
     typeId: 'w_micro_smg',

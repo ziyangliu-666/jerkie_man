@@ -1,0 +1,50 @@
+# MAPTEXT v1
+# 测试地图：展示所有支持的语法
+
+@meta id=test_all_syntax name="Test All Syntax" desc="测试所有地图编辑器语法功能"
+@map width=800 height=800 seed=12345
+
+# === 撤离点 ===
+@extract x=350 y=350 w=100 h=100
+
+# === 出生点（4个） ===
+@spawn x=100 y=100
+@spawn x=700 y=100
+@spawn x=100 y=700
+@spawn x=700 y=700
+
+# === 障碍物（不同类型） ===
+@obstacle x=200 y=200 w=100 h=100 type=wall
+@obstacle x=500 y=200 w=50 h=50 type=crate
+@obstacle x=300 y=500 w=80 h=80 type=bush
+@obstacle x=600 y=600 w=120 h=80 type=water
+
+# === 兴趣点（POI） ===
+@poi x=400 y=400 id=center type=landmark name="Center Point" desc="地图中心点"
+@poi x=200 y=400 id=west_poi type=resource name="West Resource"
+@poi x=600 y=400 id=east_poi type=resource name="East Resource"
+
+# === 区域（Zones） ===
+@zone x=0 y=0 w=400 h=400 id=northwest type=safe name="Northwest Safe Zone" desc="西北安全区"
+@zone x=400 y=400 w=400 h=400 id=southeast type=danger name="Southeast Danger Zone" desc="东南危险区"
+
+# === AI生成点 ===
+@aispawn x=250 y=250 type=patrol weapon=w_pistol count=2 patrol=west_poi,center vision=250
+@aispawn x=550 y=550 type=guard weapon=w_dmr count=1 radius=100 vision=300 visionAngle=180
+
+# === 重刷配置 ===
+# 物品重刷示例1：全局公共物资（初始+重刷，默认权重 COMMON 60 / RARE 30 / EPIC 10）
+@itemrespawn id=global_common mode=both intervalTicks=600 count=2 maxItems=20
+
+# 物品重刷示例2：局部高级物资区（只刷指定物品 + 提高稀有掉落权重，仅用于重刷）
+# - 只在 northwest 区域内刷新
+# - 只会掉落 w_sniper, w_grenade_launcher, armor_heavy 这三种高价值物品
+# - 调整稀有度权重：COMMON:10, RARE:40, EPIC:100（EPIC 更容易出）
+@itemrespawn id=northwest_high mode=respawn intervalTicks=900 count=1 maxItems=10 zoneId=northwest items=w_sniper,w_grenade_launcher,armor_heavy rarityWeights=COMMON:10,RARE:40,EPIC:100
+
+# AI重刷：每60秒（1200 ticks）重刷1个AI，最多保持5个AI
+@airespawn intervalTicks=1200 maxAIs=5
+
+@note "这是一个测试地图，展示了所有支持的语法功能"
+@comment "包括：元数据、地图配置、撤离点、出生点、障碍物、POI、区域、AI生成、重刷配置等"
+

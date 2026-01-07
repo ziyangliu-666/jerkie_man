@@ -32,7 +32,7 @@ export const LAG_COMP_MAX_REWIND_MS = 500; // 最大回溯时间
 export const POSITION_HISTORY_SIZE = 50; // 位置历史缓冲区大小（约2.5秒@20Hz）
 
 // 提取区常量
-export const EXTRACT_DURATION_MS = 2000; // 撤离持续时间
+export const EXTRACT_DURATION_MS = 10000; // 撤离持续时间（10秒）
 export const EXTRACT_ZONE_RADIUS = 100; // 撤离区半径
 
 // 拾取交互常量

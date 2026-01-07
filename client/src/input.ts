@@ -11,10 +11,47 @@ export class InputManager {
 
   // P0-3 修复: 使用 pointer events + 捕获，解决鼠标拖出 canvas 松开导致开火卡住的问题
   private capturedPointerId: number | null = null;
+  
+  // 新增: 耐力检查回调函数（返回当前耐力百分比，用于UI限制）
+  private staminaCheckCallback: (() => number) | null = null;
+  
+  // 新增: 耐力UI摇晃回调函数
+  private staminaShakeCallback: (() => void) | null = null;
+  
+  // 新增: 跟踪耐力是否曾经耗尽（用于判断是否需要35%限制）
+  private staminaWasExhausted: boolean = false;
 
   constructor(canvas: HTMLCanvasElement) {
     window.addEventListener('keydown', (e) => {
       const key = e.key.toLowerCase();
+      
+      // 新增: 耐力限制检查（空格键）
+      // 允许耐力消耗到0，但一旦为0后需要恢复到35%以上才能再按
+      if (key === ' ') {
+        if (this.staminaCheckCallback) {
+          const staminaPercent = this.staminaCheckCallback();
+          
+          // 更新耐力耗尽状态：如果耐力为0或接近0，标记为已耗尽
+          if (staminaPercent <= 0.1) {
+            this.staminaWasExhausted = true;
+          }
+          
+          // 如果耐力曾经耗尽，且当前还没恢复到35%以上，阻止输入并摇晃
+          if (this.staminaWasExhausted && staminaPercent < 35) {
+            if (this.staminaShakeCallback) {
+              this.staminaShakeCallback();
+            }
+            e.preventDefault();
+            return; // 不设置空格键状态
+          }
+          
+          // 如果耐力恢复到35%以上，清除耗尽标记
+          if (staminaPercent >= 35) {
+            this.staminaWasExhausted = false;
+          }
+        }
+      }
+      
       this.keys.set(key, true);
       
       // Day3: 脉冲事件（edge-trigger）
@@ -45,7 +82,18 @@ export class InputManager {
     });
 
     window.addEventListener('keyup', (e) => {
-      this.keys.set(e.key.toLowerCase(), false);
+      const key = e.key.toLowerCase();
+      this.keys.set(key, false);
+      
+      // 新增: 当空格键松开时，如果耐力已经恢复，清除耗尽标记
+      if (key === ' ') {
+        if (this.staminaCheckCallback) {
+          const staminaPercent = this.staminaCheckCallback();
+          if (staminaPercent >= 35) {
+            this.staminaWasExhausted = false;
+          }
+        }
+      }
     });
 
     // 修复: 统一坐标更新函数
@@ -143,6 +191,7 @@ export class InputManager {
       this.interactFlag = false; // Day3: 清除脉冲事件标志
       this.extractFlag = false;
       this.useItemFlags.fill(false); // 新增: 清除使用物品脉冲事件标志
+      // 注意: 不重置 staminaWasExhausted，因为这是游戏状态，不是输入状态
     });
   }
 
@@ -234,5 +283,26 @@ export class InputManager {
   // 新增: 获取冲刺状态（空格键）
   getSprintHeld(): boolean {
     return this.keys.get(' ') ?? false;
+  }
+  
+  // 新增: 设置耐力检查回调函数
+  setStaminaCheckCallback(callback: (() => number) | null): void {
+    this.staminaCheckCallback = callback;
+  }
+  
+  // 新增: 设置耐力UI摇晃回调函数
+  setStaminaShakeCallback(callback: (() => void) | null): void {
+    this.staminaShakeCallback = callback;
+  }
+  
+  // 新增: 更新耐力耗尽状态（由外部调用，用于在耐力恢复时清除标记）
+  updateStaminaExhaustedState(staminaPercent: number): void {
+    if (staminaPercent <= 0.1) {
+      this.staminaWasExhausted = true;
+      // 长按空格把耐力耗到0时，自动“松开”冲刺键（逻辑层面）
+      this.keys.set(' ', false);
+    } else if (staminaPercent >= 35) {
+      this.staminaWasExhausted = false;
+    }
   }
 }

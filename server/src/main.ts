@@ -1303,6 +1303,9 @@ setInterval(() => {
     player.updateBuffs(room.tick);
   }
 
+  // 新增: 更新需要读条的道具使用（例如急救包）
+  room.updateItemUsages();
+
   // 新增: 记录本tick有输入的玩家（避免重复更新耐力）
   const playersWithInput = new Set<string>();
 
@@ -1622,6 +1625,10 @@ setInterval(() => {
 
   // 更新AI（行为、寻路、战斗）
   room.updateAIs(room.tick);
+
+  // 新增: 检查并执行物品和AI重刷
+  room.checkAndRespawnItems();
+  room.checkAndRespawnAIs();
 
   // Day2: 更新子弹位置并检测命中（20Hz tick = 50ms = 0.05s）
   const deltaTime = 0.05;

@@ -88,7 +88,7 @@ export const ITEM_CATALOG: Record<string, ItemType> = {
     shortName: '兴奋',
     consumableProps: {
       buffDurationMs: 15000,  // 15秒
-      speedMultiplier: 2.0,  // +100% 速度
+      speedMultiplier: 1.4,  // +40% 速度
     },
   },
   regeneration_serum: {

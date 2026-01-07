@@ -615,6 +615,11 @@ export class BulletTrackManager {
               status: 'ALIVE',
               lastInputSeq: 0,
               lastInputTick: 0,
+              extractProgress: 0,
+              inBush: false,
+              inSmoke: false,
+              isFlashed: false,
+              flashEndTime: 0,
             };
             this.emitLocalHit(bullet, aiAsTarget);
             break;
