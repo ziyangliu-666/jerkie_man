@@ -26,6 +26,7 @@ server/data/profiles.json
 .idea/
 .vscode/
 .kiro/
+CLAUDE.md
 
 # 操作系统文件
 .DS_Store
