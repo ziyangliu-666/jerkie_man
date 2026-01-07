@@ -1,6 +1,32 @@
 node_modules/
-dist/
 build/
 out/
 coverage/
+
+# 构建产物目录（各模块）
+shared/dist/
+server/dist/
+client/dist/
+dist/
+
+# TypeScript 编译缓存
+*.tsbuildinfo
+
+# 工具生成的文件
+dump_key_code*.txt
+dump_key_code*.dense.txt
+
+# 用户数据文件（不应提交到版本控制）
+server/data/profiles.json
+**/data/profiles.json
+
+# AI/IDE 配置和缓存目录
+.claude/
+.cursor/
+.idea/
+.vscode/
+.kiro/
+
+# 操作系统文件
 .DS_Store
+Thumbs.db

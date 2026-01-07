@@ -1,0 +1,15 @@
+{
+  "example-account-id": {
+    "displayName": null,
+    "money": 50000,
+    "stash": [],
+    "prepArea": [],
+    "equipment": {
+      "weaponIid": null,
+      "bagIid": null,
+      "armorIid": null
+    },
+    "bagCap": 4
+  }
+}
+
