@@ -3621,7 +3621,11 @@ function renderLoop(): void {
       if (currentPhase === 'RAID' && localPlayerId) {
         const localPlayer = renderLocalPlayer ?? predictedLocalPlayer ?? state.players.find((p) => p.id === localPlayerId);
         if (localPlayer && isThrowingMode) {
-          // 在投掷模式下渲染瞄准界面
+          // 修复: 在 renderLoop 中每帧更新目标位置，确保投掷环平滑跟随鼠标
+          // 这样即使 updateTarget 原本只在 clientTick（20Hz）调用，现在在 renderLoop（60fps）中也会更新
+          const mouseWorldPos = inputManager.getMouseWorldPos((x, y) => renderer.screenToWorld(x, y));
+          throwingAim.updateTarget(mouseWorldPos.x, mouseWorldPos.y, localPlayer.x, localPlayer.y);
+          // 渲染瞄准界面
           throwingAim.render((x, y) => renderer.worldToScreen(x, y));
         }
       }

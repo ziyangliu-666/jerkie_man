@@ -135,7 +135,7 @@ export const WEAPONS: Record<string, WeaponDef> = {
     spreadDeg: 12, // 霰弹枪总散布角度（度）
     bulletSpeed: 600,
     damage: 20, // 单颗弹丸伤害（降低，因为一次发射多颗）
-    bulletLifeMs: 500, // 0.5秒（短射程）
+    bulletLifeMs: 300, // 0.3秒（短射程）
     pelletCount: 8, // 一次发射8颗弹丸
   },
   w_sniper: {

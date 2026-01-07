@@ -222,8 +222,8 @@ export const ITEM_CATALOG: Record<string, ItemType> = {
   frag_grenade: {
     id: 'frag_grenade',
     name: '破片手雷',
-    rarity: 'COMMON',
-    value: 150,
+    rarity: 'RARE',
+    value: 300,
     stackMax: 5, // 可以堆叠5个
     shortName: '手雷',
     consumableProps: {
@@ -236,11 +236,11 @@ export const ITEM_CATALOG: Record<string, ItemType> = {
     name: '闪光弹',
     rarity: 'RARE',
     value: 200,
-    stackMax: 3,
+    stackMax: 5,
     shortName: '闪光',
     consumableProps: {
       flashRadius: 150,  // 150像素致盲范围
-      flashDurationMs: 3000,  // 3秒致盲持续时间
+      flashDurationMs: 5000,  // 5秒致盲持续时间
       explosionRadius: 150,  // 150像素爆炸半径（用于视觉效果）
     },
   },
@@ -249,7 +249,7 @@ export const ITEM_CATALOG: Record<string, ItemType> = {
     name: '烟雾弹',
     rarity: 'RARE',
     value: 180,
-    stackMax: 3,
+    stackMax: 5,
     shortName: '烟雾',
     consumableProps: {
       smokeRadius: 200,  // 140像素烟雾半径
