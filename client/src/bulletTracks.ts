@@ -103,6 +103,7 @@ export class BulletTrackManager {
   private mapHeight = 3000;
   private obstacles: OBSTACLE_STATE[] = [];
   private players: PLAYER_STATE[] = [];
+  private ais: any[] = []; // 新增: AI列表
 
   setLocalPlayerId(id: string | null): void {
     this.localPlayerId = id;
@@ -302,6 +303,7 @@ export class BulletTrackManager {
   onSnapshot(snapshot: S2C_SNAPSHOT, players: PLAYER_STATE[]): void {
     const nowMs = Date.now();
     this.players = players;
+    this.ais = snapshot.ais ?? []; // 新增: 更新AI列表
 
     // 清理过期的"本地销毁"记录（500ms 后允许服务端重新添加同 ID 子弹）
     for (const [id, destroyTime] of this.destroyedCleanupTime) {
@@ -589,6 +591,38 @@ export class BulletTrackManager {
           this.emitLocalHit(bullet, hitTarget);
         }
         toRemove.push({ id, reason: 'player' });
+        continue;
+      }
+      
+      // 新增: 检查AI碰撞（只有玩家的子弹才检测AI碰撞）
+      let hitAI = false;
+      if (bullet.ownerId === this.localPlayerId) {
+        for (const ai of this.ais) {
+          if (ai.status !== 'ALIVE') continue; // 只打活着的AI
+
+          // AI碰撞半径约 16px（与玩家相同）
+          if (pointVsCircle(bullet.x, bullet.y, ai.x, ai.y, 16)) {
+            hitAI = true;
+            // AI命中：创建一个临时的"玩家"对象用于emitLocalHit
+            const aiAsTarget: PLAYER_STATE = {
+              id: ai.id,
+              x: ai.x,
+              y: ai.y,
+              hp: ai.hp,
+              stamina: 100,
+              maxStamina: 100,
+              isSprinting: false,
+              status: 'ALIVE',
+              lastInputSeq: 0,
+              lastInputTick: 0,
+            };
+            this.emitLocalHit(bullet, aiAsTarget);
+            break;
+          }
+        }
+      }
+      if (hitAI) {
+        toRemove.push({ id, reason: 'player' }); // 使用'player'类型的特效
         continue;
       }
     }

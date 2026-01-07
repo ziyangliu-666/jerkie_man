@@ -29,7 +29,7 @@ export class ProfileManager {
   private profiles: Map<string, PlayerProfile> = new Map();
   
   private readonly DEFAULT_BAG_CAP = 4;
-  private readonly DEFAULT_MONEY = 10000; // 初始金钱：10000
+  private readonly DEFAULT_MONEY = 50000; // 初始金钱：10000
   private readonly DEFAULT_DISPLAY_NAME = null; // 默认未设置昵称
   private readonly DEFAULT_EQUIPMENT: PlayerEquipment = {
     weaponIid: null,

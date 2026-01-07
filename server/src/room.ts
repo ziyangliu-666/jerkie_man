@@ -1,8 +1,11 @@
 import { Player } from './player.js';
 import { ProfileManager } from './profile.js';
-import type { PLAYER_STATE, BULLET_STATE, ITEM_STATE, C2S_INPUT, MAP_CONFIG, OBSTACLE_STATE, WorldItem, LootBag, ItemInstance, WeaponRuntime, WeaponDef, MapTemplate, SpawnPoint } from '@jerkie-man/shared';
-import { loadMapConfig, loadItemTypes, circleVsAABB, createRng, rectIntersects, segmentIntersectsCircle, getItemType, getAllItemTypes, getItemTypesByRarity, getWeaponDef, getArmorDef, getBagDef, applySpread, msToTicks, getFireSchedule, shouldStartBurst, canFireTick, advanceFireCooldown, PLAYER_HIT_RADIUS, getBulletPenetration, isObstacleDestructible, isUsableItem } from '@jerkie-man/shared';
+import type { PLAYER_STATE, BULLET_STATE, ITEM_STATE, C2S_INPUT, MAP_CONFIG, OBSTACLE_STATE, WorldItem, LootBag, ItemInstance, WeaponRuntime, WeaponDef, MapTemplate, SpawnPoint, AI_STATE } from '@jerkie-man/shared';
+import { loadMapConfig, loadItemTypes, circleVsAABB, createRng, rectIntersects, segmentIntersectsCircle, getItemType, getAllItemTypes, getItemTypesByRarity, getWeaponDef, getArmorDef, getBagDef, applySpread, msToTicks, getFireSchedule, shouldStartBurst, canFireTick, advanceFireCooldown, PLAYER_HIT_RADIUS, getBulletPenetration, isObstacleDestructible, isUsableItem, doesObstacleBlockPlayer } from '@jerkie-man/shared';
 import { log } from './logger.js';
+import { AI, type PatrolConfig, type GuardConfig } from './ai.js';
+import { NavigationGrid, Pathfinder } from './pathfinding.js';
+import { AIBehaviorController } from './aiBehavior.js';
 
 // Step4: 内部子弹类型（包含spawnAt、damage和bulletLifeMs用于TTL检查和伤害计算）
 type Bullet = BULLET_STATE & { 
@@ -48,6 +51,13 @@ export class Room {
   private smokes: Array<{ x: number; y: number; radius: number; durationMs: number; createdAt: number }> = [];
   private newSmokes: Array<{ x: number; y: number; radius: number; durationMs: number }> = []; // 新生成的烟雾（用于广播）
 
+  // AI系统字段
+  public ais: Map<string, AI> = new Map();
+  private navGrid!: NavigationGrid;
+  private pathfinder!: Pathfinder;
+  private aiBehaviorController!: AIBehaviorController;
+  private aiIdCounter = 0;
+
   constructor(id: string, options?: { seed?: number; mapTemplate?: MapTemplate }) {
     this.id = id;
     this.players = new Map();
@@ -88,6 +98,21 @@ export class Room {
     }
 
     this.generateWorldItems(30);
+
+    // 初始化AI系统
+    this.navGrid = new NavigationGrid(
+      this.mapConfig.width,
+      this.mapConfig.height,
+      this.obstacles,
+      20
+    );
+    this.pathfinder = new Pathfinder(this.navGrid);
+    this.aiBehaviorController = new AIBehaviorController(this, this.pathfinder);
+
+    // 从地图模板生成AI（如果有）
+    if (mapTemplate?.aiSpawns) {
+      this.spawnAIsFromTemplate(mapTemplate);
+    }
   }
 
 
@@ -2372,8 +2397,79 @@ export class Room {
           break; // 一颗子弹只能命中一个目标
         }
       }
+
+      // AI碰撞检测（类似玩家碰撞检测）
+      // 修复：AI子弹不应该伤害其他AI，只伤害玩家
+      // 只有玩家的子弹才会检测AI碰撞
+      const isPlayerBullet = this.players.has(bullet.ownerId);
+      if (isPlayerBullet) {
+        for (const [aiId, ai] of this.ais.entries()) {
+          // 跳过死亡的AI
+          if (ai.status !== 'ALIVE') {
+            continue;
+          }
+
+          // 延迟补偿（对AI也使用延迟补偿，公平性）
+          const shooterLatency = playerLatencies.get(bullet.ownerId) ?? 0;
+          const rewindTimeMs = Math.min(
+            Math.max(0, shooterLatency / 2 + CLIENT_INTERPOLATION_DELAY_MS),
+            MAX_REWIND_MS
+          );
+
+          const SAMPLE_COUNT = 3;
+          let rewindHit = false;
+          let hitPosition = { x: ai.x, y: ai.y };
+
+          for (let i = 0; i < SAMPLE_COUNT; i++) {
+            const t = i / (SAMPLE_COUNT - 1);
+            const sampleTime = now - rewindTimeMs * t;
+            const pos = ai.positionHistory.getPositionAt(sampleTime);
+            const sampleX = pos?.x ?? ai.x;
+            const sampleY = pos?.y ?? ai.y;
+
+            if (segmentIntersectsCircle(oldX, oldY, bullet.x, bullet.y, sampleX, sampleY, PLAYER_HIT_RADIUS)) {
+              rewindHit = true;
+              hitPosition = { x: sampleX, y: sampleY };
+              break;
+            }
+          }
+
+          if (rewindHit) {
+            // 命中AI！
+            const baseDamage = bullet.damage;
+            const armorReduction = ai.armorReduction;
+            const finalDamage = Math.floor(baseDamage * (1 - armorReduction));
+            ai.takeDamage(finalDamage);
+
+            if (ai.hp <= 0) {
+              this.handleAIDeath(aiId);
+            }
+
+            // 发送命中事件给射击者
+            if (!this.combatEvents.has(bullet.ownerId)) {
+              this.combatEvents.set(bullet.ownerId, []);
+            }
+            this.combatEvents.get(bullet.ownerId)!.push({ kind: 'HIT' });
+
+            this.pushEvent(`${bullet.ownerId} hit AI ${aiId} (-${finalDamage})`);
+
+            log('AI_HIT', {
+              room: this.id,
+              ai: aiId,
+              shooter: bullet.ownerId,
+              damage: finalDamage,
+              aiHpRemaining: ai.hp,
+              tick: this.tick,
+            });
+
+            this.applyExplosion(bullet, hitPosition.x, hitPosition.y);
+            bulletsToRemove.add(bullet.id);
+            break; // 一颗子弹只能命中一个目标
+          }
+        }
+      }
     }
-    
+
     // Step4: 移除所有标记的子弹（用Set.has，O(1)查找）
     this.bullets = this.bullets.filter(b => !bulletsToRemove.has(b.id));
 
@@ -2405,6 +2501,115 @@ export class Room {
     }
   }
 
+  // ===== AI系统方法 =====
+
+  private spawnAIsFromTemplate(mapTemplate: MapTemplate): void {
+    if (!mapTemplate.aiSpawns) return;
+
+    for (const aiSpawn of mapTemplate.aiSpawns) {
+      for (let i = 0; i < aiSpawn.count; i++) {
+        const aiId = `ai_${this.aiIdCounter++}`;
+
+        // 构建巡逻配置
+        let patrolConfig: PatrolConfig | undefined;
+        if (aiSpawn.type === 'patrol' && aiSpawn.patrolPointIds) {
+          const points = aiSpawn.patrolPointIds
+            .map(id => mapTemplate.pois?.find(p => p.id === id))
+            .filter(poi => poi !== undefined)
+            .map(poi => ({ x: poi!.x, y: poi!.y }));
+
+          if (points.length > 0) {
+            patrolConfig = {
+              points,
+              currentIndex: 0,
+              waitTimeMs: 2000,
+              waitUntil: 0,
+            };
+          }
+        }
+
+        // 构建防守配置
+        let guardConfig: GuardConfig | undefined;
+        if (aiSpawn.type === 'guard') {
+          guardConfig = {
+            centerX: aiSpawn.x,
+            centerY: aiSpawn.y,
+            radius: aiSpawn.guardRadius ?? 150,
+          };
+        }
+
+        const ai = new AI({
+          id: aiId,
+          x: aiSpawn.x,
+          y: aiSpawn.y,
+          behaviorType: aiSpawn.type === 'patrol' ? 'PATROL' : 'GUARD',
+          weaponTypeId: aiSpawn.weaponTypeId,
+          visionRange: aiSpawn.visionRange,
+          visionAngleDeg: aiSpawn.visionAngleDeg,
+          patrolConfig,
+          guardConfig,
+          currentTick: this.tick,
+        });
+
+        this.ais.set(aiId, ai);
+        log('AI_SPAWNED', { room: this.id, aiId, type: aiSpawn.type, weapon: aiSpawn.weaponTypeId });
+      }
+    }
+  }
+
+  public updateAIs(currentTick: number): void {
+    if (!this.aiBehaviorController) return;
+
+    // 性能优化: 分批更新（每tick更新1/4的AI）
+    const aisArray = Array.from(this.ais.values());
+    const updateIndex = currentTick % 4;
+
+    for (let i = updateIndex; i < aisArray.length; i += 4) {
+      const ai = aisArray[i];
+      if (ai.status !== 'ALIVE') continue;
+      this.aiBehaviorController.updateAI(ai, currentTick);
+      ai.positionHistory.add(currentTick, Date.now(), ai.x, ai.y);
+    }
+  }
+
+  public aiFireWeapon(ai: AI, aimRad: number, currentTick: number): void {
+    if (!ai.weaponRuntime) return;
+
+    const wr = ai.weaponRuntime;
+    const weaponDef = getWeaponDef(wr.weaponTypeId);
+
+    wr.ammoInMag--;
+    advanceFireCooldown(wr, weaponDef, currentTick);
+
+    // 复用现有子弹生成逻辑（需要转换AI为兼容格式）
+    const aiAsPlayer: any = { id: ai.id, x: ai.x, y: ai.y };
+    this.spawnBullet(ai.id, aiAsPlayer, aimRad, weaponDef, undefined);
+  }
+
+  private handleAIDeath(aiId: string): void {
+    const ai = this.ais.get(aiId);
+    if (!ai || !ai.weaponRuntime) return;
+
+    ai.status = 'DEAD';
+
+    // 掉落武器
+    const weaponItem: ItemInstance = {
+      iid: `loot_${Date.now()}_${Math.random().toString(36).substring(2)}`,
+      typeId: ai.weaponRuntime.weaponTypeId,
+      qty: 1,
+    };
+
+    const bid = `bid_${this.lootBagIdCounter++}`;
+    this.lootBags.set(bid, {
+      bid,
+      x: ai.x,
+      y: ai.y,
+      items: [weaponItem],
+    });
+
+    log('AI_DEATH', { room: this.id, aiId, position: `${ai.x},${ai.y}` });
+  }
+
   // 获取当前状态快照
   // Step4: 导出时只包含BULLET_STATE字段，不包含spawnAt，保证协议兼容
   // 新增: 只包含 inWorld=true 的玩家（未来会实现 inWorld 字段，现在先包含所有玩家）
@@ -2414,7 +2619,8 @@ export class Room {
     items: ITEM_STATE[];
     worldItems: WorldItem[];
     lootBags: LootBag[];
-    obstacles: OBSTACLE_STATE[]; // 新增: 障碍物（可破坏，需要同步）
+    obstacles: OBSTACLE_STATE[];
+    ais: AI_STATE[];
   } {
     // 新增: 只包含 ALIVE/DEAD 状态的玩家（EXTRACTED 玩家不再出现在 snapshot 中）
     // 未来会改为检查 inWorld 字段
@@ -2442,6 +2648,10 @@ export class Room {
       targetY,
     }));
 
+    const aiStates = Array.from(this.ais.values())
+      .filter(ai => ai.status === 'ALIVE')
+      .map(ai => ai.toState(this.tick));
+
     return {
       players: visiblePlayers,
       // Step4: 映射内部Bullet类型到BULLET_STATE（去掉spawnAt和damage字段，保留clientShotId和weaponTypeId）
@@ -2450,6 +2660,7 @@ export class Room {
       worldItems: this.getWorldItems(), // 新增: 世界物品
       lootBags: this.getLootBags(), // 新增: 掉落包
       obstacles: this.getObstacles(), // 新增: 障碍物（可破坏，需要同步）
+      ais: aiStates, // 新增: AI实体
     };
   }
   

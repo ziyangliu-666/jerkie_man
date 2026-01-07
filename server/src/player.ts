@@ -125,6 +125,26 @@ export class Player {
     return multiplier;
   }
 
+  // 新增: 更新耐力（独立于移动输入，用于每tick恢复）
+  updateStamina(deltaTime: number, isMoving: boolean, wantsSprint: boolean): void {
+    // 更新冲刺状态
+    this.isSprinting = canSprint(this.stamina, wantsSprint) && isMoving;
+
+    // 更新耐力
+    this.stamina = calculateStaminaChange(
+      this.stamina,
+      this.maxStamina,
+      this.isSprinting,
+      isMoving,
+      deltaTime
+    );
+
+    // 如果耐力耗尽，停止冲刺
+    if (this.stamina <= 0) {
+      this.isSprinting = false;
+    }
+  }
+
   // 处理输入，更新位置
   // Day2: 如果玩家已死亡，不允许移动
   // Day3: EXTRACTED 玩家也不能移动
@@ -147,22 +167,8 @@ export class Player {
     // 检查是否正在移动
     const isMoving = keys.up || keys.down || keys.left || keys.right;
 
-    // 更新冲刺状态
-    this.isSprinting = canSprint(this.stamina, wantsSprint) && isMoving;
-
-    // 更新耐力
-    this.stamina = calculateStaminaChange(
-      this.stamina,
-      this.maxStamina,
-      this.isSprinting,
-      isMoving,
-      deltaTime
-    );
-
-    // 如果耐力耗尽，停止冲刺
-    if (this.stamina <= 0) {
-      this.isSprinting = false;
-    }
+    // 更新耐力（使用统一的方法）
+    this.updateStamina(deltaTime, isMoving, wantsSprint);
 
     // 计算速度倍数（基于装备 buff）
     const equipmentSpeedMultiplier = this.getSpeedMultiplier();

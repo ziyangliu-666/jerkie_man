@@ -3551,7 +3551,8 @@ function renderLoop(): void {
           network.getConnectionState().lastServerTick, // 新增: 当前服务器 tick（用于计算换弹进度）
           nearbyInteractableForRender, // 新增: 附近可交互目标
           renderLocalPlayerForTooltip, // 新增: 本地玩家（用于计算相对位置）
-          isLocalPlayerInBush // 新增: 本地玩家是否在草丛内
+          isLocalPlayerInBush, // 新增: 本地玩家是否在草丛内
+          state.ais ?? [] // 新增: AI实体列表
         );
       } else {
         // 非 RAID phase: 只清屏（显示暗背景）

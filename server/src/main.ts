@@ -1303,6 +1303,9 @@ setInterval(() => {
     player.updateBuffs(room.tick);
   }
 
+  // 新增: 记录本tick有输入的玩家（避免重复更新耐力）
+  const playersWithInput = new Set<string>();
+
   // Day2: 先处理输入（可能生成子弹）
   // 修复: 按序处理最多 N 条，避免队列为空时不移动（解决 err=10 问题）
   const MAX_STEPS = 4; // 每 tick 最多追 4 步，避免被恶意灌爆
@@ -1310,6 +1313,9 @@ setInterval(() => {
     if (queue.length === 0) {
       continue;
     }
+    
+    // 标记该玩家本tick有输入
+    playersWithInput.add(playerId);
     
     // 修复: 按 seq 升序排序，按序处理（而不是只处理最新一条）
     queue.sort((a, b) => a.input.seq - b.input.seq);
@@ -1614,6 +1620,9 @@ setInterval(() => {
     latencyMap.set(playerId, latency.rtt);
   }
 
+  // 更新AI（行为、寻路、战斗）
+  room.updateAIs(room.tick);
+
   // Day2: 更新子弹位置并检测命中（20Hz tick = 50ms = 0.05s）
   const deltaTime = 0.05;
   room.updateBullets(deltaTime, latencyMap);
@@ -1709,6 +1718,14 @@ setInterval(() => {
     }
   }
 
+  // 新增: 为没有输入的玩家更新耐力（确保不动时也能恢复耐力）
+  for (const [playerId, player] of room.players.entries()) {
+    if (player.status === 'ALIVE' && !playersWithInput.has(playerId)) {
+      // 玩家本tick没有输入，手动更新耐力（不移动，不冲刺）
+      player.updateStamina(0.05, false, false); // deltaTime=0.05秒（20Hz）
+    }
+  }
+
 }, TICK_INTERVAL_MS);
 
 // Snapshot 广播循环（10Hz）
@@ -1724,6 +1741,7 @@ setInterval(() => {
     worldItems: snapshot.worldItems, // 新增: 世界物品列表（MVP 全量，未来做 delta）
     lootBags: snapshot.lootBags, // 新增: 掉落包列表
     obstacles: snapshot.obstacles, // 新增: 障碍物列表（可破坏，需要同步）
+    ais: snapshot.ais, // 新增: AI实体列表
   });
 
   // 广播给所有连接

@@ -256,6 +256,19 @@ export const PLAYER_STATE_SCHEMA = z.object({
   buffs: z.array(PLAYER_BUFF_SCHEMA).optional(), // 新增: 局内短效 Buff 列表
 });
 
+// AI实体状态 schema（用于服务端AI系统）
+export const AI_STATE_SCHEMA = z.object({
+  id: z.string(),
+  x: z.number(),
+  y: z.number(),
+  hp: z.number().int().min(0).max(100),
+  maxHp: z.number().int().positive(),
+  status: z.enum(['ALIVE', 'DEAD']),
+  weaponRuntime: WEAPON_RUNTIME_SCHEMA.optional(),
+  aimRad: z.number(),
+  behaviorState: z.enum(['IDLE', 'PATROL', 'CHASE', 'ATTACK', 'SEARCH', 'RETURN']),
+});
+
 export const BULLET_STATE_SCHEMA = z.object({
   id: z.string(),
   x: z.number(),
@@ -327,6 +340,7 @@ export const S2C_SNAPSHOT_SCHEMA = z.object({
   worldItems: z.array(WORLD_ITEM_SCHEMA).optional(), // 新增: 世界物品列表（MVP 全量，未来做 delta）
   lootBags: z.array(LOOT_BAG_SCHEMA).optional(), // 新增: 掉落包列表
   obstacles: z.array(OBSTACLE_STATE_SCHEMA).optional(), // 新增: 障碍物列表（可破坏，需要同步）
+  ais: z.array(AI_STATE_SCHEMA).default([]), // 新增: AI实体列表
 });
 
 export const S2C_ERROR_SCHEMA = z.object({
@@ -448,6 +462,7 @@ export type C2S_LOCAL_BULLET_HIT = z.infer<typeof C2S_LOCAL_BULLET_HIT_SCHEMA>;
 
 export type PLAYER_STATE = z.infer<typeof PLAYER_STATE_SCHEMA>;
 export type PLAYER_BUFF = PlayerBuff;
+export type AI_STATE = z.infer<typeof AI_STATE_SCHEMA>;
 export type BULLET_STATE = z.infer<typeof BULLET_STATE_SCHEMA>;
 export type ITEM_STATE = z.infer<typeof ITEM_STATE_SCHEMA>;
 export type OBSTACLE_STATE = z.infer<typeof OBSTACLE_STATE_SCHEMA>; // Day4-2: 障碍物类型

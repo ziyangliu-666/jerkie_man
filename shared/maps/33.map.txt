@@ -1,0 +1,153 @@
+# MAPTEXT v1
+# 4人中图：Green Ring Deadlock（稍大一些：1200x1200）
+# 目标：草丛更多；草丛围绕中心撤离点；箱子尽量“成群”堆放；硬障碍尽量少且不封闭
+
+@meta id=green_ring_deadlock_1200 name="Green Ring Deadlock" desc="4人中图：中心撤离点被草丛环绕（软掩体多、视野差）；箱子以“成群堆”分布在四象限；硬障碍很少且不封闭。"
+@map width=1200 height=1200 seed=7012026
+
+# 撤离点：中心（危险）
+@extract x=570 y=570 w=60 h=60
+
+# === 出生点（4人）===
+@spawn x=120 y=120
+@spawn x=1080 y=120
+@spawn x=120 y=1080
+@spawn x=1080 y=1080
+
+@poi x=600 y=600 id=center_extract type=landmark name="Center Extract" desc="中心撤离点：四面枪线汇聚，草丛环绕，最危险。"
+
+# === 少量水域（一点点即可，不封死路） ===
+@obstacle x=150 y=520 w=160 h=110 type=water
+@obstacle x=890 y=560 w=160 h=110 type=water
+@obstacle x=520 y=150 w=110 h=160 type=water
+@obstacle x=560 y=890 w=110 h=160 type=water
+
+@poi x=230 y=575 id=west_pool type=landmark name="West Pool" desc="西侧浅水：逼迫绕行或抢过路口。"
+@poi x=970 y=620 id=east_pool type=landmark name="East Pool" desc="东侧浅水：制造节奏停顿。"
+
+# === 极少“硬障碍”（不封闭，只切视线） ===
+@obstacle 590 420 20 140 type=wall
+@obstacle 420 590 140 20 type=wall
+@obstacle 590 640 20 140 type=wall
+@obstacle 640 590 140 20 type=wall
+
+@poi x=610 y=610 id=linecut_cross type=landmark name="Linecut Cross" desc="中心细墙十字：切视线但不围房间。"
+
+# === 草丛：围绕撤离点（做一个“绿环”软掩体圈） ===
+# 内环（紧贴撤离点外圈）
+@obstacle x=520 y=520 w=70 h=70 type=bush
+@obstacle x=610 y=520 w=70 h=70 type=bush
+@obstacle x=520 y=610 w=70 h=70 type=bush
+@obstacle x=610 y=610 w=70 h=70 type=bush
+
+# 外环（再外一圈，形成“看不清 + 容易贴脸”）
+@obstacle x=470 y=470 w=80 h=80 type=bush
+@obstacle x=650 y=470 w=80 h=80 type=bush
+@obstacle x=470 y=650 w=80 h=80 type=bush
+@obstacle x=650 y=650 w=80 h=80 type=bush
+@obstacle x=560 y=450 w=80 h=60 type=bush
+@obstacle x=560 y=690 w=80 h=60 type=bush
+@obstacle x=450 y=560 w=60 h=80 type=bush
+@obstacle x=690 y=560 w=60 h=80 type=bush
+
+@zone x=450 y=450 w=300 h=300 id=green_ring type=pvp name="Green Ring" desc="草丛环：撤离点周围软掩体密集，极易发生贴脸交火。"
+
+# === 额外草丛带：四条路的“侧翼线”更隐蔽 ===
+@obstacle x=220 y=320 w=120 h=90 type=bush
+@obstacle x=860 y=320 w=120 h=90 type=bush
+@obstacle x=220 y=820 w=120 h=90 type=bush
+@obstacle x=860 y=820 w=120 h=90 type=bush
+
+@obstacle x=320 y=220 w=90 h=120 type=bush
+@obstacle x=790 y=220 w=90 h=120 type=bush
+@obstacle x=320 y=880 w=90 h=120 type=bush
+@obstacle x=790 y=880 w=90 h=120 type=bush
+
+# === 箱子：成群堆放（每群 6~12 个），四象限 + 四条路节点 ===
+# 群1：西北箱群（偏近北线）
+@obstacle x=170 y=170 w=30 h=30 type=crate
+@obstacle x=205 y=170 w=30 h=30 type=crate
+@obstacle x=240 y=170 w=30 h=30 type=crate
+@obstacle x=170 y=205 w=30 h=30 type=crate
+@obstacle x=205 y=205 w=30 h=30 type=crate
+@obstacle x=240 y=205 w=30 h=30 type=crate
+@obstacle x=185 y=240 w=30 h=30 type=crate
+@obstacle x=220 y=240 w=30 h=30 type=crate
+
+@poi x=210 y=210 id=crate_pile_nw type=landmark name="Crate Pile NW" desc="西北箱群：小范围掩体密，适合短线卡点。"
+
+# 群2：东北箱群
+@obstacle x=930 y=170 w=30 h=30 type=crate
+@obstacle x=965 y=170 w=30 h=30 type=crate
+@obstacle x=1000 y=170 w=30 h=30 type=crate
+@obstacle x=930 y=205 w=30 h=30 type=crate
+@obstacle x=965 y=205 w=30 h=30 type=crate
+@obstacle x=1000 y=205 w=30 h=30 type=crate
+@obstacle x=945 y=240 w=30 h=30 type=crate
+@obstacle x=980 y=240 w=30 h=30 type=crate
+
+@poi x=970 y=210 id=crate_pile_ne type=landmark name="Crate Pile NE" desc="东北箱群：对称点，常见开局交火。"
+
+# 群3：西南箱群（更靠近水域边）
+@obstacle x=170 y=930 w=30 h=30 type=crate
+@obstacle x=205 y=930 w=30 h=30 type=crate
+@obstacle x=240 y=930 w=30 h=30 type=crate
+@obstacle x=170 y=965 w=30 h=30 type=crate
+@obstacle x=205 y=965 w=30 h=30 type=crate
+@obstacle x=240 y=965 w=30 h=30 type=crate
+@obstacle x=185 y=1000 w=30 h=30 type=crate
+@obstacle x=220 y=1000 w=30 h=30 type=crate
+@obstacle x=255 y=1000 w=30 h=30 type=crate
+
+@poi x=210 y=970 id=crate_pile_sw type=landmark name="Crate Pile SW" desc="西南箱群：贴水绕行时的补给/埋伏点。"
+
+# 群4：东南箱群（离中心稍近，但仍成群）
+@obstacle x=930 y=930 w=30 h=30 type=crate
+@obstacle x=965 y=930 w=30 h=30 type=crate
+@obstacle x=1000 y=930 w=30 h=30 type=crate
+@obstacle x=930 y=965 w=30 h=30 type=crate
+@obstacle x=965 y=965 w=30 h=30 type=crate
+@obstacle x=1000 y=965 w=30 h=30 type=crate
+@obstacle x=945 y=1000 w=30 h=30 type=crate
+@obstacle x=980 y=1000 w=30 h=30 type=crate
+@obstacle x=1015 y=1000 w=30 h=30 type=crate
+
+@poi x=980 y=970 id=crate_pile_se type=landmark name="Crate Pile SE" desc="东南箱群：更靠近中心，风险更高。"
+
+# 群5：西路节点箱群（进中心的西入口）
+@obstacle x=260 y=575 w=30 h=30 type=crate
+@obstacle x=295 y=575 w=30 h=30 type=crate
+@obstacle x=330 y=575 w=30 h=30 type=crate
+@obstacle x=260 y=610 w=30 h=30 type=crate
+@obstacle x=295 y=610 w=30 h=30 type=crate
+@obstacle x=330 y=610 w=30 h=30 type=crate
+
+# 群6：东路节点箱群
+@obstacle x=840 y=575 w=30 h=30 type=crate
+@obstacle x=875 y=575 w=30 h=30 type=crate
+@obstacle x=910 y=575 w=30 h=30 type=crate
+@obstacle x=840 y=610 w=30 h=30 type=crate
+@obstacle x=875 y=610 w=30 h=30 type=crate
+@obstacle x=910 y=610 w=30 h=30 type=crate
+
+# 群7：北路节点箱群
+@obstacle x=575 y=260 w=30 h=30 type=crate
+@obstacle x=610 y=260 w=30 h=30 type=crate
+@obstacle x=645 y=260 w=30 h=30 type=crate
+@obstacle x=592 y=295 w=30 h=30 type=crate
+@obstacle x=627 y=295 w=30 h=30 type=crate
+
+# 群8：南路节点箱群
+@obstacle x=575 y=910 w=30 h=30 type=crate
+@obstacle x=610 y=910 w=30 h=30 type=crate
+@obstacle x=645 y=910 w=30 h=30 type=crate
+@obstacle x=592 y=875 w=30 h=30 type=crate
+@obstacle x=627 y=875 w=30 h=30 type=crate
+
+# === Zones：外围与水域 ===
+@zone x=0 y=0 w=1200 h=1200 id=outer type=generic name="Outer Routes" desc="外围绕行：相对安全但更费时间；箱群是主要掩体来源。"
+@zone x=120 y=480 w=220 h=200 id=west_wet type=generic name="West Wet" desc="西侧浅水区：不致命但会拖节奏。"
+@zone x=860 y=520 w=220 h=200 id=east_wet type=generic name="East Wet" desc="东侧浅水区：逼迫绕行或抢点。"
+
+@note "箱子是成群堆放：每群都留了边缘缝隙，保证路径不会被堵死。中心草丛环会让撤离更像‘最后一波’。"
+@comment 如果你想让撤离更‘纯危险’，把中心内环四个 bush 再各扩大 10~20 像素（或把 extract 改成 50x50），否则太容易被草丛贴脸秒。"

@@ -29,6 +29,19 @@ export const ZONE_SCHEMA = z.object({
   description: z.string().optional(),
 });
 
+// 新增: AI spawn点定义
+export const AI_SPAWN_SCHEMA = z.object({
+  x: z.number().nonnegative(),
+  y: z.number().nonnegative(),
+  type: z.enum(['patrol', 'guard']),
+  weaponTypeId: z.string(),
+  count: z.number().int().positive().default(1),
+  patrolPointIds: z.array(z.string()).optional(),
+  guardRadius: z.number().positive().optional(),
+  visionRange: z.number().positive().default(300),
+  visionAngleDeg: z.number().min(0).max(360).default(360),
+});
+
 export const MAP_TEMPLATE_SCHEMA = z.object({
   id: z.string().min(1),
   name: z.string().optional(),
@@ -38,12 +51,14 @@ export const MAP_TEMPLATE_SCHEMA = z.object({
   spawns: z.array(SPAWN_POINT_SCHEMA).default([]),
   pois: z.array(POI_SCHEMA).default([]), // 新增: POI 列表
   zones: z.array(ZONE_SCHEMA).default([]), // 新增: 区域列表
+  aiSpawns: z.array(AI_SPAWN_SCHEMA).default([]), // 新增: AI spawn点列表
 });
 
 export type MapTemplate = z.infer<typeof MAP_TEMPLATE_SCHEMA>;
 export type SpawnPoint = z.infer<typeof SPAWN_POINT_SCHEMA>;
 export type POI = z.infer<typeof POI_SCHEMA>;
 export type Zone = z.infer<typeof ZONE_SCHEMA>;
+export type AISpawn = z.infer<typeof AI_SPAWN_SCHEMA>;
 
 type TokenizedLine = {
   directive: string;
@@ -175,6 +190,7 @@ export function createDefaultMapTemplate(id: string = 'default'): MapTemplate {
     spawns: [],
     pois: [],
     zones: [],
+    aiSpawns: [],
   };
 }
 
@@ -278,6 +294,27 @@ export function parseMapTemplateText(text: string): MapTemplate {
         description: kv.description || kv.desc,
       };
       template.zones.push(zone);
+    } else if (directive === '@aispawn' || directive === '@ai') {
+      // 新增: 解析AI spawn点
+      const { kv, positionals } = parseKeyValues(tokens);
+      const aiSpawn: AISpawn = {
+        x: positionals.length >= 2
+          ? parseNumber(positionals[0], lineNumber, 'ai.x')
+          : parseNumber(kv.x ?? '', lineNumber, 'ai.x'),
+        y: positionals.length >= 2
+          ? parseNumber(positionals[1], lineNumber, 'ai.y')
+          : parseNumber(kv.y ?? '', lineNumber, 'ai.y'),
+        type: kv.type === 'guard' ? 'guard' : 'patrol',
+        weaponTypeId: kv.weapon || 'w_pistol',
+        count: kv.count ? parseNumber(kv.count, lineNumber, 'ai.count') : 1,
+        visionRange: kv.vision ? parseNumber(kv.vision, lineNumber, 'ai.vision') : 300,
+        visionAngleDeg: kv.visionangle || kv.visionAngle
+          ? parseNumber(kv.visionangle || kv.visionAngle, lineNumber, 'ai.visionAngle')
+          : 360,
+        guardRadius: kv.radius ? parseNumber(kv.radius, lineNumber, 'ai.radius') : undefined,
+        patrolPointIds: kv.patrol ? kv.patrol.split(',').map((s: string) => s.trim()) : undefined,
+      };
+      template.aiSpawns.push(aiSpawn);
     } else if (directive === '@note' || directive === '@comment') {
       continue;
     } else {

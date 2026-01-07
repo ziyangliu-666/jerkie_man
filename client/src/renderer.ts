@@ -303,7 +303,61 @@ export class Renderer {
   }
 
   /**
-   * 新增: 判断玩家当前是否“高速移动”
+   * 新增: 绘制AI实体
+   */
+  drawAI(ai: any, debug: boolean = false): void {
+    const size = 20;
+    const screenX = Math.round(ai.x - this.camX);
+    const screenY = Math.round(ai.y - this.camY);
+
+    // AI颜色: 橙色（区别于蓝色本地玩家/红色敌对玩家）
+    this.ctx.fillStyle = ai.status === 'ALIVE' ? '#ff8800' : '#666666';
+    this.ctx.fillRect(screenX - size / 2, screenY - size / 2, size, size);
+
+    // 白色边框
+    this.ctx.strokeStyle = '#fff';
+    this.ctx.lineWidth = 2;
+    this.ctx.strokeRect(screenX - size / 2, screenY - size / 2, size, size);
+
+    // 血条
+    if (ai.status === 'ALIVE' && ai.hp !== undefined && ai.maxHp !== undefined) {
+      const hpBarWidth = 30;
+      const hpBarHeight = 4;
+      const hpBarY = screenY - size / 2 - 8;
+
+      this.ctx.fillStyle = '#333';
+      this.ctx.fillRect(screenX - hpBarWidth / 2, hpBarY, hpBarWidth, hpBarHeight);
+
+      const hpRatio = ai.hp / ai.maxHp;
+      this.ctx.fillStyle = hpRatio > 0.5 ? '#0f0' : hpRatio > 0.25 ? '#ff0' : '#f00';
+      this.ctx.fillRect(screenX - hpBarWidth / 2, hpBarY, hpBarWidth * hpRatio, hpBarHeight);
+    }
+
+    // 瞄准方向
+    if (ai.weaponRuntime && ai.status === 'ALIVE' && ai.aimRad !== undefined) {
+      const barrelLength = 15;
+      const barrelEndX = screenX + Math.cos(ai.aimRad) * barrelLength;
+      const barrelEndY = screenY + Math.sin(ai.aimRad) * barrelLength;
+
+      this.ctx.strokeStyle = '#fff';
+      this.ctx.lineWidth = 2;
+      this.ctx.beginPath();
+      this.ctx.moveTo(screenX, screenY);
+      this.ctx.lineTo(barrelEndX, barrelEndY);
+      this.ctx.stroke();
+    }
+
+    // Debug: 状态标签
+    if (debug && ai.behaviorState) {
+      this.ctx.font = '10px monospace';
+      this.ctx.fillStyle = '#fff';
+      this.ctx.textAlign = 'center';
+      this.ctx.fillText(ai.behaviorState, screenX, screenY - size / 2 - 18);
+    }
+  }
+
+  /**
+   * 新增: 判断玩家当前是否"高速移动"
    * 完全基于本地可见的位置变化，不依赖服务端的 isSprinting 或 buff 字段
    */
   private isPlayerFast(player: PLAYER_STATE): boolean {
@@ -1104,7 +1158,8 @@ export class Renderer {
     currentServerTick?: number, // 新增: 当前服务器 tick（用于计算换弹进度）
     nearbyInteractable?: { type: 'worldItem' | 'lootBag' | 'extractZone'; name: string; distance: number } | null, // 新增: 附近可交互目标
     localPlayer?: PLAYER_STATE | null, // 新增: 本地玩家（用于计算相对位置）
-    isLocalPlayerInBush: boolean = false // 新增: 本地玩家是否在草丛内
+    isLocalPlayerInBush: boolean = false, // 新增: 本地玩家是否在草丛内
+    ais: any[] = [] // 新增: AI实体列表
   ): void {
     this.clear();
 
@@ -1230,6 +1285,29 @@ export class Renderer {
     // 近战挥击特效
     for (const swing of meleeSwings) {
       this.drawMeleeSwing(swing);
+    }
+    
+    // 新增: 绘制AI实体（应用烟雾/闪光弹视野遮挡）
+    for (const ai of ais) {
+      if (ai.status !== 'ALIVE') continue;
+      
+      // AI视野遮挡逻辑：
+      // 1. 如果本地玩家被闪光弹致盲，看不到任何AI
+      // 2. 如果本地玩家在烟雾内，只能看到同样在烟雾内的AI
+      // 3. 如果本地玩家不在烟雾内，看不到烟雾内的AI
+      
+      // 检查本地玩家是否被闪光弹致盲
+      const isLocalFlashed = localPlayer?.isFlashed ?? false;
+      if (isLocalFlashed) {
+        // 本地玩家被闪光弹致盲，看不到任何AI
+        continue;
+      }
+      
+      // 检查AI是否在烟雾内（需要服务端计算并同步，暂时跳过烟雾检查）
+      // TODO: 服务端需要为AI添加inSmoke字段
+      
+      // 绘制AI
+      this.drawAI(ai, debug);
     }
 
     // Day2: 绘制所有子弹

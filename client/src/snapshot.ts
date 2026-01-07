@@ -46,7 +46,8 @@ export class SnapshotBuffer {
     items: ITEM_STATE[];
     worldItems: WorldItem[];
     lootBags: LootBag[];
-    obstacles?: OBSTACLE_STATE[]; // 新增: 障碍物（可破坏，需要同步）
+    obstacles?: OBSTACLE_STATE[];
+    ais: any[];
   } {
     // P0-1: 使用服务器时间域计算renderTime，避免跨机器时钟偏移导致插值失败
     // 将客户端时间转换为服务器时间域：clientNow + offset = serverNow
@@ -56,17 +57,18 @@ export class SnapshotBuffer {
     const renderTimeServer = serverNow - renderDelay;
 
     if (this.buffer.length === 0) {
-      return { players: [], bullets: [], items: [], worldItems: [], lootBags: [], obstacles: [] };
+      return { players: [], bullets: [], items: [], worldItems: [], lootBags: [], obstacles: [], ais: [] };
     }
 
     if (this.buffer.length === 1) {
       return {
         players: this.buffer[0].snapshot.players,
         bullets: this.buffer[0].snapshot.bullets,
-        items: this.buffer[0].snapshot.items ?? [], // 修复: 处理可选字段
-        worldItems: this.buffer[0].snapshot.worldItems ?? [], // 新增: 世界物品
-        lootBags: this.buffer[0].snapshot.lootBags ?? [], // 新增: 掉落包
-        obstacles: this.buffer[0].snapshot.obstacles ?? [], // 新增: 障碍物
+        items: this.buffer[0].snapshot.items ?? [],
+        worldItems: this.buffer[0].snapshot.worldItems ?? [],
+        lootBags: this.buffer[0].snapshot.lootBags ?? [],
+        obstacles: this.buffer[0].snapshot.obstacles ?? [],
+        ais: this.buffer[0].snapshot.ais ?? [],
       };
     }
 
@@ -99,10 +101,11 @@ export class SnapshotBuffer {
         return {
           players: latest.snapshot.players,
           bullets: latest.snapshot.bullets,
-          items: latest.snapshot.items ?? [], // 修复: 处理可选字段
-          worldItems: latest.snapshot.worldItems ?? [], // 新增: 世界物品
-          lootBags: latest.snapshot.lootBags ?? [], // 新增: 掉落包
-          obstacles: latest.snapshot.obstacles ?? [], // 新增: 障碍物
+          items: latest.snapshot.items ?? [],
+          worldItems: latest.snapshot.worldItems ?? [],
+          lootBags: latest.snapshot.lootBags ?? [],
+          obstacles: latest.snapshot.obstacles ?? [],
+          ais: latest.snapshot.ais ?? [],
         };
       }
     }
@@ -149,16 +152,42 @@ export class SnapshotBuffer {
       }
     }
 
+    // AI插值（类似玩家插值）
+    const interpolatedAIs: any[] = [];
+    const aiMap0 = new Map((t0.snapshot.ais ?? []).map((a: any) => [a.id, a]));
+    const aiMap1 = new Map((t1.snapshot.ais ?? []).map((a: any) => [a.id, a]));
+
+    const allAIIds = new Set([
+      ...(t0.snapshot.ais ?? []).map((a: any) => a.id),
+      ...(t1.snapshot.ais ?? []).map((a: any) => a.id),
+    ]);
+
+    for (const id of allAIIds) {
+      const a0 = aiMap0.get(id);
+      const a1 = aiMap1.get(id);
+
+      if (a0 && a1) {
+        interpolatedAIs.push({
+          ...a1,
+          x: lerp(a0.x, a1.x, clampedAlphaPlayers),
+          y: lerp(a0.y, a1.y, clampedAlphaPlayers),
+        });
+      } else if (a1) {
+        interpolatedAIs.push(a1);
+      }
+    }
+
     // 子弹渲染已完全由 BulletTrackManager 负责，此处不再插值
     // 仅保留字段用于向后兼容（如服务端调试等）
 
     return {
       players: interpolatedPlayers,
-      bullets: t1.snapshot.bullets, // 不再插值，直接返回最新帧
-      items: t1.snapshot.items ?? [], // 修复: 处理可选字段
-      worldItems: t1.snapshot.worldItems ?? [], // 新增: 世界物品（不做插值）
-      lootBags: t1.snapshot.lootBags ?? [], // 新增: 掉落包（不做插值）
-      obstacles: t1.snapshot.obstacles ?? [], // 新增: 障碍物（不做插值，直接使用最新状态）
+      bullets: t1.snapshot.bullets,
+      items: t1.snapshot.items ?? [],
+      worldItems: t1.snapshot.worldItems ?? [],
+      lootBags: t1.snapshot.lootBags ?? [],
+      obstacles: t1.snapshot.obstacles ?? [],
+      ais: interpolatedAIs,
     };
   }
 
