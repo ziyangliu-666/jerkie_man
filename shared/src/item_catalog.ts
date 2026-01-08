@@ -5,15 +5,7 @@
 import type { ItemType, Rarity } from './types.js';
 
 export const ITEM_CATALOG: Record<string, ItemType> = {
-  // 消耗品
-  ammo: {
-    id: 'ammo',
-    category: 'consumable',
-    name: '弹药',
-    rarity: 'COMMON',
-    value: 50,
-    stackMax: 60,
-  },
+
   medkit: {
     id: 'medkit',
     category: 'consumable',
@@ -106,12 +98,12 @@ export const ITEM_CATALOG: Record<string, ItemType> = {
     category: 'consumable',
     name: '再生血清',
     rarity: 'EPIC',
-    value: 250,
+    value: 300,
     stackMax: 2,
     shortName: '再生',
     consumableProps: {
       buffDurationMs: 20000,  // 20秒
-      hpPerSecond: 5,  // 每秒回复5点HP
+      hpPerSecond: 15,  // 每秒回复15点HP
     },
   },
   
@@ -244,6 +236,14 @@ export const ITEM_CATALOG: Record<string, ItemType> = {
     value: 1200,
     stackMax: 1,
   },
+  w_bubble_gun: {
+    id: 'w_bubble_gun',
+    category: 'weapon',
+    name: '泡泡枪',
+    rarity: 'EPIC',
+    value: 2500,
+    stackMax: 1,
+  },
   
   // 投掷物消耗品
   frag_grenade: {
@@ -251,7 +251,7 @@ export const ITEM_CATALOG: Record<string, ItemType> = {
     category: 'consumable',
     name: '破片手雷',
     rarity: 'RARE',
-    value: 300,
+    value: 150,
     stackMax: 5, // 可以堆叠5个
     shortName: '手雷',
     consumableProps: {
@@ -293,7 +293,7 @@ export const ITEM_CATALOG: Record<string, ItemType> = {
     category: 'consumable',
     name: '全息诱饵',
     rarity: 'RARE',
-    value: 400,
+    value: 100,
     stackMax: 3,
     shortName: '诱饵',
     consumableProps: {
@@ -307,7 +307,7 @@ export const ITEM_CATALOG: Record<string, ItemType> = {
     category: 'consumable',
     name: '伪装工具包',
     rarity: 'RARE',
-    value: 500,
+    value: 200,
     stackMax: 2,
     shortName: '伪装',
     consumableProps: {
@@ -328,14 +328,7 @@ export const ITEM_CATALOG: Record<string, ItemType> = {
       healAmount: 100,  // 恢复100点生命值（满血）
     },
   },
-  armor_plate_item: {
-    id: 'armor_plate_item',
-    category: 'consumable',
-    name: '防弹插板',
-    rarity: 'EPIC',
-    value: 800,
-    stackMax: 2,
-  },
+
   
   // 背包 (5个)
   bag_sling: {

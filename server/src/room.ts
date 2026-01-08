@@ -48,7 +48,7 @@ export class Room {
   private events: Array<{ tick: number; timestamp: number; message: string }> = [];
   private readonly MAX_EVENTS = 50;
   private readonly PICKUP_RADIUS = 40;
-  public raidResults: Map<string, { result: 'EXTRACTED' | 'DIED'; accountId: string; loot?: ItemInstance[]; moneyGained?: number; moneyLost?: number }> = new Map();
+  public raidResults: Map<string, { result: 'EXTRACTED' | 'DIED'; accountId: string; loot?: ItemInstance[]; moneyGained?: number; moneyLost?: number; killedBy?: string; killedByWeaponName?: string }> = new Map();
   public combatEvents: Map<string, Array<{ kind: 'DRY_FIRE' | 'HIT' | 'DAMAGE_TAKEN'; direction?: number }>> = new Map();
   public meleeSwings: Array<{ playerId: string; x: number; y: number; aimRad: number; range: number; arcRad: number }> = [];
   public explosions: Array<{ x: number; y: number; radius: number }> = [];
@@ -70,6 +70,7 @@ export class Room {
   private lastItemRespawnTick: number = 0; // 上次物品重刷的tick
   private lastAIRespawnTick: number = 0; // 上次AI重刷的tick
   private aiSpawnMap: Map<string, AISpawn> = new Map(); // AI spawn点映射（用于重刷）
+  private aiSlotDeathTimes: Map<string, number> = new Map(); // AI槽位死亡时间（"spawnId:index" -> tick）
 
   constructor(id: string, options?: { seed?: number; mapTemplate?: MapTemplate }) {
     this.id = id;
@@ -2741,15 +2742,6 @@ export class Room {
                 // 子弹可以穿透，但伤害降低
                 const oldDamage = bullet.damage;
                 bullet.damage = Math.floor(bullet.damage * penetration);
-                log('BULLET_PENETRATE', {
-                  room: this.id,
-                  bullet: bullet.id,
-                  obstacle: obsType,
-                  penetration,
-                  oldDamage,
-                  newDamage: bullet.damage,
-                  tick: this.tick,
-                });
                 // 继续检测下一个障碍物（可能穿透多个）
               } else {
                 // 子弹被完全阻挡
@@ -3342,22 +3334,31 @@ export class Room {
       const toSpawn = Math.min(1, targetCount - aliveAICount); // 每次重刷1个AI
 
       if (toSpawn > 0) {
-        this.respawnAIs(toSpawn, respawnConfig.spawnId);
-        this.lastAIRespawnTick = this.tick;
+        const spawned = this.respawnAIs(toSpawn, respawnConfig.spawnId);
         
-        log('AIS_RESPAWNED', {
-          room: this.id,
-          count: toSpawn,
-          totalAIs: aliveAICount + toSpawn,
-          tick: this.tick,
-        });
+        // 无论是否生成成功，都更新计时器，避免每一帧都尝试重刷导致刷屏
+        this.lastAIRespawnTick = this.tick;
+
+        if (spawned > 0) {
+          log('AIS_RESPAWNED', {
+            room: this.id,
+            count: spawned,
+            totalAIs: aliveAICount + spawned,
+            tick: this.tick,
+          });
+        }
       }
     }
   }
 
   // 执行AI重刷（生成新AI）
-  private respawnAIs(count: number, spawnId?: string): void {
-    if (!this.mapTemplate?.aiSpawns || this.mapTemplate.aiSpawns.length === 0) return;
+  // 返回值：实际生成的AI数量
+  private respawnAIs(count: number, spawnId?: string): number {
+    if (!this.mapTemplate?.aiSpawns || this.mapTemplate.aiSpawns.length === 0) return 0;
+
+    // 定义重刷参数
+    const RESPAWN_COOLDOWN_TICKS = 1200; // 槽位死亡后的冷却时间（60秒，避免立即重刷）
+    const PLAYER_VISION_RANGE = 500; // 避免在玩家视野范围内重刷
 
     // 1. 整理出所有可用的空闲槽位
     // 每个 AISpawn.count 代表该点位有多少个槽位
@@ -3379,15 +3380,46 @@ export class Room {
       if (!spawn) continue;
 
       for (let i = 0; i < spawn.count; i++) {
-        if (!occupiedSlots.has(`${sid}:${i}`)) {
-          freeSlots.push({ spawn, spawnId: sid, index: i });
+        const slotKey = `${sid}:${i}`;
+        
+        // 检查槽位是否被占用
+        if (occupiedSlots.has(slotKey)) continue;
+        
+        // 检查槽位冷却时间（如果该槽位的AI最近死亡，则跳过）
+        const lastDeathTick = this.aiSlotDeathTimes.get(slotKey);
+        if (lastDeathTick !== undefined) {
+          const ticksSinceDeath = this.tick - lastDeathTick;
+          if (ticksSinceDeath < RESPAWN_COOLDOWN_TICKS) {
+            // 还在冷却期，不重刷
+            continue;
+          }
         }
+        
+        // 检查是否有玩家在附近（避免在玩家眼前刷新）
+        let tooCloseToPlayer = false;
+        for (const player of this.players.values()) {
+          if (player.status !== 'ALIVE') continue;
+          
+          const dx = spawn.x - player.x;
+          const dy = spawn.y - player.y;
+          const dist = Math.sqrt(dx * dx + dy * dy);
+          
+          if (dist < PLAYER_VISION_RANGE) {
+            tooCloseToPlayer = true;
+            break;
+          }
+        }
+        
+        if (tooCloseToPlayer) continue;
+        
+        // 该槽位可用
+        freeSlots.push({ spawn, spawnId: sid, index: i });
       }
     }
 
     if (freeSlots.length === 0) {
-      log('AI_RESPAWN_FAILED', { room: this.id, reason: 'no_free_slots', spawnId });
-      return;
+      // 没有任何可用槽位（都在冷却中或都有玩家在附近）是正常现象，不再打日志刷屏
+      return 0;
     }
 
     // 2. 随机排序空闲槽位，从中抽取 count 个
@@ -3399,6 +3431,7 @@ export class Room {
     }
 
     const numToSpawn = Math.min(count, shuffledSlots.length);
+    let actuallySpawned = 0;
 
     for (let i = 0; i < numToSpawn; i++) {
       const slot = shuffledSlots[i];
@@ -3465,8 +3498,21 @@ export class Room {
       });
 
       this.ais.set(aiId, ai);
-      log('AI_RESPAWNED', { room: this.id, aiId, type: selectedSpawn.type, weapon: ai.weaponRuntime.weaponTypeId, spawnId: slot.spawnId, spawnIndex: slot.index });
+      actuallySpawned++;
+      
+      log('AI_RESPAWNED', { 
+        room: this.id, 
+        aiId, 
+        type: selectedSpawn.type, 
+        role,
+        weapon: ai.weaponRuntime.weaponTypeId, 
+        spawnId: slot.spawnId, 
+        spawnIndex: slot.index,
+        tick: this.tick
+      });
     }
+    
+    return actuallySpawned;
   }
 
   private handleAIDeath(aiId: string): void {
@@ -3474,6 +3520,19 @@ export class Room {
     if (!ai || !ai.weaponRuntime) return;
 
     ai.status = 'DEAD';
+
+    // 记录槽位死亡时间（用于重刷冷却）
+    if (ai.spawnId !== undefined && ai.spawnIndex !== undefined) {
+      const slotKey = `${ai.spawnId}:${ai.spawnIndex}`;
+      this.aiSlotDeathTimes.set(slotKey, this.tick);
+      
+      log('AI_SLOT_DEATH_RECORDED', {
+        room: this.id,
+        aiId,
+        slotKey,
+        tick: this.tick
+      });
+    }
 
     // 掉落武器
     const weaponItem: ItemInstance = {
@@ -3490,7 +3549,7 @@ export class Room {
       items: [weaponItem],
     });
 
-    log('AI_DEATH', { room: this.id, aiId, position: `${ai.x},${ai.y}` });
+    log('AI_DEATH', { room: this.id, aiId, position: `${ai.x},${ai.y}`, tick: this.tick });
   }
 
   // 获取当前状态快照
@@ -3805,7 +3864,7 @@ export class Room {
   }
 
   // 新增: 处理玩家死亡（生成掉落包）
-  handlePlayerDeath(playerId: string): { success: boolean; accountId?: string; moneyLost?: number } {
+  handlePlayerDeath(playerId: string): { success: boolean; accountId?: string; moneyLost?: number; killedBy?: string; killedByWeaponName?: string } {
     const player = this.players.get(playerId);
     if (!player || player.status !== 'DEAD') return { success: false };
 
@@ -3823,6 +3882,10 @@ export class Room {
       });
       return { success: false };
     }
+
+    // 获取击杀者信息
+    const killedBy = player.killedBy ?? undefined;
+    const killedByWeaponName = player.killedByWeaponName ?? undefined;
 
     // 计算损失的金钱（prep 物品的价值，但 prep 已经在进入战局时移到 inventory 了）
     // 所以这里计算的是 inventory 中物品的价值
@@ -3863,6 +3926,8 @@ export class Room {
         bid,
         itemCount: droppedItems.length,
         moneyLost,
+        killedBy,
+        killedByWeaponName,
         tick: this.tick,
       });
     }
@@ -3900,14 +3965,16 @@ export class Room {
       });
     }
     
-    // 添加到结果队列
+    // 添加到结果队列（包含死亡原因）
     this.raidResults.set(playerId, {
       result: 'DIED',
       accountId,
       moneyLost,
+      killedBy,
+      killedByWeaponName,
     });
     
-    return { success: true, accountId, moneyLost };
+    return { success: true, accountId, moneyLost, killedBy, killedByWeaponName };
   }
 
   // 新增: 处理玩家撤离（inventory -> stash）

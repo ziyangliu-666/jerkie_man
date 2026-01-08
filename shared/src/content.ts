@@ -42,7 +42,7 @@ export type ITEM_TYPE = z.infer<typeof ITEM_TYPE_SCHEMA>;
 // 默认物品类型（已废弃，现在统一使用 ITEM_CATALOG）
 export const DEFAULT_ITEM_TYPES: ITEM_TYPE[] = [
   { id: 'medkit', name: '医疗包', rarity: 'common' },
-  { id: 'ammo', name: '弹药', rarity: 'common' },
+
 ];
 
 // 内容加载器（Day1只返回默认内容）

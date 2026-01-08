@@ -147,7 +147,7 @@ export class NavigationGrid {
 }
 
 export class Pathfinder {
-  private navGrid: NavigationGrid;
+  public navGrid: NavigationGrid;
 
   constructor(navGrid: NavigationGrid) {
     this.navGrid = navGrid;

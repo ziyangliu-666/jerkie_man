@@ -799,6 +799,19 @@ ws.on('message', (data: Buffer) => {
             )
           );
         } else {
+          // ✅ 修复: 如果购买时自动装备了物品，需要同步到玩家实体（类似 C2S_EQUIP 的处理）
+          if (parsed.autoAction === 'equip' && playerId) {
+            const slot = parsed.typeId.startsWith('w_') ? 'weapon' : 
+                        parsed.typeId.startsWith('bag_') ? 'bag' : 
+                        parsed.typeId.startsWith('armor_') ? 'armor' : null;
+            if (slot === 'weapon') {
+              room.updatePlayerWeaponFromProfile(playerId, accountId);
+              log('BUY_EQUIP_WEAPON_SYNC', { playerId, accountId, typeId: parsed.typeId });
+            } else if (slot) {
+              room.updatePlayerGearFromProfile(playerId, accountId);
+              log('BUY_EQUIP_GEAR_SYNC', { playerId, accountId, typeId: parsed.typeId, slot });
+            }
+          }
           sendProfile(ws, accountId);
         }
       } else if (parsed.type === 'C2S_EQUIP') {
@@ -1562,7 +1575,9 @@ setInterval(() => {
             result: result.result,
             loot: result.loot ?? [],
             moneyGained: result.moneyGained ?? 0,
-            moneyLost: result.moneyLost ?? 0,
+            moneyLost: result.moneyLost ??0,
+            killedBy: result.killedBy,
+            killedByWeaponName: result.killedByWeaponName,
           })
         )
       );

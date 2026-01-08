@@ -141,18 +141,6 @@ export class AI {
   }
 
   public toState(currentTick: number): AI_STATE {
-    // DEBUG: 记录眩晕状态
-    const isCurrentlyStunned = this.stunnedUntil > Date.now();
-    if (isCurrentlyStunned || this.stunnedUntil > 0) {
-      console.log('[Server AI.toState] Stun Debug:', {
-        aiId: this.id,
-        stunnedUntil: this.stunnedUntil,
-        now: Date.now(),
-        isStunned: isCurrentlyStunned,
-        remainingMs: Math.max(0, this.stunnedUntil - Date.now())
-      });
-    }
-    
     return {
       id: this.id,
       x: this.x,

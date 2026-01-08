@@ -994,7 +994,7 @@ export class Renderer {
     this.playerLastSample.set(id, { x: player.x, y: player.y, t: now });
 
     // 阈值：略高于基础速度，避免微小抖动就触发拖影
-    const threshold = PLAYER_SPEED * 1.05;
+    const threshold = PLAYER_SPEED * 1.10;
     const isFast = speed > threshold;
 
     return isFast;
@@ -1210,6 +1210,27 @@ export class Renderer {
       this.ctx.beginPath();
       this.ctx.arc(screenX, screenY, grenadeRadius, 0, Math.PI * 2);
       this.ctx.stroke();
+    } else if (bullet.weaponTypeId === 'w_bubble_gun') {
+      // 泡泡枪：绘制泡泡效果
+      const bubbleRadius = 6;
+      
+      // 泡泡本体（半透明青色）
+      this.ctx.fillStyle = 'rgba(135, 206, 250, 0.4)'; // LightSkyBlue translucent
+      this.ctx.beginPath();
+      this.ctx.arc(screenX, screenY, bubbleRadius, 0, Math.PI * 2);
+      this.ctx.fill();
+      
+      // 泡泡边缘（较不透明青色）
+      this.ctx.strokeStyle = 'rgba(135, 206, 250, 0.8)';
+      this.ctx.lineWidth = 1;
+      this.ctx.stroke();
+      
+      // 高光（白色反光，增加立体感）
+      this.ctx.fillStyle = 'rgba(255, 255, 255, 0.8)';
+      this.ctx.beginPath();
+      // 高光位置在左上侧
+      this.ctx.arc(screenX - bubbleRadius * 0.3, screenY - bubbleRadius * 0.3, bubbleRadius * 0.25, 0, Math.PI * 2);
+      this.ctx.fill();
     } else {
       // 普通子弹：小黄色圆点
       this.ctx.fillStyle = '#ffff00'; // 黄色
@@ -1410,46 +1431,93 @@ export class Renderer {
     const screenX = Math.round(worldItem.x - this.camX);
     const screenY = Math.round(worldItem.y - this.camY);
     const size = 12;
+    const now = Date.now();
     
+    let color = '#00ff00';
     try {
       const itemType = getItemType(worldItem.typeId);
-      // 根据稀有度设置颜色
-      if (itemType.rarity === 'COMMON') {
-        this.ctx.fillStyle = '#00ff00'; // 绿色
-      } else if (itemType.rarity === 'RARE') {
-        this.ctx.fillStyle = '#0088ff'; // 蓝色
-      } else if (itemType.rarity === 'EPIC') {
-        this.ctx.fillStyle = '#9d4edd'; // 紫色（史诗）
-      } else {
-        this.ctx.fillStyle = '#00ff00'; // 默认绿色
-      }
-    } catch {
-      this.ctx.fillStyle = '#00ff00'; // 默认绿色
-    }
+      if (itemType.rarity === 'RARE') color = '#0088ff';
+      else if (itemType.rarity === 'EPIC') color = '#9d4edd';
+    } catch {}
+
+    this.ctx.save();
     
-    this.ctx.fillRect(screenX - size / 2, screenY - size / 2, size, size);
-    this.ctx.strokeStyle = '#000000';
-    this.ctx.lineWidth = 1;
-    this.ctx.strokeRect(screenX - size / 2, screenY - size / 2, size, size);
+    // 浮动效果
+    const floatOffset = Math.sin(now / 400) * 3;
+    const finalY = screenY + floatOffset;
+
+    // 绘制底部光晕
+    const glow = this.ctx.createRadialGradient(screenX, finalY, 0, screenX, finalY, size * 1.5);
+    glow.addColorStop(0, `${color}66`); // 40% alpha
+    glow.addColorStop(1, `${color}00`); // transparent
+    this.ctx.fillStyle = glow;
+    this.ctx.beginPath();
+    this.ctx.arc(screenX, finalY, size * 1.5, 0, Math.PI * 2);
+    this.ctx.fill();
+
+    // 绘制物品主体 (菱形旋转)
+    this.ctx.translate(screenX, finalY);
+    this.ctx.rotate(Math.PI / 4); // 旋转45度成菱形
+    
+    this.ctx.fillStyle = color;
+    this.ctx.fillRect(-size / 2, -size / 2, size, size);
+    
+    // 内部高光
+    this.ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
+    this.ctx.fillRect(-size / 2, -size / 2, size / 2, size / 2);
+    
+    this.ctx.strokeStyle = '#fff';
+    this.ctx.lineWidth = 1.5;
+    this.ctx.strokeRect(-size / 2, -size / 2, size, size);
+    
+    this.ctx.restore();
   }
 
   // 新增: 绘制掉落包
   drawLootBag(bag: LootBag): void {
     const screenX = Math.round(bag.x - this.camX);
     const screenY = Math.round(bag.y - this.camY);
-    const size = 16; // 掉落包稍大一些
+    const size = 18;
     
-    // 掉落包用棕色表示
-    this.ctx.fillStyle = '#8b4513';
-    this.ctx.fillRect(screenX - size / 2, screenY - size / 2, size, size);
-    this.ctx.strokeStyle = '#654321';
+    this.ctx.save();
+    
+    // 阴影
+    this.ctx.shadowColor = 'rgba(0, 0, 0, 0.5)';
+    this.ctx.shadowBlur = 4;
+    this.ctx.shadowOffsetY = 2;
+
+    // 掉落包主体 (带圆角的深棕色矩形)
+    const r = 4;
+    this.ctx.fillStyle = '#6d4c41'; // 更有质感的棕色
+    this.ctx.beginPath();
+    this.ctx.moveTo(screenX - size / 2 + r, screenY - size / 2);
+    this.ctx.lineTo(screenX + size / 2 - r, screenY - size / 2);
+    this.ctx.quadraticCurveTo(screenX + size / 2, screenY - size / 2, screenX + size / 2, screenY - size / 2 + r);
+    this.ctx.lineTo(screenX + size / 2, screenY + size / 2 - r);
+    this.ctx.quadraticCurveTo(screenX + size / 2, screenY + size / 2, screenX + size / 2 - r, screenY + size / 2);
+    this.ctx.lineTo(screenX - size / 2 + r, screenY + size / 2);
+    this.ctx.quadraticCurveTo(screenX - size / 2, screenY + size / 2, screenX - size / 2, screenY + size / 2 - r);
+    this.ctx.lineTo(screenX - size / 2, screenY - size / 2 + r);
+    this.ctx.quadraticCurveTo(screenX - size / 2, screenY - size / 2, screenX - size / 2 + r, screenY - size / 2);
+    this.ctx.fill();
+    
+    // 装饰线条 (看起来像个包)
+    this.ctx.strokeStyle = '#4e342e';
     this.ctx.lineWidth = 2;
-    this.ctx.strokeRect(screenX - size / 2, screenY - size / 2, size, size);
+    this.ctx.stroke();
     
-    // 显示物品数量（如果有）
+    this.ctx.beginPath();
+    this.ctx.moveTo(screenX - size / 2, screenY);
+    this.ctx.lineTo(screenX + size / 2, screenY);
+    this.ctx.strokeStyle = 'rgba(0, 0, 0, 0.2)';
+    this.ctx.stroke();
+
+    this.ctx.restore();
+    
+    // 显示物品数量
     if (bag.items.length > 0) {
       this.ctx.fillStyle = '#ffffff';
-      this.ctx.font = '10px monospace';
+      this.ctx.font = 'bold 10px monospace';
       this.ctx.textAlign = 'center';
       this.ctx.textBaseline = 'middle';
       this.ctx.fillText(bag.items.length.toString(), screenX, screenY);
@@ -1563,19 +1631,259 @@ export class Renderer {
     this.ctx.restore();
   }
 
-  // Day3: 绘制撤离区
+  // Day3: 绘制撤离区 (简化版：减少 Draw Call 以优化性能)
   drawExtractZone(zone: { x: number; y: number; w: number; h: number }): void {
     const screenX = zone.x - this.camX;
     const screenY = zone.y - this.camY;
+    const now = Date.now();
     
-    // 半透明矩形填充
-    this.ctx.fillStyle = 'rgba(0, 255, 0, 0.2)';
+    this.ctx.save();
+    
+    // 基础填充
+    this.ctx.fillStyle = 'rgba(0, 255, 0, 0.15)';
     this.ctx.fillRect(screenX, screenY, zone.w, zone.h);
     
-    // 边框线
-    this.ctx.strokeStyle = '#0f0';
+    // 简单的呼吸效果扫描线 (不再使用渐变)
+    const scanPos = (now / 1500) % 1.0;
+    const scanY = screenY + zone.h * scanPos;
+    this.ctx.strokeStyle = 'rgba(255, 255, 255, 0.4)';
     this.ctx.lineWidth = 2;
+    this.ctx.beginPath();
+    this.ctx.moveTo(screenX, scanY);
+    this.ctx.lineTo(screenX + zone.w, scanY);
+    this.ctx.stroke();
+
+    // 静态边框 (不使用阴影)
+    this.ctx.strokeStyle = '#00ff00';
+    this.ctx.lineWidth = 3;
     this.ctx.strokeRect(screenX, screenY, zone.w, zone.h);
+    
+    this.ctx.restore();
+  }
+
+  // 新增: 绘制地图背景（地板、网格、灰尘等）
+  private drawFloor(): void {
+    if (this.worldWidth <= 0 || this.worldHeight <= 0) return;
+
+    this.ctx.save();
+    
+    // 基础颜色 (深灰褐色，比单纯的 #2a2a2a 更有质感)
+    this.ctx.fillStyle = '#222222';
+    const floorX = Math.round(0 - this.camX);
+    const floorY = Math.round(0 - this.camY);
+    this.ctx.fillRect(floorX, floorY, this.worldWidth, this.worldHeight);
+
+    // 绘制网格 (暗色细线)
+    this.ctx.strokeStyle = 'rgba(255, 255, 255, 0.03)';
+    this.ctx.lineWidth = 1;
+    const gridSize = 100;
+    
+    this.ctx.beginPath();
+    // 垂直线
+    for (let x = 0; x <= this.worldWidth; x += gridSize) {
+      const sx = Math.round(x - this.camX);
+      if (sx >= 0 && sx <= this.cssWidth) {
+        this.ctx.moveTo(sx, floorY);
+        this.ctx.lineTo(sx, floorY + this.worldHeight);
+      }
+    }
+    // 水平线
+    for (let y = 0; y <= this.worldHeight; y += gridSize) {
+      const sy = Math.round(y - this.camY);
+      if (sy >= 0 && sy <= this.cssHeight) {
+        this.ctx.moveTo(floorX, sy);
+        this.ctx.lineTo(floorX + this.worldWidth, sy);
+      }
+    }
+    this.ctx.stroke();
+
+    // 绘制一些随机的“灰尘/划痕”效果 (增加地面质感)
+    // 使用简单的确定性假随机 (基于世界坐标)
+    this.ctx.fillStyle = 'rgba(255, 255, 255, 0.02)';
+    for (let i = 0; i < 50; i++) {
+        const seed = 12345;
+        const rx = ((seed * (i + 1) * 7919) % this.worldWidth);
+        const ry = ((seed * (i + 1) * 104729) % this.worldHeight);
+        const rw = ((seed * (i + 1) * 13) % 20) + 5;
+        const rh = ((seed * (i + 1) * 17) % 20) + 5;
+        
+        const sx = rx - this.camX;
+        const sy = ry - this.camY;
+        
+        if (sx > -rw && sx < this.cssWidth && sy > -rh && sy < this.cssHeight) {
+            this.ctx.fillRect(sx, sy, rw, rh);
+        }
+    }
+
+    this.ctx.restore();
+  }
+
+  // 新增: 绘制墙壁 (石墙)
+  private drawWall(screenX: number, screenY: number, w: number, h: number, seed: number): void {
+    const ctx = this.ctx;
+    
+    // 基础渐变：深灰到更深的灰
+    const gradient = ctx.createLinearGradient(screenX, screenY, screenX + w, screenY + h);
+    gradient.addColorStop(0, '#555555');
+    gradient.addColorStop(1, '#333333');
+    ctx.fillStyle = gradient;
+    ctx.fillRect(screenX, screenY, w, h);
+
+    // 绘制内部“石块”纹理
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.15)';
+    const stoneCount = Math.floor((w * h) / 800) + 2;
+    for (let i = 0; i < stoneCount; i++) {
+        const rx = (Math.abs(Math.sin(seed + i)) * (w - 15)) + 5;
+        const ry = (Math.abs(Math.cos(seed * 1.3 + i)) * (h - 15)) + 5;
+        const rw = (Math.abs(Math.sin(seed * 0.7 + i)) * 10) + 10;
+        const rh = (Math.abs(Math.cos(seed * 0.9 + i)) * 10) + 10;
+        ctx.fillRect(screenX + rx, screenY + ry, rw, rh);
+    }
+    
+    // 高光边缘 (增加体积感)
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.1)';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(screenX + 1, screenY + 1, w - 2, h - 2);
+
+    // 外部主边框
+    ctx.strokeStyle = '#111111';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(screenX, screenY, w, h);
+  }
+
+  // 新增: 绘制木箱
+  private drawCrateImprove(screenX: number, screenY: number, w: number, h: number, seed: number): void {
+    const ctx = this.ctx;
+    
+    // 基础渐变：棕色调
+    const gradient = ctx.createLinearGradient(screenX, screenY, screenX, screenY + h);
+    gradient.addColorStop(0, '#A0522D');
+    gradient.addColorStop(1, '#6B3410');
+    ctx.fillStyle = gradient;
+    ctx.fillRect(screenX, screenY, w, h);
+
+    // 绘制木板纹理 (几条横向/纵向线)
+    ctx.strokeStyle = 'rgba(0, 0, 0, 0.2)';
+    ctx.lineWidth = 2;
+    const boardCount = 4;
+    for (let i = 1; i < boardCount; i++) {
+        const bx = screenX + (w * i) / boardCount;
+        ctx.beginPath();
+        ctx.moveTo(bx, screenY);
+        ctx.lineTo(bx, screenY + h);
+        ctx.stroke();
+    }
+
+    // 绘制“X”型加固木条
+    ctx.strokeStyle = '#5D2E0B';
+    ctx.lineWidth = 4;
+    ctx.beginPath();
+    ctx.moveTo(screenX + 5, screenY + 5);
+    ctx.lineTo(screenX + w - 5, screenY + h - 5);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(screenX + w - 5, screenY + 5);
+    ctx.lineTo(screenX + 5, screenY + h - 5);
+    ctx.stroke();
+
+    // 边框
+    ctx.strokeStyle = '#3E1F07';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(screenX, screenY, w, h);
+  }
+
+  // 新增: 绘制草丛 (改为方形，满足用户需求)
+  private drawBushImprove(screenX: number, screenY: number, w: number, h: number, seed: number): void {
+    const ctx = this.ctx;
+    
+    ctx.save();
+    ctx.globalAlpha = 0.6; // 稍微透明一点，表示可以躲藏
+
+    // 基础渐变：不同层次的绿色
+    const gradient = ctx.createLinearGradient(screenX, screenY, screenX, screenY + h);
+    gradient.addColorStop(0, '#2eab2e'); // 亮绿
+    gradient.addColorStop(1, '#1a5e1a'); // 深绿
+    ctx.fillStyle = gradient;
+    ctx.fillRect(screenX, screenY, w, h);
+
+    // 绘制一些内部的“草叶”线条
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.1)';
+    ctx.lineWidth = 1.5;
+    
+    // 使用种子生成确定性的草叶位置
+    const grassCount = 6;
+    for (let i = 0; i < grassCount; i++) {
+        const offset = ((seed * (i + 1) * 137) % 100) / 100;
+        const gx = screenX + w * offset;
+        
+        ctx.beginPath();
+        ctx.moveTo(gx, screenY + h - 5);
+        ctx.quadraticCurveTo(
+            gx + (i % 2 === 0 ? 4 : -4),
+            screenY + h / 2,
+            gx + (i % 2 === 0 ? 2 : -2),
+            screenY + 5
+        );
+        ctx.stroke();
+    }
+
+    // 外部边框
+    ctx.strokeStyle = '#006400';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(screenX, screenY, w, h);
+    
+    ctx.restore();
+  }
+
+  // 新增: 绘制水域
+  private drawWaterImprove(screenX: number, screenY: number, w: number, h: number, seed: number): void {
+    const ctx = this.ctx;
+    const now = Date.now();
+    
+    // 基础渐变：水蓝色到深蓝
+    const gradient = ctx.createRadialGradient(
+        screenX + w / 2, screenY + h / 2, 0,
+        screenX + w / 2, screenY + h / 2, Math.max(w, h)
+    );
+    gradient.addColorStop(0, '#4facfe');
+    gradient.addColorStop(1, '#0061ff');
+    
+    ctx.save();
+    ctx.globalAlpha = 0.7;
+    ctx.fillStyle = gradient;
+    ctx.fillRect(screenX, screenY, w, h);
+    
+    // 绘制波纹 (动画)
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.2)';
+    ctx.lineWidth = 2;
+    ctx.lineCap = 'round';
+    
+    const rippleCount = 3;
+    for (let i = 0; i < rippleCount; i++) {
+        // 基于时间计算水平偏移
+        const offset = (now / 3000 + i / rippleCount) % 1.0;
+        const waveY = screenY + (h * (i + 1)) / (rippleCount + 1);
+        const waveStart = screenX + 10;
+        const waveEnd = screenX + w - 10;
+        const currentLen = (waveEnd - waveStart) * 0.3;
+        const currentX = waveStart + (waveEnd - waveStart - currentLen) * offset;
+        
+        ctx.beginPath();
+        ctx.moveTo(currentX, waveY);
+        ctx.bezierCurveTo(
+            currentX + currentLen / 3, waveY - 5 * Math.sin(now / 500 + i),
+            currentX + 2 * currentLen / 3, waveY + 5 * Math.sin(now / 500 + i),
+            currentX + currentLen, waveY
+        );
+        ctx.stroke();
+    }
+    
+    // 内部微弱光晕
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.1)';
+    ctx.lineWidth = 3;
+    ctx.strokeRect(screenX + 2, screenY + 2, w - 4, h - 4);
+    
+    ctx.restore();
   }
 
   // 新增: 绘制地图边界框
@@ -1612,70 +1920,43 @@ export class Renderer {
     const obsHp = (obstacle as any).hp;
     const obsMaxHp = (obstacle as any).maxHp;
 
-    // 根据类型选择颜色和样式
-    let fillColor = '#666';
-    let alpha = 1.0;
-    let strokeColor = '#333';
-    let pattern: 'solid' | 'bush' | 'water' = 'solid';
-
-    switch (obsType) {
-      case 'wall':
-        fillColor = '#666666';
-        strokeColor = '#333333';
-        break;
-      case 'crate':
-        fillColor = '#A0522D';
-        strokeColor = '#6B3410';
-        break;
-      case 'bush':
-        fillColor = '#228B22';
-        alpha = 0.6;
-        strokeColor = '#006400';
-        pattern = 'bush';
-        break;
-      case 'water':
-        fillColor = '#4169E1';
-        alpha = 0.7;
-        strokeColor = '#1E3A8A';
-        pattern = 'water';
-        break;
-    }
+    // 使用障碍物ID或位置作为种子
+    const seedStr = obstacle.id || `${obstacle.x}_${obstacle.y}`;
+    const seed = seedStr.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
 
     this.ctx.save();
-    this.ctx.globalAlpha = alpha;
-
-    // 填充
-    this.ctx.fillStyle = fillColor;
-    this.ctx.fillRect(screenX, screenY, obstacle.w, obstacle.h);
-
-    // 特殊图案
-    if (pattern === 'bush') {
-      // 草丛：绘制一些圆点
-      this.ctx.fillStyle = '#1a6b1a';
-      for (let i = 0; i < 5; i++) {
-        const cx = screenX + (obstacle.w * (i + 1)) / 6;
-        const cy = screenY + obstacle.h / 2;
-        this.ctx.beginPath();
-        this.ctx.arc(cx, cy, 8, 0, Math.PI * 2);
-        this.ctx.fill();
-      }
-    } else if (pattern === 'water') {
-      // 水域：绘制波纹线
-      this.ctx.strokeStyle = '#2D5BA8';
-      this.ctx.lineWidth = 1;
-      for (let y = 0; y < 3; y++) {
-        const waveY = screenY + (obstacle.h * (y + 1)) / 4;
-        this.ctx.beginPath();
-        this.ctx.moveTo(screenX, waveY);
-        this.ctx.lineTo(screenX + obstacle.w, waveY);
-        this.ctx.stroke();
-      }
+    
+    // 添加阴影效果 (提升边缘美感)
+    if (obsType !== 'water' && obsType !== 'bush') {
+        this.ctx.shadowColor = 'rgba(0, 0, 0, 0.4)';
+        this.ctx.shadowBlur = 8;
+        this.ctx.shadowOffsetY = 4;
     }
 
-    // 边框
-    this.ctx.strokeStyle = strokeColor;
-    this.ctx.lineWidth = 2;
-    this.ctx.strokeRect(screenX, screenY, obstacle.w, obstacle.h);
+    // 根据类型调用增强版绘制函数
+    switch (obsType) {
+      case 'wall':
+        this.drawWall(screenX, screenY, obstacle.w, obstacle.h, seed);
+        break;
+      case 'crate':
+        this.drawCrateImprove(screenX, screenY, obstacle.w, obstacle.h, seed);
+        break;
+      case 'bush':
+        this.drawBushImprove(screenX, screenY, obstacle.w, obstacle.h, seed);
+        break;
+      case 'water':
+        this.drawWaterImprove(screenX, screenY, obstacle.w, obstacle.h, seed);
+        break;
+      default:
+        // 后备渲染
+        this.ctx.fillStyle = '#666';
+        this.ctx.fillRect(screenX, screenY, obstacle.w, obstacle.h);
+        this.ctx.strokeStyle = '#333';
+        this.ctx.lineWidth = 2;
+        this.ctx.strokeRect(screenX, screenY, obstacle.w, obstacle.h);
+    }
+    
+    this.ctx.restore();
 
     // 绘制破损裂痕（仅对可破坏物体）- 辐射状裂痕
     if (obsHp !== undefined && obsMaxHp !== undefined && obsMaxHp > 0) {
@@ -1692,72 +1973,43 @@ export class Renderer {
       }
 
       if (crackCount > 0) {
-        // 使用障碍物ID作为随机种子
-        const seedStr = obstacle.id || `${obstacle.x}_${obstacle.y}`;
-        const seed = seedStr.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
-        
-        // 裂痕中心点（略微偏移，但保持在木箱内）
+        // 裂痕中心点（略微偏移，但保持在物体内）
         const centerX = screenX + obstacle.w / 2 + ((seed % 20) - 10);
         const centerY = screenY + obstacle.h / 2 + (((seed * 7) % 20) - 10);
         
         this.ctx.save();
-        // 裁剪区域，确保裂痕不超出木箱边界
+        // 裁剪区域，确保裂痕不超出物体边界
         this.ctx.beginPath();
         this.ctx.rect(screenX, screenY, obstacle.w, obstacle.h);
         this.ctx.clip();
         
-        this.ctx.strokeStyle = 'rgba(0, 0, 0, 0.5)';
-        this.ctx.lineWidth = 1.5;
+        this.ctx.strokeStyle = 'rgba(0, 0, 0, 0.6)';
+        this.ctx.lineWidth = 1.8;
         this.ctx.lineCap = 'round';
         
         for (let i = 0; i < crackCount; i++) {
           // 计算裂痕方向（辐射状）
           const angle = ((seed + i * 137) % 360) * Math.PI / 180; // 黄金角度分布
           
-          // 计算射线与木箱边界的交点（延伸到边缘）
+          // 计算射线与物边界的交点（延伸到边缘）
           const dx = Math.cos(angle);
           const dy = Math.sin(angle);
           
-          // 计算到达四条边的距离
           let tMax = Infinity;
+          if (dx > 0) tMax = Math.min(tMax, (screenX + obstacle.w - centerX) / dx);
+          if (dx < 0) tMax = Math.min(tMax, (screenX - centerX) / dx);
+          if (dy > 0) tMax = Math.min(tMax, (screenY + obstacle.h - centerY) / dy);
+          if (dy < 0) tMax = Math.min(tMax, (screenY - centerY) / dy);
           
-          // 右边界
-          if (dx > 0) {
-            const t = (screenX + obstacle.w - centerX) / dx;
-            tMax = Math.min(tMax, t);
-          }
-          // 左边界
-          if (dx < 0) {
-            const t = (screenX - centerX) / dx;
-            tMax = Math.min(tMax, t);
-          }
-          // 下边界
-          if (dy > 0) {
-            const t = (screenY + obstacle.h - centerY) / dy;
-            tMax = Math.min(tMax, t);
-          }
-          // 上边界
-          if (dy < 0) {
-            const t = (screenY - centerY) / dy;
-            tMax = Math.min(tMax, t);
-          }
-          
-          // 裂痕终点（到达边缘）
-          const endX = centerX + dx * tMax;
-          const endY = centerY + dy * tMax;
-          
-          // 绘制主裂痕
           this.ctx.beginPath();
           this.ctx.moveTo(centerX, centerY);
-          this.ctx.lineTo(endX, endY);
+          this.ctx.lineTo(centerX + dx * tMax, centerY + dy * tMax);
           this.ctx.stroke();
         }
         
         this.ctx.restore();
       }
     }
-
-    this.ctx.restore();
   }
 
   // 辅助函数：使颜色变暗
@@ -1898,10 +2150,13 @@ export class Renderer {
     this.camY += shakeOffset.y;
     // 如果本地玩家不存在，camX/camY保持0（不移动camera）
 
-    // 新增: 绘制地图边界框（最底层）
+    // 新增: 绘制地图背景和地板
+    this.drawFloor();
+
+    // 新增: 绘制地图边界框（背景层之一）
     this.drawWorldBounds();
 
-    // Day4-2: 先绘制障碍物（背景层）
+    // Day4-2: 绘制障碍物
     for (const obstacle of obstacles) {
       this.drawObstacle(obstacle);
     }

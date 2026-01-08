@@ -230,33 +230,111 @@ export class UIOverlay {
   }
 
   /**
-   * 绘制撤离进度环
+   * 绘制撤离进度条（重新设计：顶部水平进度条）
    */
   private drawExtractProgress(ctx: CanvasRenderingContext2D, cx: number, cy: number, progress: number): void {
-    const radius = 40;
-    const lineWidth = 6;
-
-    // 背景圆环
-    ctx.strokeStyle = 'rgba(255, 255, 255, 0.2)';
-    ctx.lineWidth = lineWidth;
-    ctx.beginPath();
-    ctx.arc(cx, cy + 60, radius, 0, Math.PI * 2);
+    const w = this.cssWidth;
+    const h = this.cssHeight;
+    
+    // 进度条位置：屏幕顶部中央
+    const barWidth = 400;
+    const barHeight = 8;
+    const barPadding = 4;
+    const totalHeight = 60; // 总高度（包括文字和间距）
+    const topMargin = 80;
+    
+    const barX = cx - barWidth / 2;
+    const barY = topMargin;
+    
+    // 绘制背景模糊效果（增强可见性）
+    ctx.save();
+    ctx.globalAlpha = 0.3;
+    ctx.fillStyle = '#000000';
+    ctx.fillRect(barX - 20, barY - 35, barWidth + 40, totalHeight);
+    ctx.restore();
+    
+    // 绘制外框（带圆角效果）
+    ctx.save();
+    ctx.fillStyle = 'rgba(40, 40, 40, 0.9)';
+    ctx.strokeStyle = 'rgba(150, 150, 150, 0.6)';
+    ctx.lineWidth = 2;
+    
+    // 绘制圆角矩形背景
+    const cornerRadius = 4;
+    this.roundRect(ctx, barX - barPadding, barY - barPadding - 20, barWidth + barPadding * 2, barHeight + barPadding * 2 + 30, cornerRadius);
+    ctx.fill();
     ctx.stroke();
-
-    // 进度圆弧
-    ctx.strokeStyle = '#4CAF50';
-    ctx.lineWidth = lineWidth;
-    ctx.lineCap = 'round';
-    ctx.beginPath();
-    ctx.arc(cx, cy + 60, radius, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * progress);
-    ctx.stroke();
-
-    // 进度文字
-    ctx.fillStyle = '#ffffff';
-    ctx.font = 'bold 14px monospace';
+    ctx.restore();
+    
+    // 绘制进度条背景（内层）
+    ctx.fillStyle = 'rgba(20, 20, 20, 0.8)';
+    ctx.fillRect(barX, barY, barWidth, barHeight);
+    
+    // 绘制进度条前景（带渐变）
+    if (progress > 0) {
+      const progressWidth = barWidth * progress;
+      
+      // 创建渐变（从绿色到亮绿色）
+      const gradient = ctx.createLinearGradient(barX, barY, barX + progressWidth, barY);
+      gradient.addColorStop(0, '#4CAF50');
+      gradient.addColorStop(0.5, '#66BB6A');
+      gradient.addColorStop(1, '#81C784');
+      
+      ctx.fillStyle = gradient;
+      ctx.fillRect(barX, barY, progressWidth, barHeight);
+      
+      // 绘制进度条发光效果（顶部高光）
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.2)';
+      ctx.fillRect(barX, barY, progressWidth, barHeight * 0.3);
+    }
+    
+    // 绘制进度条边框
+    ctx.strokeStyle = 'rgba(100, 100, 100, 0.5)';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(barX, barY, barWidth, barHeight);
+    
+    // 绘制文字标签
+    ctx.fillStyle = '#FFFFFF';
+    ctx.font = 'bold 16px "Segoe UI", Arial, sans-serif';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillText(`${Math.floor(progress * 100)}%`, cx, cy + 60);
+    
+    // 文字阴影（增强可读性）
+    ctx.shadowColor = 'rgba(0, 0, 0, 0.8)';
+    ctx.shadowBlur = 4;
+    ctx.shadowOffsetX = 0;
+    ctx.shadowOffsetY = 2;
+    
+    // 绘制标题
+    ctx.fillText('正在撤离...', cx, barY - 20);
+    
+    // 绘制进度百分比
+    ctx.font = 'bold 14px "Segoe UI", Arial, sans-serif';
+    ctx.fillStyle = '#4CAF50';
+    ctx.fillText(`${Math.floor(progress * 100)}%`, cx, barY + barHeight / 2);
+    
+    // 重置阴影
+    ctx.shadowColor = 'transparent';
+    ctx.shadowBlur = 0;
+    ctx.shadowOffsetX = 0;
+    ctx.shadowOffsetY = 0;
+  }
+  
+  /**
+   * 绘制圆角矩形（辅助方法）
+   */
+  private roundRect(ctx: CanvasRenderingContext2D, x: number, y: number, width: number, height: number, radius: number): void {
+    ctx.beginPath();
+    ctx.moveTo(x + radius, y);
+    ctx.lineTo(x + width - radius, y);
+    ctx.quadraticCurveTo(x + width, y, x + width, y + radius);
+    ctx.lineTo(x + width, y + height - radius);
+    ctx.quadraticCurveTo(x + width, y + height, x + width - radius, y + height);
+    ctx.lineTo(x + radius, y + height);
+    ctx.quadraticCurveTo(x, y + height, x, y + height - radius);
+    ctx.lineTo(x, y + radius);
+    ctx.quadraticCurveTo(x, y, x + radius, y);
+    ctx.closePath();
   }
 
   /**

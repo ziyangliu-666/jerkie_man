@@ -449,6 +449,8 @@ export const S2C_RAID_RESULT_SCHEMA = z.object({
   loot: z.array(ITEM_INSTANCE_SCHEMA), // 获得的物品（撤离时）
   moneyGained: z.number().int().nonnegative(), // 获得的金钱（撤离时）
   moneyLost: z.number().int().nonnegative(), // 损失的金钱（死亡时，prep 物品的价值）
+  killedBy: z.string().optional(), // 死亡时：击杀者名字
+  killedByWeaponName: z.string().optional(), // 死亡时：击杀使用的武器名称
 });
 
 // 新增: 战斗事件消息（干火/命中/受伤反馈）

@@ -66,7 +66,7 @@ export class Player {
   // 修复: 移动速度已移至 shared/sim.ts，这里不再需要（保留注释用于文档）
   // SPEED = 200 (在 shared/sim.ts 中定义)
   
-  private readonly EXTRACT_DURATION_MS = 10000; // 游戏化增强: 撤离需要持续10秒
+  private readonly EXTRACT_DURATION_MS = 5000; // 游戏化增强: 撤离需要持续10秒
 
   constructor(id: string, x: number = 0, y: number = 0, bagCap: number = 4, name?: string, weaponRuntime?: WeaponRuntime) {
     this.id = id;

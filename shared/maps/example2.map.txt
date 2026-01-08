@@ -41,7 +41,8 @@
 @obstacle x=120 y=860 w=120 h=280 type=water
 @obstacle x=1760 y=860 w=120 h=280 type=water
 @obstacle x=860 y=120 w=280 h=120 type=water
-@obstacle x=860 y=1760 w=280 h=120 type=water
+# 修复：下移10px，避免压到南部箱群
+@obstacle x=860 y=1770 w=280 h=120 type=water
 
 # === 中心硬障碍（仅视线切割，不封闭，不重叠，不触碰撤离区）===
 @obstacle x=995 y=760 w=10 h=170 type=wall
@@ -50,39 +51,48 @@
 @obstacle x=1070 y=995 w=170 h=10 type=wall
 
 # === 草丛：中心"灌木环"（不覆盖撤离区 950..1050）===
-# 四边
-@obstacle x=930 y=880 w=140 h=50 type=bush
-@obstacle x=930 y=1070 w=140 h=50 type=bush
-@obstacle x=880 y=930 w=50 h=140 type=bush
-@obstacle x=1070 y=930 w=50 h=140 type=bush
-# 四角
+# 修复：给中心细墙留“槽位”，避免 wall <-> bush 重叠
+# 上边（给竖墙 x=995..1005 留槽）
+@obstacle x=930 y=880 w=65 h=50 type=bush
+@obstacle x=1005 y=880 w=65 h=50 type=bush
+# 下边（给竖墙 x=995..1005 留槽）
+@obstacle x=930 y=1070 w=65 h=50 type=bush
+@obstacle x=1005 y=1070 w=65 h=50 type=bush
+# 左边（给横墙 y=995..1005 留槽）
+@obstacle x=880 y=930 w=50 h=65 type=bush
+@obstacle x=880 y=1005 w=50 h=65 type=bush
+# 右边（给横墙 y=995..1005 留槽）
+@obstacle x=1070 y=930 w=50 h=65 type=bush
+@obstacle x=1070 y=1005 w=50 h=65 type=bush
+
+# 四角（不动）
 @obstacle x=880 y=880 w=45 h=45 type=bush
 @obstacle x=1075 y=880 w=45 h=45 type=bush
 @obstacle x=880 y=1075 w=45 h=45 type=bush
 @obstacle x=1075 y=1075 w=45 h=45 type=bush
 
 # === 外围草丛（减少数量，保留关键位置）===
-# 北带（减少到2块）
-@obstacle x=760 y=260 w=180 h=120 type=bush
+# 北带（修复：左移60px，避免压到北部资源点箱群）
+@obstacle x=700 y=260 w=180 h=120 type=bush
 @obstacle x=1100 y=260 w=180 h=120 type=bush
 
-# 南带（减少到2块）
-@obstacle x=760 y=1620 w=180 h=120 type=bush
+# 南带（修复：左移60px，避免压到南部资源点箱群）
+@obstacle x=700 y=1620 w=180 h=120 type=bush
 @obstacle x=1100 y=1620 w=180 h=120 type=bush
 
-# 西带（减少到2块，注意避开左水池 x=120..240）
-@obstacle x=300 y=760 w=180 h=140 type=bush
-@obstacle x=300 y=1120 w=180 h=140 type=bush
+# 西带（修复：缩窄，避开西侧石墙 x=400..）
+@obstacle x=300 y=760 w=90 h=140 type=bush
+@obstacle x=300 y=1120 w=90 h=140 type=bush
 
-# 东带（减少到2块，注意避开右水池 x=1760..1880）
-@obstacle x=1520 y=760 w=180 h=140 type=bush
-@obstacle x=1520 y=1120 w=180 h=140 type=bush
+# 东带（修复：右移+缩窄，避开东侧石墙并避开右水池 x=1760..1880）
+@obstacle x=1620 y=760 w=130 h=140 type=bush
+@obstacle x=1620 y=1120 w=130 h=140 type=bush
 
-# 象限块状（只保留4个角落的大块）
-@obstacle x=520 y=520 w=220 h=160 type=bush
+# 象限块状（修复：两块会压到石墙的做平移）
+@obstacle x=620 y=520 w=220 h=160 type=bush
 @obstacle x=1240 y=1240 w=220 h=160 type=bush
 @obstacle x=520 y=1240 w=220 h=160 type=bush
-@obstacle x=1240 y=520 w=220 h=160 type=bush
+@obstacle x=1180 y=520 w=220 h=160 type=bush
 
 # === 外围石墙（增加视线切割墙，不封闭）===
 # 北部石墙（切割视线）
@@ -107,7 +117,8 @@
 @obstacle x=1400 y=600 w=200 h=15 type=wall
 @obstacle x=1400 y=800 w=200 h=15 type=wall
 @obstacle x=1400 y=1200 w=200 h=15 type=wall
-@obstacle x=1400 y=1400 w=200 h=15 type=wall
+# 修复：避免与竖墙(1400,1400,15x200) 相交
+@obstacle x=1415 y=1400 w=185 h=15 type=wall
 
 # === 箱子群：8个资源点（全部成群堆放）===
 # 西北资源点箱群（4x3 + 2 尾箱）
@@ -309,7 +320,7 @@
 # - 数量明显低于外围总量，保证中心是“少量但优质”
 @itemrespawn id=center_high mode=both intervalTicks=900 count=1 maxItems=8 zoneId=center_zone items=w_minigun,w_grenade_launcher,w_sniper,armor_heavy,bag_military rarityWeights=COMMON:10,RARE:40,EPIC:70
 
-@airespawn intervalTicks=600 maxAIs=10
+@airespawn intervalTicks=1800 maxAIs=10
 
 @note "v4 AI角色系统升级（2K大图）："
 @note "- 中心：2个重机枪手(红色26px,200HP,30%护甲,2倍射速疯狂扫射)"

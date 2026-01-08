@@ -515,7 +515,7 @@ export class AIBehaviorController {
     }
 
     // 1. 大幅转动视角（模拟人类守卫左顾右盼，在多个开阔区域之间切换）
-    if (ai.idleOpenAreas === undefined || ai.idleOpenAreas.length === 0 || (ai.idleNextLookChangeTime && now >= ai.idleNextLookChangeTime)) {
+      if (ai.idleOpenAreas === undefined || ai.idleOpenAreas.length === 0 || (ai.idleNextLookChangeTime && now >= ai.idleNextLookChangeTime)) {
       // 扫描左右两侧的所有开阔区域
       const baseAngle = ai.idleBaseAngle;
       const leftRange = 120 * Math.PI / 180;  // 左侧扫描范围 120 度
@@ -607,13 +607,33 @@ export class AIBehaviorController {
 
     // 2. 小幅随机移动（模拟警戒状态）
     if (ai.idleWanderTarget === undefined || (ai.idleNextWanderTime && now >= ai.idleNextWanderTime)) {
-      // 在出生点周围 30-80 像素范围内随机移动
-      const wanderRadius = 30 + Math.random() * 50;
-      const wanderAngle = Math.random() * Math.PI * 2;
-      ai.idleWanderTarget = {
-        x: ai.spawnX + Math.cos(wanderAngle) * wanderRadius,
-        y: ai.spawnY + Math.sin(wanderAngle) * wanderRadius
-      };
+      // 尝试寻找一个可以行走的随机目标
+      let found = false;
+      for (let i = 0; i < 5; i++) {
+        // 在出生点周围 30-80 像素范围内随机移动
+        const wanderRadius = 30 + Math.random() * 50;
+        const wanderAngle = Math.random() * Math.PI * 2;
+        const tx = ai.spawnX + Math.cos(wanderAngle) * wanderRadius;
+        const ty = ai.spawnY + Math.sin(wanderAngle) * wanderRadius;
+
+        // 检查目标点是否可行走
+        const grid = this.pathfinder.navGrid.worldToGrid(tx, ty);
+        if (this.pathfinder.navGrid.isWalkable(grid.x, grid.y)) {
+          ai.idleWanderTarget = { x: tx, y: ty };
+          found = true;
+          break;
+        }
+      }
+
+      // 如果没找到且距离出生点较远，先尝试回中心
+      if (!found) {
+        const dxToSpawn = ai.spawnX - ai.x;
+        const dyToSpawn = ai.spawnY - ai.y;
+        if (Math.sqrt(dxToSpawn * dxToSpawn + dyToSpawn * dyToSpawn) > 50) {
+          ai.idleWanderTarget = { x: ai.spawnX, y: ai.spawnY };
+        }
+      }
+
       // 3-8秒后改变移动目标
       ai.idleNextWanderTime = now + 3000 + Math.random() * 5000;
     }
@@ -624,21 +644,13 @@ export class AIBehaviorController {
       const dy = ai.idleWanderTarget.y - ai.y;
       const dist = Math.sqrt(dx * dx + dy * dy);
 
-      if (dist > 10) {
-        // 缓慢移动（正常速度的 30%，应用角色速度倍率）
-        const baseSpeed = 400 * 0.3; // 120 像素/秒
-        const speed = baseSpeed * ai.moveSpeed; // 应用角色速度倍率
-        const deltaTime = 0.05; // 50ms tick
-        const moveDistance = speed * deltaTime;
-
-        const moveX = (dx / dist) * moveDistance;
-        const moveY = (dy / dist) * moveDistance;
-
-        ai.x += moveX;
-        ai.y += moveY;
+      if (dist > 15) {
+        // 使用路径寻路替代直接移动，防止穿墙
+        this.updatePath(ai, ai.idleWanderTarget.x, ai.idleWanderTarget.y);
       } else {
-        // 到达目标，清除目标（等待下次生成新目标）
+        // 到达目标，清除目标
         ai.idleWanderTarget = undefined;
+        ai.currentPath = [];
       }
     }
   }
@@ -940,8 +952,16 @@ export class AIBehaviorController {
     ai.x += moveX;
     ai.y += moveY;
 
-    // 更新瞄准方向为移动方向
-    ai.currentAimRad = Math.atan2(dy, dx);
+    // 更新瞄准方向为移动方向（仅针对追逐、巡逻、返回、搜索状态）
+    // IDLE 和 ATTACK 状态由各自的 handle 函数控制瞄准，以支持看左右扫描或锁定目标
+    if (
+      ai.behaviorState === 'CHASE' || 
+      ai.behaviorState === 'PATROL' || 
+      ai.behaviorState === 'RETURN' || 
+      ai.behaviorState === 'SEARCH'
+    ) {
+      ai.currentAimRad = Math.atan2(dy, dx);
+    }
   }
 
   private updateAim(ai: AI, targetX: number, targetY: number, currentTick: number): void {

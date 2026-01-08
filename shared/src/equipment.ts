@@ -271,6 +271,17 @@ export const WEAPONS: Record<string, WeaponDef> = {
     meleeRange: 60,      // 稍长近战范围
     meleeArcDeg: 180,    // 180度扇形
   },
+  w_bubble_gun: {
+    typeId: 'w_bubble_gun',
+    name: '泡泡枪',
+    magSize: 100,        // 弹夹很多 100 发
+    reloadMs: 3000,
+    fireIntervalMs: 50,  // 射速很快，类似加特林
+    spreadDeg: 15,       // 较大的散布，增加趣味性
+    bulletSpeed: 200,    // 子弹很慢
+    damage: 30,
+    bulletLifeMs: 10000,  // 子弹ttl很长
+  },
 };
 
 // 背包配置

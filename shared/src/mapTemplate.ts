@@ -308,6 +308,115 @@ function parsePoint(tokens: string[], lineNumber: number): { x: number; y: numbe
   };
 }
 
+/**
+ * 检测两个矩形是否重叠
+ */
+function rectsOverlap(
+  a: { x: number; y: number; w: number; h: number },
+  b: { x: number; y: number; w: number; h: number }
+): boolean {
+  return !(
+    a.x + a.w <= b.x || // a 在 b 左侧
+    b.x + b.w <= a.x || // b 在 a 左侧
+    a.y + a.h <= b.y || // a 在 b 上方
+    b.y + b.h <= a.y    // b 在 a 上方
+  );
+}
+
+/**
+ * 计算两个矩形的重叠区域
+ */
+function getOverlapArea(
+  a: { x: number; y: number; w: number; h: number },
+  b: { x: number; y: number; w: number; h: number }
+): { x: number; y: number; w: number; h: number } | null {
+  if (!rectsOverlap(a, b)) return null;
+  
+  const x = Math.max(a.x, b.x);
+  const y = Math.max(a.y, b.y);
+  const maxX = Math.min(a.x + a.w, b.x + b.w);
+  const maxY = Math.min(a.y + a.h, b.y + b.h);
+  
+  return {
+    x,
+    y,
+    w: maxX - x,
+    h: maxY - y,
+  };
+}
+
+/**
+ * 检测地图模板中的区域重叠并输出警告
+ */
+function detectOverlaps(template: MapTemplate): void {
+  const warnings: string[] = [];
+
+  // 1. 检测障碍物之间的重叠
+  for (let i = 0; i < template.obstacles.length; i++) {
+    for (let j = i + 1; j < template.obstacles.length; j++) {
+      const obsA = template.obstacles[i];
+      const obsB = template.obstacles[j];
+      
+      const overlap = getOverlapArea(obsA, obsB);
+      if (overlap) {
+        const areaA = obsA.w * obsA.h;
+        const areaB = obsB.w * obsB.h;
+        const overlapArea = overlap.w * overlap.h;
+        const overlapPercentA = ((overlapArea / areaA) * 100).toFixed(1);
+        const overlapPercentB = ((overlapArea / areaB) * 100).toFixed(1);
+        
+        warnings.push(
+          `⚠️  障碍物重叠 [${i}] <-> [${j}]:
+    [${i}] ${obsA.type} @ (${obsA.x}, ${obsA.y}) ${obsA.w}x${obsA.h} (id: ${obsA.id})
+    [${j}] ${obsB.type} @ (${obsB.x}, ${obsB.y}) ${obsB.w}x${obsB.h} (id: ${obsB.id})
+    重叠区域: (${overlap.x}, ${overlap.y}) ${overlap.w}x${overlap.h}
+    重叠面积: ${overlapArea} (占 [${i}] 的 ${overlapPercentA}%, 占 [${j}] 的 ${overlapPercentB}%)`
+        );
+      }
+    }
+  }
+
+  // 注意: 区域 (zones) 之间的重叠是允许的，不进行检测
+
+  // 2. 检测撤离点与障碍物的重叠
+  if (template.mapConfig.extractZone) {
+    const extractZone = template.mapConfig.extractZone;
+    for (let i = 0; i < template.obstacles.length; i++) {
+      const obs = template.obstacles[i];
+      const overlap = getOverlapArea(extractZone, obs);
+      
+      if (overlap) {
+        const extractArea = extractZone.w * extractZone.h;
+        const obsArea = obs.w * obs.h;
+        const overlapArea = overlap.w * overlap.h;
+        const overlapPercentExtract = ((overlapArea / extractArea) * 100).toFixed(1);
+        const overlapPercentObs = ((overlapArea / obsArea) * 100).toFixed(1);
+        
+        warnings.push(
+          `⚠️  撤离点与障碍物重叠 ExtractZone <-> [${i}]:
+    撤离点 @ (${extractZone.x}, ${extractZone.y}) ${extractZone.w}x${extractZone.h}
+    [${i}] ${obs.type} @ (${obs.x}, ${obs.y}) ${obs.w}x${obs.h} (id: ${obs.id})
+    重叠区域: (${overlap.x}, ${overlap.y}) ${overlap.w}x${overlap.h}
+    重叠面积: ${overlapArea} (占撤离点 ${overlapPercentExtract}%, 占障碍物 ${overlapPercentObs}%)`
+        );
+      }
+    }
+  }
+
+  // 输出所有警告
+  if (warnings.length > 0) {
+    console.warn('\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+    console.warn(`📍 地图 "${template.id}" (${template.name || 'unnamed'}) 检测到 ${warnings.length} 个重叠问题:`);
+    console.warn('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+    warnings.forEach((warning, index) => {
+      console.warn(`${index + 1}. ${warning}`);
+    });
+    console.warn('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+    console.warn('💡 提示: 您可以使用 LLM 调整地图配置以消除这些重叠\n');
+  }
+}
+
+
 export function createDefaultMapTemplate(id: string = 'default'): MapTemplate {
   return {
     id,
@@ -527,6 +636,9 @@ export function parseMapTemplateText(text: string): MapTemplate {
       throw new Error(`Line ${lineNumber}: Unknown directive "${directive}"`);
     }
   }
+
+  // 区域重叠检测
+  detectOverlaps(template);
 
   return MAP_TEMPLATE_SCHEMA.parse(template);
 }

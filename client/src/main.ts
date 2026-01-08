@@ -368,7 +368,15 @@ window.addEventListener('keydown', startBGM);
 // Debug 面板折叠功能（F1 切换）
 const hudContainer = document.getElementById('hudContainer');
 const debugToggle = document.getElementById('debugToggle');
-let debugPanelCollapsed = false;
+let debugPanelCollapsed = true; // 默认折叠状态
+
+// 初始化时设置为折叠状态
+hudContainer?.classList.add('collapsed');
+if (debugToggle) {
+  debugToggle.textContent = '▶';
+}
+// 初始化后需要计算 canvas 尺寸（考虑折叠状态）
+scheduleResize();
 
 function toggleDebugPanel(): void {
   debugPanelCollapsed = !debugPanelCollapsed;
@@ -659,15 +667,26 @@ function updatePhaseUI(): void {
       nameModal.style.display = 'none';
       console.log('[updatePhaseUI] Hiding NAME modal');
     }
-    if (hideoutUI) {
-      hideoutUI.style.display = 'none';
-      console.log('[updatePhaseUI] Hiding Hideout UI, computed display:', window.getComputedStyle(hideoutUI).display);
-    } else {
-      console.warn('[updatePhaseUI] hideoutUI is null, cannot hide');
-    }
+    // if (hideoutUI) {
+    //   hideoutUI.style.display = 'none';
+    //   console.log('[updatePhaseUI] Hiding Hideout UI, computed display:', window.getComputedStyle(hideoutUI).display);
+    // } else {
+    //   console.warn('[updatePhaseUI] hideoutUI is null, cannot hide');
+    // }
     if (raidEquipment) {
       raidEquipment.style.display = 'block';
     }
+    
+    // 播放 Hideout 退出动画（UI 分裂移除）
+    // 只有当 hideoutUI 可见时才播放（避免刷新页面直接进入 RAID 时闪烁）
+    if (hideoutUI && hideoutUI.style.display !== 'none') {
+      playHideoutExitAnimation();
+    } else {
+      // 如果本来就不可见（例如直接进Raid调试），确保隐藏
+      if (hideoutUI) hideoutUI.style.display = 'none';
+      playHideoutExitAnimation(); // 依然调用，以确保清理类名和正确重置
+    }
+    
   } else if (currentPhase === 'RESULT') {
     // 隐藏 NAME modal 和 Hideout UI，显示结果页面
     if (nameModal) {
@@ -699,8 +718,35 @@ function updatePhaseUI(): void {
   }
 }
 
+// 新增: 播放 Hideout 退出动画
+function playHideoutExitAnimation(): void {
+  const hideoutUI = document.getElementById('hideoutUI');
+  const topBar = document.getElementById('hideoutTopBar');
+  const tabs = document.getElementById('hideoutTabs');
+  const main = document.getElementById('hideoutMain');
+  
+  if (!hideoutUI) return;
+
+  // 1. 添加动画类
+  hideoutUI.classList.add('anim-fade-out');
+  if (topBar) topBar.classList.add('anim-exit-up');
+  if (tabs) tabs.classList.add('anim-exit-left');
+  if (main) main.classList.add('anim-exit-right');
+  
+  // 2. 动画结束清理
+  setTimeout(() => {
+    hideoutUI.style.display = 'none';
+    
+    // 移除动画类，确保下次显示时位置正常
+    hideoutUI.classList.remove('anim-fade-out');
+    if (topBar) topBar.classList.remove('anim-exit-up');
+    if (tabs) tabs.classList.remove('anim-exit-left');
+    if (main) main.classList.remove('anim-exit-right');
+  }, 1000);
+}
+
 // 新增: 战局结果数据
-let raidResult: { result: 'EXTRACTED' | 'DIED'; loot: ItemInstance[]; moneyGained: number; moneyLost: number } | null = null;
+let raidResult: { result: 'EXTRACTED' | 'DIED'; loot: ItemInstance[]; moneyGained: number; moneyLost: number; killedBy?: string; killedByWeaponName?: string } | null = null;
 
 // 新增: 结果页面 DOM 元素
 let resultUI: HTMLElement | null = null;
@@ -739,6 +785,7 @@ function updateResultUI(): void {
   // 更新标题和状态
   if (raidResult.result === 'EXTRACTED') {
     resultTitle.textContent = '成功撤离';
+    resultTitle.className = 'success-title';
     resultStatus.textContent = '✓ 成功撤离';
     resultStatus.className = 'success';
     
@@ -761,11 +808,23 @@ function updateResultUI(): void {
     resultDetails.innerHTML = detailsHtml || '<div>无额外奖励</div>';
   } else {
     resultTitle.textContent = '战局失败';
+    resultTitle.className = 'failed-title';
     resultStatus.textContent = '✗ 死亡';
     resultStatus.className = 'failed';
-    
-    // 显示损失的金钱
+    // 显示死亡原因、损失的金钱
     let detailsHtml = '';
+    // 显示死亡原因（击杀者 + 武器）
+    if (raidResult.killedBy || raidResult.killedByWeaponName) {
+      detailsHtml += `<div class="death-reason"><strong>死亡原因:</strong></div>`;
+      if (raidResult.killedBy) {
+        detailsHtml += `<div class="death-attacker">击杀者: <span class="highlight">${escapeHtml(raidResult.killedBy)}</span></div>`;
+      }
+      if (raidResult.killedByWeaponName) {
+        detailsHtml += `<div class="death-weapon">武器: <span class="highlight">${escapeHtml(raidResult.killedByWeaponName)}</span></div>`;
+      }
+      detailsHtml += '<div style="margin-top: 16px;"></div>';
+    }
+    
     if (raidResult.moneyLost > 0) {
       detailsHtml += `<div><strong>损失金钱:</strong> $${escapeHtml(raidResult.moneyLost)}</div>`;
     }
@@ -1768,26 +1827,26 @@ function updateItemLists(): void {
   if (!playerProfile) return;
   
   // 更新整备区列表（过滤已装备的物品）
+      // 更新整备区列表（过滤已装备的物品）
     if (prepList && playerProfile.prep) {
-      prepList.innerHTML = '';
       const availablePrepItems = playerProfile.prep.filter(item => !isItemEquipped(item));
+      
       if (availablePrepItems.length === 0) {
-        prepList.innerHTML = '<div style="color: #666; padding: 20px; text-align: center;">整备区为空</div>';
+        if (prepList.innerHTML.indexOf('整备区为空') === -1) {
+             prepList.innerHTML = '<div style="color: #666; padding: 20px; text-align: center;">整备区为空</div>';
+        }
       } else {
+         // Clear empty message if present
+         if (prepList.firstChild && (prepList.firstChild as HTMLElement).innerText === '整备区为空') {
+             prepList.innerHTML = '';
+         }
+
         // 合并相同typeId的物品
         const mergedItems = mergeItemsByTypeId(availablePrepItems);
         // 按typeId排序
         mergedItems.sort((a, b) => a.typeId.localeCompare(b.typeId));
         
-        for (const mergedItem of mergedItems) {
-          try {
-            const itemType = getItemType(mergedItem.typeId);
-            const row = createItemRow(mergedItem, itemType, 'prep');
-            prepList.appendChild(row);
-          } catch {
-            // 跳过无法获取类型的物品
-          }
-        }
+        reconcileItemList(prepList, mergedItems, 'prep');
       }
     }
   
@@ -1897,21 +1956,23 @@ function initShopTabs(): void {
   }
 
 // 更新仓库列表（按当前选中的分类和稀有度组织）
+// 更新仓库列表（按当前选中的分类和稀有度组织）
 function updateStashList(): void {
   if (!stashList || !playerProfile || !playerProfile.stash) return;
-  
-  // 保存滚动位置
-  const scrollTop = stashList.scrollTop;
   
   const availableStashItems = playerProfile.stash.filter(item => !isItemEquipped(item));
   
   if (availableStashItems.length === 0) {
-    stashList.innerHTML = '<div style="color: #666; padding: 20px; text-align: center;">仓库为空</div>';
+    if (stashList.innerHTML.indexOf('仓库为空') === -1) {
+       stashList.innerHTML = '<div style="color: #666; padding: 20px; text-align: center;">仓库为空</div>';
+    }
     return;
   }
   
-  // 使用 Fragment 减少重绘
-  const fragment = document.createDocumentFragment();
+  // Clear empty message if present
+  if (stashList.firstChild && (stashList.firstChild as HTMLElement).innerText === '仓库为空') {
+     stashList.innerHTML = '';
+  }
 
   // 按分类分组
   const categories: Record<string, ItemInstance[]> = {
@@ -1933,8 +1994,18 @@ function updateStashList(): void {
   const selectedCategory = (typeof currentStashCategory !== 'undefined' ? currentStashCategory : 'weapon');
   const items = categories[selectedCategory] || [];
   if (items.length === 0) {
+      // 检查当前是否已经显示了"暂无物品"
+      const currentContent = stashList.textContent || '';
+      if (currentContent.includes('暂无物品') && stashList.children.length === 1) {
+          return; 
+      }
     stashList.innerHTML = '<div style="color: #666; padding: 20px; text-align: center;">该分类暂无物品</div>';
     return;
+  } else {
+     // Clear empty category message
+     if (stashList.firstChild && (stashList.firstChild as HTMLElement).innerText === '该分类暂无物品') {
+         stashList.innerHTML = '';
+     }
   }
   
   // 按稀有度分组
@@ -1957,59 +2028,70 @@ function updateStashList(): void {
     }
   }
   
-  // 为每个稀有度创建区域
   const rarityOrder = ['COMMON', 'RARE', 'EPIC'];
-  for (const rarity of rarityOrder) {
-    const rarityItems = rarityGroups[rarity];
-    if (rarityItems.length === 0) continue;
-    
-    // 稀有度区域
-    const raritySection = document.createElement('div');
-    raritySection.className = 'shop-rarity-section';
-    
-    // 稀有度标题
-    const rarityHeader = document.createElement('div');
-    rarityHeader.className = `shop-rarity-header ${rarity.toLowerCase()}`;
-    rarityHeader.textContent = rarity === 'COMMON' ? '普通' : rarity === 'RARE' ? '稀有' : '史诗';
-    raritySection.appendChild(rarityHeader);
-    
-    // 物品列表
-    const rarityItemsDiv = document.createElement('div');
-    rarityItemsDiv.className = 'shop-rarity-items stash-rarity-items';
-    
-    // 合并相同typeId的物品
-    const mergedItems = mergeItemsByTypeId(rarityItems);
-    // 按typeId排序
-    mergedItems.sort((a, b) => {
-      try {
-        const aType = getItemType(a.typeId);
-        const bType = getItemType(b.typeId);
-        return aType.name.localeCompare(bType.name);
-      } catch {
-        return a.typeId.localeCompare(b.typeId);
-      }
-    });
-    
-    for (const mergedItem of mergedItems) {
-      try {
-        const itemType = getItemType(mergedItem.typeId);
-        const row = createItemRow(mergedItem, itemType, 'stash');
-        rarityItemsDiv.appendChild(row);
-      } catch {
-        // 跳过无法获取类型的物品
-      }
-    }
-    
-    raritySection.appendChild(rarityItemsDiv);
-    fragment.appendChild(raritySection);
-  }
-
-  // 一次性更新 DOM
-  stashList.innerHTML = '';
-  stashList.appendChild(fragment);
   
-  // 恢复滚动位置
-  stashList.scrollTop = scrollTop;
+  // 按照稀有度顺序管理 DOM 结构
+  // 注意：这里我们假设稀有度分区的顺序不会变，只需管理内容
+  
+  // 首先确保所有需要的 rarity section 都存在，不需要的移除（或者隐藏）
+  // 为了简单，我们只从上到下渲染存在的 rarity section
+  
+  // 使用一个简单的 diff 策略：遍历 rarityOrder，如果该稀有度有物品，则查找或创建 section 并 reconcile 列表
+  
+    rarityOrder.forEach(rarity => {
+        const rarityItems = rarityGroups[rarity];
+        const sectionId = `stash-section-${rarity}`;
+        let raritySection = document.getElementById(sectionId);
+
+        if (rarityItems.length === 0) {
+            if (raritySection) {
+                raritySection.style.display = 'none';
+            }
+            return;
+        }
+
+        // Create section if not exists
+        if (!raritySection) {
+            raritySection = document.createElement('div');
+            raritySection.id = sectionId;
+            raritySection.className = 'shop-rarity-section';
+            
+            const rarityHeader = document.createElement('div');
+            rarityHeader.className = `shop-rarity-header ${rarity.toLowerCase()}`;
+            rarityHeader.textContent = rarity === 'COMMON' ? '普通' : rarity === 'RARE' ? '稀有' : '史诗';
+            raritySection.appendChild(rarityHeader);
+            
+            const listDiv = document.createElement('div');
+            listDiv.className = 'shop-rarity-items stash-rarity-items';
+            raritySection.appendChild(listDiv);
+            
+            // Insert in correct order? For simplicity append, or check siblings.
+            // Since we iterate in order, appending usually works if we start empty.
+            // But if we have dynamic updates, strict ordering is better.
+            stashList?.appendChild(raritySection); 
+        }
+
+        raritySection.style.display = 'block';
+
+        const listDiv = raritySection.querySelector('.stash-rarity-items') as HTMLElement;
+        if (listDiv) {
+             // 合并 + 排序
+            const mergedItems = mergeItemsByTypeId(rarityItems);
+            mergedItems.sort((a, b) => {
+                try {
+                    const aType = getItemType(a.typeId);
+                    const bType = getItemType(b.typeId);
+                    return aType.name.localeCompare(bType.name);
+                } catch {
+                    return a.typeId.localeCompare(b.typeId);
+                }
+            });
+            
+            reconcileItemList(listDiv, mergedItems, 'stash');
+        }
+    });
+
+    // Cleanup: Remove sections that shouldn't exist? (Managed by display:none above)
 }
 
 // 初始化仓库 Tab 切换
@@ -2169,125 +2251,227 @@ function mergeItemsByTypeId(items: ItemInstance[]): MergedItem[] {
   return Array.from(mergedMap.values());
 }
 
-// 新增: 创建物品行（用于整备区和仓库）
-function createItemRow(mergedItem: MergedItem, itemType: any, source: 'prep' | 'stash'): HTMLElement {
-  const row = document.createElement('div');
-  row.className = 'item-row';
+// 新增: 智能更新物品列表 (Reconciliation)
+function reconcileItemList(container: HTMLElement, mergedItems: MergedItem[], source: 'prep' | 'stash'): void {
+    const existingCards = Array.from(container.children) as HTMLElement[];
+    const existingMap = new Map<string, HTMLElement>();
+    
+    existingCards.forEach(card => {
+        const typeId = card.getAttribute('data-type-id');
+        if (typeId) {
+            existingMap.set(typeId, card);
+        } else {
+            // Remove invalid/legacy cards
+            card.remove();
+        }
+    });
+
+    const activeTypeIds = new Set<string>();
+
+    mergedItems.forEach((item, index) => {
+        const typeId = item.typeId;
+        activeTypeIds.add(typeId);
+        
+        // Try get Type Def
+        let itemType;
+        try { itemType = getItemType(typeId); } catch { return; }
+
+        let card = existingMap.get(typeId);
+
+        if (card) {
+            // Update existing
+            const countBadge = card.querySelector('.item-count-badge');
+            if (countBadge) {
+                const currentQty = parseInt(countBadge.textContent || '0');
+                if (currentQty !== item.totalQty) {
+                    countBadge.textContent = item.totalQty.toString();
+                    countBadge.classList.remove('hidden');
+                    if (item.totalQty <= 1 && itemType.stackMax <= 1) {
+                         countBadge.classList.add('hidden');
+                    } else {
+                         // Animate update
+                        countBadge.classList.remove('updated');
+                        void (countBadge as HTMLElement).offsetWidth; // trigger reflow
+                        countBadge.classList.add('updated');
+                    }
+                }
+            }
+            
+            // Critical Fix: Update the current IID for actions
+            // Even if the card exists, the "first item" (target of actions) might have changed
+            // if the previous first item was moved/sold.
+            card.setAttribute('data-current-iid', item.items[0].iid);
+            
+            // Move to correct position if order changed
+            if (container.children[index] !== card) {
+                container.insertBefore(card, container.children[index]);
+            }
+
+        } else {
+            // Create new
+             card = createItemCard(item, itemType, source);
+             if (index < container.children.length) {
+                 container.insertBefore(card, container.children[index]);
+             } else {
+                 container.appendChild(card);
+             }
+        }
+    });
+
+    // Remove redundant
+    existingMap.forEach((card, typeId) => {
+        if (!activeTypeIds.has(typeId)) {
+            card.style.opacity = '0';
+            card.style.transform = 'scale(0.9)';
+            setTimeout(() => card.remove(), 250); // Animated removal
+        }
+    });
+}
+
+// 新增: 追踪正在处理的物品，防止重复操作，同时支持从堆叠中快速连续操作
+const pendingActionItems = new Set<string>();
+
+// 新增: 创建物品卡片 (Replacing Row)
+function createItemCard(mergedItem: MergedItem, itemType: any, source: 'prep' | 'stash'): HTMLElement {
+  const card = document.createElement('div');
+  card.className = 'stash-card';
+  card.setAttribute('data-type-id', mergedItem.typeId); // Important for reconciliation
   
-  const info = document.createElement('div');
-  info.className = 'item-info';
+  // Store the current IID on the card element itself (for dynamic retrieval)
+  const firstItem = mergedItem.items[0];
+  card.setAttribute('data-current-iid', firstItem.iid);
   
-  // 数量显示在名称中
-  const displayName = mergedItem.totalQty > 1 
-    ? `${itemType.name} x${mergedItem.totalQty}`
-    : itemType.name;
+  const header = document.createElement('div');
+  header.className = 'stash-card-header';
   
-  // 价格显示在标题后面，带金币图标
-  const priceHtml = `<span style="color: #ffd700; margin-left: 8px;">💰 ${itemType.value}</span>`;
-  const description = getItemDescription(itemType);
+  const title = document.createElement('div');
+  title.className = 'stash-card-title';
+  title.textContent = itemType.name;
   
-  info.innerHTML = `
-    <div class="item-name">${displayName}${priceHtml}</div>
-    ${description ? `<div class="item-meta" style="margin-top: 4px; color: #aaa; font-size: 12px;">${description}</div>` : ''}
-  `;
+  const price = document.createElement('div');
+  price.className = 'stash-card-price';
+  price.textContent = `💰 ${itemType.value}`;
+  
+  header.appendChild(title);
+  header.appendChild(price);
+  
+  // Quantity Badge
+  const countBadge = document.createElement('div');
+  countBadge.className = 'item-count-badge';
+  countBadge.textContent = mergedItem.totalQty.toString();
+  if (mergedItem.totalQty <= 1 && (itemType.stackMax || 1) <= 1) {
+      countBadge.classList.add('hidden');
+  }
+  // Attach badge to card (absolute positioned)
+  card.appendChild(countBadge);
+  
+  const meta = document.createElement('div');
+  meta.className = 'stash-card-meta';
+  meta.textContent = getItemDescription(itemType);
+
   
   const actions = document.createElement('div');
-  actions.className = 'item-actions';
+  actions.className = 'stash-card-actions';
   
   // 检查是否是装备（武器/背包/防具）
   const slot = getItemSlot(mergedItem.typeId);
+
+  // Helper: Find the next available item IID for this type
+  // This allows rapid clicking by picking the next item in the stack that isn't already being processed
+  const getNextAvailableIID = (): string | null => {
+      // Get FRESH list from profile
+      let pool: ItemInstance[] = [];
+      if (source === 'prep' && playerProfile?.prep) {
+          pool = playerProfile.prep;
+      } else if (source === 'stash' && playerProfile?.stash) {
+          pool = playerProfile.stash;
+      }
+      
+      // Find items of this type that are NOT pending
+      const candidate = pool.find(item => 
+          item.typeId === mergedItem.typeId && 
+          !pendingActionItems.has(item.iid) &&
+          !isItemEquipped(item)
+      );
+      
+      return candidate ? candidate.iid : null;
+  };
   
-  // 使用第一个物品实例进行操作（如果需要操作多个，可以后续扩展）
-  const firstItem = mergedItem.items[0];
-  const isStackable = itemType.stackMax > 1;
-  
+  const executeAction = (actionName: string, networkCall: (iid: string) => void) => {
+      const iid = getNextAvailableIID();
+      if (!iid) {
+          console.log(`[DEBUG] No available item for ${actionName} (all pending or gone)`);
+          return;
+      }
+      
+      console.log(`[DEBUG] ${actionName}: ${itemType.name} (iid: ${iid})`);
+      
+      // Mark as pending
+      pendingActionItems.add(iid);
+      
+      // Execute
+      networkCall(iid);
+      
+      // Safety cleanup: remove from pending after 2s in case update never comes (packet loss)
+      setTimeout(() => pendingActionItems.delete(iid), 2000);
+  };
+
   if (source === 'prep') {
-    // 整备区：可以移回仓库，如果是装备可以装备
+    // 整备区 -> 仓库
     const moveBtn = document.createElement('button');
-    moveBtn.className = 'item-btn';
+    moveBtn.className = 'stash-btn';
     moveBtn.textContent = '移回仓库';
     moveBtn.onclick = () => {
-      moveBtn.classList.add('loading');
-      // 每次只移动1个
-      const moveQty = 1;
-      network.sendMovePrepToStash(firstItem.iid, moveQty);
-      hud.addEvent(`移回仓库: ${itemType.name} x1`);
-      setTimeout(() => {
-        moveBtn.classList.remove('loading');
-        addButtonFeedback(moveBtn, true);
-      }, 300);
+        executeAction('Move Prep->Stash', (iid) => network.sendMovePrepToStash(iid, 1));
+        // No disabled state!
     };
     actions.appendChild(moveBtn);
     
     if (slot) {
-      const equipBtn = document.createElement('button');
-      equipBtn.className = 'item-btn primary';
-      equipBtn.textContent = slot === 'weapon' ? '装备为武器' : slot === 'bag' ? '装备为背包' : '装备为防具';
-      equipBtn.onclick = () => {
-        equipBtn.classList.add('loading');
-        network.sendEquip(slot, firstItem.iid);
-        hud.addEvent(`装备: ${itemType.name}`);
-        setTimeout(() => {
-          equipBtn.classList.remove('loading');
-          addButtonFeedback(equipBtn, true, '已装备');
-        }, 300);
-      };
-      actions.appendChild(equipBtn);
+        const equipBtn = document.createElement('button');
+        equipBtn.className = 'stash-btn primary';
+        equipBtn.textContent = '装备';
+        equipBtn.onclick = () => {
+            executeAction('Equip from Prep', (iid) => network.sendEquip(slot, iid));
+        };
+        actions.appendChild(equipBtn);
     }
+
   } else {
-    // 仓库：可以移到整备区或卖出，如果是装备可以装备
+    // 仓库 -> 整备区 / 卖出
     const moveBtn = document.createElement('button');
-    moveBtn.className = 'item-btn';
-    moveBtn.textContent = '移到整备';
+    moveBtn.className = 'stash-btn';
+    moveBtn.textContent = '带入';
     moveBtn.onclick = () => {
-      moveBtn.classList.add('loading');
-      // 每次只移动1个
-      const moveQty = 1;
-      network.sendMoveStashToPrep(firstItem.iid, moveQty);
-      hud.addEvent(`移到整备: ${itemType.name} x1`);
-      setTimeout(() => {
-        moveBtn.classList.remove('loading');
-        addButtonFeedback(moveBtn, true);
-      }, 300);
+        executeAction('Move Stash->Prep', (iid) => network.sendMoveStashToPrep(iid, 1));
+        // No disabled state!
     };
     actions.appendChild(moveBtn);
-    
+
     const sellBtn = document.createElement('button');
-    sellBtn.className = 'item-btn';
+    sellBtn.className = 'stash-btn';
     sellBtn.textContent = '卖出';
     sellBtn.onclick = () => {
-      sellBtn.classList.add('loading');
-      // 每次只卖出1个
-      const sellQty = 1;
-      network.sendSellFromStash(firstItem.iid, sellQty);
-      hud.addEvent(`卖出: ${itemType.name} x1`);
-      setTimeout(() => {
-        sellBtn.classList.remove('loading');
-        addButtonFeedback(sellBtn, true, '已卖出');
-      }, 300);
+        executeAction('Sell Stash', (iid) => network.sendSellFromStash(iid, 1));
     };
     actions.appendChild(sellBtn);
-    
-    if (slot) {
-      const equipBtn = document.createElement('button');
-      equipBtn.className = 'item-btn primary';
-      equipBtn.textContent = slot === 'weapon' ? '装备为武器' : slot === 'bag' ? '装备为背包' : '装备为防具';
-      equipBtn.onclick = () => {
-        equipBtn.classList.add('loading');
-        network.sendEquip(slot, firstItem.iid);
-        hud.addEvent(`装备: ${itemType.name}`);
-        setTimeout(() => {
-          equipBtn.classList.remove('loading');
-          addButtonFeedback(equipBtn, true, '已装备');
-        }, 300);
-      };
-      actions.appendChild(equipBtn);
+
+      if (slot) {
+        const equipBtn = document.createElement('button');
+        equipBtn.className = 'stash-btn primary';
+        equipBtn.textContent = '装备';
+        equipBtn.onclick = () => {
+             executeAction('Equip from Stash', (iid) => network.sendEquip(slot, iid));
+        };
+        actions.appendChild(equipBtn);
     }
   }
-  
-  row.appendChild(info);
-  row.appendChild(actions);
-  return row;
+
+  card.appendChild(header);
+  card.appendChild(meta);
+  card.appendChild(actions);
+
+  return card;
 }
 
 // 新增: 获取物品简短描述
@@ -2339,10 +2523,10 @@ function getItemDescription(itemType: any): string {
       desc.push(`爆炸: ${props.damage}伤害`);
     }
     if (props.flashRadius && props.flashDurationMs) {
-      desc.push(`致盲: ${Math.floor(props.flashDurationMs / 1000)}秒`);
+      desc.push(`致盲: ${Math.floor(props.flashDurationMs / 1000)}秒 | 短暂失明`);
     }
     if (props.smokeRadius && props.smokeDurationMs) {
-      desc.push(`烟雾: ${Math.floor(props.smokeDurationMs / 1000)}秒`);
+      desc.push(`烟雾: ${Math.floor(props.smokeDurationMs / 1000)}秒 | 超大烟雾，笼罩一切`);
     }
     if (props.speedMultiplier) {
       desc.push(`速度: +${Math.floor((props.speedMultiplier - 1) * 100)}%`);
@@ -2351,11 +2535,11 @@ function getItemDescription(itemType: any): string {
       desc.push(`持续回复: ${props.hpPerSecond}HP/秒`);
     }
     if (props.disguiseDurationMs) {
-      desc.push(`伪装: ${Math.floor(props.disguiseDurationMs / 1000)}秒 | AI无法发现`);
+      desc.push(`伪装: ${Math.floor(props.disguiseDurationMs / 1000)}秒 | 变成一只 AI`);
     }
     // 诱饵特殊标记（explosionRadius=1表示诱饵）
     if (itemType.id === 'w_decoy') {
-      desc.push(`投掷诱饵 | 吸引AI火力`);
+      desc.push(`投掷诱饵 | 生成全息诱饵，被摧毁后爆炸`);
     }
     if (desc.length > 0) {
       return desc.join(' | ');
@@ -2440,6 +2624,7 @@ function createShopRow(itemType: any): HTMLElement {
     const totalCost = itemType.value; // 单个价格
 
     if (playerProfile && playerProfile.money >= totalCost) {
+      console.log(`[DEBUG] Buy Item: ${itemType.name} (id: ${itemType.id}, action: ${autoAction})`);
       network.sendBuy(itemType.id, 1, autoAction);
       
       let actionLabel = '';
@@ -3183,6 +3368,10 @@ const network = new Network(getWebSocketUrl(), 'local', {
         const speedMultiplier = getLocalSpeedMultiplier();
         
         for (const input of pendingInputs) {
+          // 修复: 如果服务端状态显示被晕眩或正在使用道具，回滚预测时不应用移动
+          if (serverPlayer.isStunned || serverPlayer.usingItemTypeId) {
+            continue;
+          }
           predictedPos = simulatePlayerMove(
             predictedPos,
             input.keys,
@@ -3302,6 +3491,8 @@ const network = new Network(getWebSocketUrl(), 'local', {
       loot: result.loot,
       moneyGained: result.moneyGained,
       moneyLost: result.moneyLost,
+      killedBy: result.killedBy,
+      killedByWeaponName: result.killedByWeaponName,
     };
     hud.addEvent(`战局结束: ${result.result === 'EXTRACTED' ? '成功撤离' : '死亡'}`);
 
@@ -4138,57 +4329,62 @@ function renderLoop(): void {
       // 修复: 只有 committed 才推进预测（保证 pendingInputs 可重放）
       // 这样即使某个 tick 发包失败/服务端没吃到，也不会"白走一步"
       if (committed && predictedLocalPlayer && mapConfig) {
-        const beforeX = predictedLocalPlayer.x;
-        const beforeY = predictedLocalPlayer.y;
-        
-        // 检查是否正在移动
-        const isMoving = commitKeys.up || commitKeys.down || commitKeys.left || commitKeys.right;
-        
-        // 更新耐力预测
-        const currentStamina = predictedLocalPlayer.stamina ?? 100;
-        const maxStamina = predictedLocalPlayer.maxStamina ?? 100;
-        const wantsSprint = tickSprint;
-        const isSprinting = canSprint(currentStamina, wantsSprint) && isMoving;
-        
-        // 计算新的耐力值
-        const newStamina = calculateStaminaChange(
-          currentStamina,
-          maxStamina,
-          isSprinting,
-          isMoving,
-          0.05 // 固定为 server tick 间隔
-        );
-        
-        // 如果耐力耗尽，停止冲刺
-        const finalIsSprinting = newStamina > 0 ? isSprinting : false;
-        
-        // 计算速度倍数（基于局内装备 buff）
-        const equipmentSpeedMultiplier = getLocalSpeedMultiplier();
-        const sprintSpeedMultiplier = getSprintSpeedMultiplier(finalIsSprinting);
-        
-        const newPredictedPos = simulatePlayerMove(
-          { x: beforeX, y: beforeY },
-          commitKeys,
-          0.05, // 固定为 server tick 间隔
-          mapConfig.width,
-          mapConfig.height,
-          cachedObstacles,
-          equipmentSpeedMultiplier,
-          sprintSpeedMultiplier
-        );
-        
-        // 检测撞墙/被阻挡：触发短时间"快速收敛"，不瞬移
-        const movedDist = Math.hypot(newPredictedPos.x - beforeX, newPredictedPos.y - beforeY);
-        const keysAny = commitKeys.up || commitKeys.down || commitKeys.left || commitKeys.right;
-        if (keysAny && movedDist < 0.01) {
-          fastConvergeUntil = performance.now() + FAST_CONVERGE_ON_BLOCK_MS;
+        // 修复: 如果被晕眩或正在使用道具，停止客户端预测（包括移动和耐力更新），避免与服务器状态（early return）冲突导致的抖动
+        if (predictedLocalPlayer.isStunned || predictedLocalPlayer.usingItemTypeId) {
+           // Do nothing, keep x, y, stamina as is
+        } else {
+          const beforeX = predictedLocalPlayer.x;
+          const beforeY = predictedLocalPlayer.y;
+          
+          // 检查是否正在移动
+          const isMoving = commitKeys.up || commitKeys.down || commitKeys.left || commitKeys.right;
+          
+          // 更新耐力预测
+          const currentStamina = predictedLocalPlayer.stamina ?? 100;
+          const maxStamina = predictedLocalPlayer.maxStamina ?? 100;
+          const wantsSprint = tickSprint;
+          const isSprinting = canSprint(currentStamina, wantsSprint) && isMoving;
+          
+          // 计算新的耐力值
+          const newStamina = calculateStaminaChange(
+            currentStamina,
+            maxStamina,
+            isSprinting,
+            isMoving,
+            0.05 // 固定为 server tick 间隔
+          );
+          
+          // 如果耐力耗尽，停止冲刺
+          const finalIsSprinting = newStamina > 0 ? isSprinting : false;
+          
+          // 计算速度倍数（基于局内装备 buff）
+          const equipmentSpeedMultiplier = getLocalSpeedMultiplier();
+          const sprintSpeedMultiplier = getSprintSpeedMultiplier(finalIsSprinting);
+          
+          const newPredictedPos = simulatePlayerMove(
+            { x: beforeX, y: beforeY },
+            commitKeys,
+            0.05, // 固定为 server tick 间隔
+            mapConfig.width,
+            mapConfig.height,
+            cachedObstacles,
+            equipmentSpeedMultiplier,
+            sprintSpeedMultiplier
+          );
+          
+          // 检测撞墙/被阻挡：触发短时间"快速收敛"，不瞬移
+          const movedDist = Math.hypot(newPredictedPos.x - beforeX, newPredictedPos.y - beforeY);
+          const keysAny = commitKeys.up || commitKeys.down || commitKeys.left || commitKeys.right;
+          if (keysAny && movedDist < 0.01) {
+            fastConvergeUntil = performance.now() + FAST_CONVERGE_ON_BLOCK_MS;
+          }
+          
+          // 更新预测状态
+          predictedLocalPlayer.x = newPredictedPos.x;
+          predictedLocalPlayer.y = newPredictedPos.y;
+          predictedLocalPlayer.stamina = Math.round(newStamina);
+          predictedLocalPlayer.isSprinting = finalIsSprinting;
         }
-        
-        // 更新预测状态
-        predictedLocalPlayer.x = newPredictedPos.x;
-        predictedLocalPlayer.y = newPredictedPos.y;
-        predictedLocalPlayer.stamina = Math.round(newStamina);
-        predictedLocalPlayer.isSprinting = finalIsSprinting;
       }
       } // 结束 if (currentPhase === 'RAID')
     }

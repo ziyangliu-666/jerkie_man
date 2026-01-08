@@ -254,6 +254,33 @@
     .equipment-fly-animation.flying {
       animation: flyToRaid 0.8s cubic-bezier(0.4, 0, 0.2, 1) forwards;
     }
+    
+    /* ===== Hideout Exit Animations ===== */
+    @keyframes slideOutUp {
+      to { transform: translateY(-100%); opacity: 0; }
+    }
+    @keyframes slideOutLeft {
+      to { transform: translateX(-100%); opacity: 0; }
+    }
+    @keyframes slideOutRight {
+      to { transform: translateX(100%); opacity: 0; }
+    }
+    @keyframes containerFadeOut {
+      to { background-color: rgba(0, 0, 0, 0); backdrop-filter: none; pointer-events: none; }
+    }
+
+    .anim-exit-up {
+      animation: slideOutUp 1.0s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+    }
+    .anim-exit-left {
+      animation: slideOutLeft 1.0s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+    }
+    .anim-exit-right {
+      animation: slideOutRight 1.0s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+    }
+    .anim-fade-out {
+      animation: containerFadeOut 1.0s linear forwards;
+    }
 
     #raidEquipment .raid-equipment-title {
       color: #0ff;
@@ -925,6 +952,211 @@
       background: #0dd;
     }
 
+    /* Result UI - 赛博朋克风格战局结果界面 */
+    #resultUI {
+      position: fixed;
+      inset: 0;
+      background: linear-gradient(135deg, rgba(0, 0, 0, 0.95) 0%, rgba(10, 10, 20, 0.95) 100%);
+      display: none; /* JavaScript控制显示 */
+      align-items: center;
+      justify-content: center;
+      z-index: 1002;
+      pointer-events: auto;
+      backdrop-filter: blur(10px);
+      animation: resultFadeIn 0.4s ease;
+    }
+
+    @keyframes resultFadeIn {
+      from { opacity: 0; }
+      to { opacity: 1; }
+    }
+
+    .result-modal {
+      background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+      border: 2px solid;
+      border-image: linear-gradient(135deg, #0ff, #f0f, #0ff) 1;
+      padding: 40px 50px;
+      border-radius: 12px;
+      min-width: 500px;
+      max-width: 600px;
+      text-align: center;
+      box-shadow: 
+        0 0 40px rgba(0, 255, 255, 0.3),
+        0 0 80px rgba(255, 0, 255, 0.2),
+        inset 0 0 60px rgba(0, 255, 255, 0.05);
+      position: relative;
+      overflow: hidden;
+      animation: resultSlideIn 0.6s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+
+    @keyframes resultSlideIn {
+      from {
+        transform: translateY(-50px);
+        opacity: 0;
+      }
+      to {
+        transform: translateY(0);
+        opacity: 1;
+      }
+    }
+
+    /* 扫描线效果 */
+    .result-modal::before {
+      content: '';
+      position: absolute;
+      top: -50%;
+      left: -50%;
+      width: 200%;
+      height: 200%;
+      background: repeating-linear-gradient(
+        0deg,
+        transparent,
+        transparent 2px,
+        rgba(0, 255, 255, 0.03) 2px,
+        rgba(0, 255, 255, 0.03) 4px
+      );
+      pointer-events: none;
+      animation: scan 8s linear infinite;
+    }
+
+    @keyframes scan {
+      0% { transform: translateY(0); }
+      100% { transform: translateY(50px); }
+    }
+
+    #resultTitle {
+      font-size: 32px;
+      font-weight: bold;
+      margin-bottom: 20px;
+      text-transform: uppercase;
+      letter-spacing: 3px;
+      position: relative;
+      z-index: 1;
+    }
+
+    #resultTitle.success-title {
+      background: linear-gradient(135deg, #0ff 0%, #0f0 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+      text-shadow: 0 0 20px rgba(0, 255, 255, 0.5);
+    }
+
+    #resultTitle.failed-title {
+      background: linear-gradient(135deg, #f00 0%, #f0f 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+      text-shadow: 0 0 20px rgba(255, 0, 0, 0.5);
+      animation: glitch 2s infinite;
+    }
+
+    @keyframes glitch {
+      0%, 90%, 100% { transform: translate(0); }
+      91% { transform: translate(-2px, 2px); }
+      92% { transform: translate(2px, -2px); }
+      93% { transform: translate(-2px, -2px); }
+      94% { transform: translate(2px, 2px); }
+    }
+
+    #resultStatus {
+      font-size: 24px;
+      margin-bottom: 30px;
+      padding: 12px 24px;
+      border-radius: 8px;
+      display: inline-block;
+      font-weight: bold;
+      position: relative;
+      z-index: 1;
+    }
+
+    #resultStatus.success {
+      background: linear-gradient(135deg, rgba(0, 255, 255, 0.2) 0%, rgba(0, 255, 0, 0.2) 100%);
+      border: 2px solid #0ff;
+      color: #0ff;
+      box-shadow: 0 0 20px rgba(0, 255, 255, 0.4);
+    }
+
+    #resultStatus.failed {
+      background: linear-gradient(135deg, rgba(255, 0, 0, 0.2) 0%, rgba(255, 0, 255, 0.2) 100%);
+      border: 2px solid #f0f;
+      color: #f0f;
+      box-shadow: 0 0 20px rgba(255, 0, 255, 0.4);
+    }
+
+    #resultDetails {
+      background: rgba(0, 0, 0, 0.3);
+      border: 1px solid rgba(0, 255, 255, 0.2);
+      border-radius: 8px;
+      padding: 24px;
+      margin: 20px 0 30px 0;
+      text-align: left;
+      font-size: 15px;
+      line-height: 1.8;
+      color: #ddd;
+      position: relative;
+      z-index: 1;
+      min-height: 120px;
+    }
+
+    #resultDetails .death-reason {
+      color: #f0f;
+      font-size: 16px;
+      margin-bottom: 12px;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+    }
+
+    #resultDetails .death-attacker,
+    #resultDetails .death-weapon {
+      padding: 8px 12px;
+      margin: 6px 0;
+      background: rgba(255, 0, 255, 0.1);
+      border-left: 3px solid #f0f;
+      font-size: 14px;
+    }
+
+    #resultDetails .highlight {
+      color: #0ff;
+      font-weight: bold;
+      text-shadow: 0 0 10px rgba(0, 255, 255, 0.6);
+    }
+
+    #resultContinueBtn {
+      padding: 14px 40px;
+      font-size: 16px;
+      font-family: 'Courier New', monospace;
+      font-weight: bold;
+      text-transform: uppercase;
+      letter-spacing: 2px;
+      background: linear-gradient(135deg, #0ff 0%, #08f 100%);
+      color: #000;
+      border: none;
+      border-radius: 6px;
+      cursor: pointer;
+      position: relative;
+      z-index: 1;
+      transition: all 0.3s ease;
+      box-shadow: 
+        0 4px 15px rgba(0, 255, 255, 0.4),
+        inset 0 0 10px rgba(255, 255, 255, 0.2);
+    }
+
+    #resultContinueBtn:hover {
+      background: linear-gradient(135deg, #1ff 0%, #19f 100%);
+      box-shadow: 
+        0 6px 20px rgba(0, 255, 255, 0.6),
+        inset 0 0 15px rgba(255, 255, 255, 0.3);
+      transform: translateY(-2px);
+    }
+
+    #resultContinueBtn:active {
+      transform: translateY(0);
+      box-shadow: 
+        0 2px 8px rgba(0, 255, 255, 0.4),
+        inset 0 0 10px rgba(255, 255, 255, 0.2);
+    }
+
     /* HIDEOUT UI 样式 */
     #hideoutUI {
       position: fixed;
@@ -1084,8 +1316,8 @@
 
     .panel-desc {
       color: #aaa;
-      margin-bottom: 20px;
-      font-size: 12px;
+      margin-bottom: 12px;
+      font-size: 11px;
     }
 
     /* 物品列表 */
@@ -1168,28 +1400,33 @@
       border-left: 3px solid;
       font-size: 13px;
       font-weight: bold;
+      margin-bottom: 12px; /* Increased vertical spacing */
+      border-radius: 0 4px 4px 0; /* Soften the look */
     }
 
     .shop-rarity-header.common {
       border-left-color: #00ff00;
       color: #00ff00;
+      background: linear-gradient(90deg, rgba(0, 255, 0, 0.1), transparent);
     }
 
     .shop-rarity-header.rare {
       border-left-color: #0088ff;
       color: #0088ff;
+      background: linear-gradient(90deg, rgba(0, 136, 255, 0.1), transparent);
     }
 
     .shop-rarity-header.epic {
       border-left-color: #9d4edd;
       color: #9d4edd;
+      background: linear-gradient(90deg, rgba(157, 78, 221, 0.1), transparent);
     }
 
     .shop-rarity-items {
       display: grid;
       grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-      gap: 12px;
-      margin-left: 16px;
+      gap: 16px; /* Increased gap */
+      margin-left: 0; /* Reset */
     }
 
     /* 商店中的物品卡片使用更大的最小宽度 */
@@ -1197,9 +1434,10 @@
       grid-template-columns: repeat(auto-fit, minmax(360px, 1fr)) !important;
     }
     
-    /* 整备区和仓库的卡片使用最窄宽度（320px），确保三个按钮在一排 */
+    /* 整备区在横向布局中使用单列，紧凑显示 */
     #prepList.item-list {
-      grid-template-columns: repeat(auto-fill, minmax(320px, 320px));
+      grid-template-columns: 1fr;
+      gap: 10px;
     }
     
     /* 仓库的卡片也使用最窄宽度，确保三个按钮在一排 */
@@ -1452,20 +1690,56 @@
       margin: 8px 0;
     }
 
-    /* 装备区样式 */
-    .equipment-area {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    /* 三列布局容器 */
+    .equipment-prep-row {
+      display: flex;
       gap: 16px;
-      margin-top: 20px;
+      margin-top: 8px;
+      align-items: flex-start;
+      height: calc(100vh - 180px); /* 限制高度，让仓库能独立滚动 */
+    }
+
+    /* 左列：装备 */
+    .equipment-prep-row > .layout-col-equipment {
+      width: 170px; 
+      flex-shrink: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    /* 中列：整备 */
+    .equipment-prep-row > .layout-col-prep {
+      width: 280px;
+      flex-shrink: 0;
+      border-right: 1px solid #333;
+      padding-right: 16px;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* 右列：仓库 */
+    .equipment-prep-row > .layout-col-stash {
+      flex: 1;
+      min-width: 0;
+      height: 100%;
+      overflow-y: auto;
+      padding-right: 8px;
+    }
+
+    /* 装备槽间距微调 */
+    .equipment-area {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
     }
 
     .equipment-slot {
       background: linear-gradient(135deg, #2a2a2a 0%, #1f1f1f 100%);
       border: 2px solid #444;
-      border-radius: 8px;
-      padding: 14px;
-      min-height: 140px;
+      border-radius: 6px;
+      padding: 8px 10px;
+      min-height: 70px;
       position: relative;
       overflow: hidden;
       transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
@@ -1497,17 +1771,25 @@
       color: #0ff;
       font-size: 13px;
       font-weight: bold;
-      margin-bottom: 12px;
+      margin-bottom: 4px;
       text-transform: uppercase;
-      letter-spacing: 1px;
+      letter-spacing: 0.5px;
       display: flex;
       align-items: center;
-      gap: 6px;
+      gap: 4px;
+    }
+
+    .slot-hint {
+      font-size: 10px;
+      color: #777;
+      font-weight: normal;
+      text-transform: none;
+      letter-spacing: 0;
     }
 
     .slot-label::before {
       content: '⚡';
-      font-size: 16px;
+      font-size: 14px;
       animation: pulse-glow 2s ease-in-out infinite;
     }
 
@@ -1517,7 +1799,7 @@
     }
 
     .slot-content {
-      min-height: 70px;
+      min-height: 40px;
       pointer-events: none; /* 允许点击事件穿透到父元素 */
     }
     
@@ -1528,22 +1810,22 @@
     .slot-empty {
       color: #666;
       font-size: 12px;
-      padding: 20px 12px;
+      padding: 6px 8px;
       text-align: center;
       font-style: italic;
-      border: 2px dashed #444;
-      border-radius: 6px;
+      border: 1px dashed #444;
+      border-radius: 4px;
       background: rgba(0, 0, 0, 0.2);
     }
 
     .slot-item {
       background: linear-gradient(135deg, #1a1a1a 0%, #151515 100%);
       border: 1px solid #555;
-      border-radius: 6px;
-      padding: 12px;
+      border-radius: 4px;
+      padding: 8px 10px;
       display: flex;
       flex-direction: column;
-      gap: 10px;
+      gap: 6px;
       position: relative;
       overflow: hidden;
       transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
@@ -1578,7 +1860,7 @@
     .slot-item-name {
       color: #fff;
       font-weight: bold;
-      margin-bottom: 4px;
+      margin-bottom: 2px;
       font-size: 13px;
       text-shadow: 0 0 8px rgba(0, 255, 255, 0.3);
     }
@@ -1586,18 +1868,187 @@
     .slot-item-meta {
       color: #aaa;
       font-size: 11px;
-      line-height: 1.4;
+      line-height: 1.3;
     }
 
     .slot-item-actions {
       display: flex;
-      gap: 8px;
+      gap: 6px;
       justify-content: center;
-      padding-top: 6px;
+      padding-top: 4px;
       border-top: 1px solid #333;
     }
 
     /* 可点击的装备槽位 */
+
+    /* ===== NEW WAREHOUSE UI STYLE ===== */
+    .stash-card {
+      position: relative;
+      background: rgba(40, 44, 52, 0.7);
+      backdrop-filter: blur(8px);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 8px;
+      padding: 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      transition: all 0.25s ease;
+      overflow: hidden;
+      box-shadow: 0 4px 6px rgba(0, 0, 0, 0.2);
+    }
+
+    .stash-card::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background: linear-gradient(135deg, rgba(255, 255, 255, 0.05) 0%, transparent 100%);
+      opacity: 0;
+      transition: opacity 0.3s;
+      pointer-events: none;
+    }
+
+    .stash-card:hover {
+      transform: translateY(-2px);
+      border-color: rgba(0, 255, 255, 0.4);
+      box-shadow: 0 8px 16px rgba(0, 0, 0, 0.3), 0 0 12px rgba(0, 255, 255, 0.1);
+      z-index: 10;
+    }
+
+    .stash-card:hover::before {
+      opacity: 1;
+    }
+
+    .stash-card-header {
+      display: flex;
+      justify-content: flex-start; /* Align to start so price is next to title */
+      align-items: center;
+      gap: 8px;
+      position: relative;
+      padding-right: 32px; /* Reserve space for the absolute badge */
+    }
+
+    .stash-card-title {
+      font-family: 'Outfit', 'Segoe UI', sans-serif;
+      font-weight: 700;
+      font-size: 15px;
+      color: #fff;
+      text-shadow: 0 2px 4px rgba(0,0,0,0.5);
+      line-height: 1.3;
+      /* Remove flex: 1 to prevent pushing price to the edge */
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      max-width: 100%;
+    }
+    
+    .stash-card-price {
+      font-size: 12px;
+      color: #ffd700;
+      font-weight: 600;
+      background: rgba(0, 0, 0, 0.3);
+      padding: 2px 6px;
+      border-radius: 4px;
+      white-space: nowrap;
+    }
+
+    .stash-card-meta {
+      font-size: 11px;
+      color: rgba(255, 255, 255, 0.6);
+      line-height: 1.4;
+      min-height: 32px; /* Reserve space for 2 lines */
+    }
+
+    /* Quantity Badge */
+    .item-count-badge {
+      position: absolute;
+      top: 8px;
+      right: 8px;
+      background: linear-gradient(135deg, #00d2ff 0%, #3a7bd5 100%);
+      color: #fff;
+      font-size: 11px;
+      font-weight: 800;
+      padding: 2px 8px;
+      border-radius: 10px;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      z-index: 5;
+      min-width: 24px;
+      text-align: center;
+    }
+    
+    .item-count-badge.hidden {
+      display: none;
+    }
+
+    /* Actions area at the bottom */
+    .stash-card-actions {
+      display: flex;
+      gap: 8px;
+      margin-top: auto;
+      padding-top: 10px;
+      border-top: 1px solid rgba(255, 255, 255, 0.05);
+    }
+
+    .stash-btn {
+      flex: 1;
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      color: #ccc;
+      padding: 6px 10px;
+      border-radius: 4px;
+      font-size: 11px;
+      cursor: pointer;
+      transition: all 0.2s;
+      font-family: inherit;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .stash-btn:hover:not(:disabled) {
+      background: rgba(255, 255, 255, 0.15);
+      color: #fff;
+      border-color: rgba(255, 255, 255, 0.3);
+    }
+
+    .stash-btn.primary {
+      background: rgba(0, 255, 255, 0.1);
+      border-color: rgba(0, 255, 255, 0.3);
+      color: #0ff;
+    }
+
+    .stash-btn.primary:hover:not(:disabled) {
+      background: rgba(0, 255, 255, 0.2);
+      border-color: #0ff;
+      box-shadow: 0 0 10px rgba(0, 255, 255, 0.2);
+    }
+
+    .stash-btn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+    
+    /* Animation for count update */
+    @keyframes badgePulse {
+      0% { transform: scale(1); }
+      50% { transform: scale(1.3); filter: brightness(1.2); }
+      100% { transform: scale(1); }
+    }
+    
+    .item-count-badge.updated {
+      animation: badgePulse 0.4s ease-out;
+    }
+    
+    /* New Grid Layout Overrides */
+    #stashList .shop-rarity-items,
+    #prepList {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)) !important; /* Slightly responsive but consistent */
+      gap: 16px; /* Increased gap */
+      padding: 4px; /* Space for shadows */
+    }
+    /* ===== END NEW WAREHOUSE UI STYLE ===== */
     .clickable-slot {
       cursor: pointer;
       transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
@@ -1964,6 +2415,18 @@
       background: #1a1a1a;
       color: #fff;
     }
+
+    /* 响应式布局：窄屏幕时装备和整备区垂直排列 */
+    @media (max-width: 1200px) {
+      .equipment-prep-row {
+        flex-direction: column;
+        gap: 30px;
+      }
+
+      #prepList.item-list {
+        grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+      }
+    }
   </style>
 </head>
 <body>
@@ -2181,48 +2644,55 @@
           <div id="hideoutMain">
             <!-- 装备区域 -->
             <div id="hideoutEquipment" class="hideout-panel active">
-              <h3>装备</h3>
-              <div class="panel-desc">点击装备槽位自动从仓库选择并装备，或从下方整备区装备</div>
-              <div class="equipment-area">
-                <div class="equipment-slot clickable-slot" data-slot="weapon">
-                  <div class="slot-label">武器 <span class="slot-hint">(点击自动装备)</span></div>
-                  <div id="equipmentWeapon" class="slot-content">
-                    <div class="slot-empty">未装备</div>
+              <h3>装备与整备</h3>
+              <div class="panel-desc">点击装备槽位自动从仓库选择并装备，或从右侧整备区装备</div>
+              <!-- 装备区和整备区横向布局 -->
+              <div class="equipment-prep-row">
+                <!-- 第1列：装备区 -->
+                <div class="layout-col-equipment">
+                  <div class="equipment-area">
+                    <div class="equipment-slot clickable-slot" data-slot="weapon">
+                      <div class="slot-label">武器 <span class="slot-hint">(点击装备)</span></div>
+                      <div id="equipmentWeapon" class="slot-content">
+                        <div class="slot-empty">未装备</div>
+                      </div>
+                    </div>
+                    <div class="equipment-slot clickable-slot" data-slot="bag">
+                      <div class="slot-label">背包 <span class="slot-hint">(点击装备)</span></div>
+                      <div id="equipmentBag" class="slot-content">
+                        <div class="slot-empty">未装备</div>
+                      </div>
+                    </div>
+                    <div class="equipment-slot clickable-slot" data-slot="armor">
+                      <div class="slot-label">防具 <span class="slot-hint">(点击装备)</span></div>
+                      <div id="equipmentArmor" class="slot-content">
+                        <div class="slot-empty">未装备</div>
+                      </div>
+                    </div>
                   </div>
                 </div>
-                <div class="equipment-slot clickable-slot" data-slot="bag">
-                  <div class="slot-label">背包 <span class="slot-hint">(点击自动装备)</span></div>
-                  <div id="equipmentBag" class="slot-content">
-                    <div class="slot-empty">未装备</div>
+
+                <!-- 第2列：整备区 -->
+                <div class="layout-col-prep">
+                  <h4 style="color: #0ff; margin-bottom: 8px; font-size: 14px;">整备道具 (<span id="prepCapacity">0/8</span>)</h4>
+                  <div id="prepList" class="item-list"></div>
+                </div>
+
+                <!-- 第3列：仓库区 -->
+                <div class="layout-col-stash">
+                  <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px;">
+                    <h3 style="color: #0ff; margin: 0; font-size: 16px;">仓库</h3>
+                    <!-- 仓库分类内嵌到这一行 -->
+                    <div id="stashTabs" class="shop-tabs" style="margin: 0; padding: 0; border: none; gap: 6px;">
+                      <button class="shop-tab-btn active" data-stash-category="weapon" style="padding: 6px 12px; font-size: 13px;">武器</button>
+                      <button class="shop-tab-btn" data-stash-category="armor" style="padding: 6px 12px; font-size: 13px;">防具</button>
+                      <button class="shop-tab-btn" data-stash-category="bag" style="padding: 6px 12px; font-size: 13px;">背包</button>
+                      <button class="shop-tab-btn" data-stash-category="consumable" style="padding: 6px 12px; font-size: 13px;">消耗</button>
+                      <button class="shop-tab-btn" data-stash-category="material" style="padding: 6px 12px; font-size: 13px;">材料</button>
+                    </div>
                   </div>
+                  <div id="stashList" class="shop-container"></div>
                 </div>
-                <div class="equipment-slot clickable-slot" data-slot="armor">
-                  <div class="slot-label">防具 <span class="slot-hint">(点击自动装备)</span></div>
-                  <div id="equipmentArmor" class="slot-content">
-                    <div class="slot-empty">未装备</div>
-                  </div>
-                </div>
-              </div>
-              <!-- 整备区（整合到装备tab） -->
-              <div style="margin-top: 30px;">
-                <h3 style="color: #0ff; margin-bottom: 10px; font-size: 18px;">整备区</h3>
-                <p class="panel-desc">准备带入局内的道具（容量: <span id="prepCapacity">0/8</span>）</p>
-                <div id="prepList" class="item-list"></div>
-              </div>
-              
-              <!-- 仓库（合并到装备tab） -->
-              <div style="margin-top: 40px;">
-                <h3 style="color: #0ff; margin-bottom: 10px; font-size: 18px;">仓库</h3>
-                <p class="panel-desc">你的物品存储</p>
-                <!-- 仓库分类 Tab -->
-                <div id="stashTabs" class="shop-tabs">
-                  <button class="shop-tab-btn active" data-stash-category="weapon">武器</button>
-                  <button class="shop-tab-btn" data-stash-category="armor">防具</button>
-                  <button class="shop-tab-btn" data-stash-category="bag">背包</button>
-                  <button class="shop-tab-btn" data-stash-category="consumable">消耗品</button>
-                  <button class="shop-tab-btn" data-stash-category="material">材料</button>
-                </div>
-                <div id="stashList" class="shop-container"></div>
               </div>
             </div>
 
@@ -2243,6 +2713,16 @@
           </div>
         </div>
 
+      <!-- RESULT Phase: 战局结果界面 -->
+      <div id="resultUI" style="display: none;">
+        <div class="result-modal">
+          <h1 id="resultTitle"></h1>
+          <div id="resultStatus"></div>
+          <div id="resultDetails"></div>
+          <button id="resultContinueBtn">继续</button>
+        </div>
+      </div>
+
       </div>
 
       </div>
@@ -2257,6 +2737,7 @@
       <div id="debugPanel"></div>
     </div>
   </div>
+  
   <script type="module" src="/src/main.ts"></script>
 </body>
 </html>

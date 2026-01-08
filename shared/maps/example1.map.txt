@@ -1,0 +1,257 @@
+# MAPTEXT v1
+# Beginner Showcase 2K v1（新手友好大地图 2000x2000）
+# 目标：
+# - 中央：教学/安全枢纽 + 中心撤离点（无障碍覆盖）
+# - 东侧：Hard Zone（可绕开），展示“狙击手 + 重机枪手 + 更高价值物资”
+# - 全图：8资源点箱群 + 4主路节点箱群（让大图不空）
+# - 草丛：出生点附近提供一点点安全感；中心有少量示范草丛；Hard Zone 有更多草丛
+# - 水域：四边中段小水池 + 中心小浅水演示（都不封路）
+# - 墙：仅做视线切割/掩体，不围房间，不形成封闭迷宫
+
+@meta id=beginner_showcase_v1_2k name="Beginner Showcase v1 (2K)" desc="2000x2000 新手友好：中心教学枢纽+撤离点；东侧Hard Zone展示重机枪/狙击与高价值；全类型障碍物与AI角色齐全。"
+@map width=2000 height=2000 seed=20260108
+
+# === 撤离点：地图中心（撤离区本体不要放任何 obstacle 覆盖）===
+@extract x=930 y=930 w=140 h=140
+
+# === 出生点（4个角落，略内缩；附近给一点点掩体/草丛）===
+@spawn x=260 y=260
+@spawn x=1740 y=260
+@spawn x=260 y=1740
+@spawn x=1740 y=1740
+
+# === POI：中心 + 教学点 + 外围资源点（8个） + Hard Zone ===
+@poi x=1000 y=1000 id=center_extract type=landmark name="Center Extract" desc="中心撤离点：新手可快速撤离"
+@poi x=860 y=1000 id=tutorial_crates type=landmark name="Crate Yard" desc="箱子堆放演示：掩体/穿行/卡视角"
+@poi x=1120 y=880 id=tutorial_walls type=landmark name="Wall Gallery" desc="细墙切割视线演示：不封闭"
+@poi x=1120 y=1120 id=tutorial_bush type=landmark name="Bush Patch" desc="草丛演示：隐蔽/绕行"
+@poi x=1105 y=785 id=tutorial_water type=landmark name="Shallow Water" desc="浅水演示：不封路"
+
+@poi x=350 y=350 id=nw_resource type=resource name="Northwest Resource" desc="西北资源点（新手友好箱群）"
+@poi x=1650 y=350 id=ne_resource type=resource name="Northeast Resource" desc="东北资源点（新手友好箱群）"
+@poi x=350 y=1650 id=sw_resource type=resource name="Southwest Resource" desc="西南资源点（新手友好箱群）"
+@poi x=1650 y=1650 id=se_resource type=resource name="Southeast Resource" desc="东南资源点（新手友好箱群）"
+@poi x=1000 y=350 id=north_resource type=resource name="North Resource" desc="北部资源点（箱群）"
+@poi x=1000 y=1650 id=south_resource type=resource name="South Resource" desc="南部资源点（箱群）"
+@poi x=220 y=1000 id=west_resource type=resource name="West Resource" desc="西部资源点（箱群）"
+@poi x=1780 y=1000 id=east_resource type=resource name="East Resource" desc="东部资源点（箱群）"
+
+@poi x=1550 y=1000 id=hard_zone_poi type=danger name="Hard Zone" desc="可绕开的高压区：展示狙击手/重机枪与高价值物资"
+
+# === 区域定义（中心是“安全/教学”，东侧是“Hard Zone”）===
+@zone x=720 y=720 w=560 h=560 id=center_safe type=loot name="Center Safe Hub" desc="中心教学枢纽：AI少，掩体适中，适合新手摸机制"
+@zone x=1300 y=820 w=650 h=360 id=hard_zone type=danger name="Hard Zone" desc="东侧高压区：狙击/重机枪/更高价值物资（可绕开）"
+
+@zone x=0 y=0 w=1000 h=1000 id=northwest_zone type=loot name="Northwest Zone" desc="西北资源区"
+@zone x=1000 y=0 w=1000 h=1000 id=northeast_zone type=loot name="Northeast Zone" desc="东北资源区"
+@zone x=0 y=1000 w=1000 h=1000 id=southwest_zone type=loot name="西南 Zone" desc="西南资源区"
+@zone x=1000 y=1000 w=1000 h=1000 id=southeast_zone type=loot name="Southeast Zone" desc="东南资源区"
+
+# === 水域：四边中段小水池（不封路） + 中心浅水演示 ===
+@obstacle x=130 y=860 w=120 h=280 type=water
+# 修复：右侧水池右移到边缘，避免与Hard Zone/东部箱群重叠
+@obstacle x=1880 y=860 w=120 h=280 type=water
+@obstacle x=860 y=130 w=280 h=120 type=water
+@obstacle x=860 y=1750 w=280 h=120 type=water
+
+# 中心浅水演示（修复：上移，避开教学墙）
+@obstacle x=1060 y=740 w=90 h=90 type=water
+
+# === 墙：视线切割（中心少量 + Hard Zone 更多掩体，但不封闭）===
+# 中心：非常轻的切割，不靠近撤离区(930..1070)
+# 修复：避免墙与墙交叉重叠（竖墙缩短，留出间隙）
+@obstacle x=780 y=900 w=180 h=12 type=wall
+@obstacle x=1040 y=1120 w=180 h=12 type=wall
+@obstacle x=900 y=780 w=12 h=110 type=wall
+@obstacle x=1120 y=1040 w=12 h=70 type=wall
+
+# 教学墙廊（不封闭）
+# 修复：避免横竖墙相交重叠；并避开撤离区 y>=930
+@obstacle x=1040 y=860 w=110 h=12 type=wall
+@obstacle x=1182 y=860 w=98 h=12 type=wall
+@obstacle x=1040 y=900 w=110 h=12 type=wall
+@obstacle x=1182 y=900 w=98 h=12 type=wall
+@obstacle x=1160 y=860 w=12 h=120 type=wall
+
+# Hard Zone：提供“打得过/绕得开”的掩体
+# 修复：重排避免与右侧水池/东部箱群/墙墙交叉重叠
+@obstacle x=1460 y=900 w=12 h=220 type=wall
+@obstacle x=1540 y=860 w=200 h=12 type=wall
+@obstacle x=1540 y=1070 w=200 h=12 type=wall
+@obstacle x=1820 y=860 w=12 h=200 type=wall
+
+# === 草丛：出生点少量安全感 + 中心演示 + Hard Zone 更明显 ===
+# 出生点附近（修复：避免草丛互相重叠，也避免压到角落资源箱群）
+@obstacle x=120 y=420 w=160 h=100 type=bush
+@obstacle x=420 y=120 w=100 h=160 type=bush
+
+@obstacle x=1700 y=420 w=160 h=100 type=bush
+@obstacle x=1680 y=120 w=100 h=160 type=bush
+
+@obstacle x=120 y=1460 w=160 h=100 type=bush
+@obstacle x=420 y=1680 w=100 h=160 type=bush
+
+@obstacle x=1700 y=1460 w=160 h=100 type=bush
+@obstacle x=1680 y=1680 w=100 h=160 type=bush
+
+# 中心演示草丛（少量）
+# 修复：移出撤离区，并避开中心墙/教学箱场
+@obstacle x=760 y=1080 w=160 h=120 type=bush
+@obstacle x=1080 y=1200 w=160 h=120 type=bush
+
+# Hard Zone 草丛（更明显，但不变成迷宫）
+# 修复：避开Hard Zone墙与东部资源箱群
+@obstacle x=1310 y=840 w=140 h=140 type=bush
+@obstacle x=1500 y=900 w=160 h=140 type=bush
+@obstacle x=1580 y=1090 w=160 h=90 type=bush
+
+# === 箱子群：8个资源点（箱群成堆，但密度比“硬核图”低）===
+# NW（3x3）
+@obstacle x=290 y=290 w=30 h=30 type=crate
+@obstacle x=324 y=290 w=30 h=30 type=crate
+@obstacle x=358 y=290 w=30 h=30 type=crate
+@obstacle x=290 y=324 w=30 h=30 type=crate
+@obstacle x=324 y=324 w=30 h=30 type=crate
+@obstacle x=358 y=324 w=30 h=30 type=crate
+@obstacle x=290 y=358 w=30 h=30 type=crate
+@obstacle x=324 y=358 w=30 h=30 type=crate
+@obstacle x=358 y=358 w=30 h=30 type=crate
+
+# NE（3x3）
+@obstacle x=1610 y=290 w=30 h=30 type=crate
+@obstacle x=1644 y=290 w=30 h=30 type=crate
+@obstacle x=1678 y=290 w=30 h=30 type=crate
+@obstacle x=1610 y=324 w=30 h=30 type=crate
+@obstacle x=1644 y=324 w=30 h=30 type=crate
+@obstacle x=1678 y=324 w=30 h=30 type=crate
+@obstacle x=1610 y=358 w=30 h=30 type=crate
+@obstacle x=1644 y=358 w=30 h=30 type=crate
+@obstacle x=1678 y=358 w=30 h=30 type=crate
+
+# SW（3x3）
+@obstacle x=290 y=1610 w=30 h=30 type=crate
+@obstacle x=324 y=1610 w=30 h=30 type=crate
+@obstacle x=358 y=1610 w=30 h=30 type=crate
+@obstacle x=290 y=1644 w=30 h=30 type=crate
+@obstacle x=324 y=1644 w=30 h=30 type=crate
+@obstacle x=358 y=1644 w=30 h=30 type=crate
+@obstacle x=290 y=1678 w=30 h=30 type=crate
+@obstacle x=324 y=1678 w=30 h=30 type=crate
+@obstacle x=358 y=1678 w=30 h=30 type=crate
+
+# SE（3x3）
+@obstacle x=1610 y=1610 w=30 h=30 type=crate
+@obstacle x=1644 y=1610 w=30 h=30 type=crate
+@obstacle x=1678 y=1610 w=30 h=30 type=crate
+@obstacle x=1610 y=1644 w=30 h=30 type=crate
+@obstacle x=1644 y=1644 w=30 h=30 type=crate
+@obstacle x=1678 y=1644 w=30 h=30 type=crate
+@obstacle x=1610 y=1678 w=30 h=30 type=crate
+@obstacle x=1644 y=1678 w=30 h=30 type=crate
+@obstacle x=1678 y=1678 w=30 h=30 type=crate
+
+# 北部资源点（4x2）
+@obstacle x=940 y=290 w=30 h=30 type=crate
+@obstacle x=974 y=290 w=30 h=30 type=crate
+@obstacle x=1008 y=290 w=30 h=30 type=crate
+@obstacle x=1042 y=290 w=30 h=30 type=crate
+@obstacle x=940 y=324 w=30 h=30 type=crate
+@obstacle x=974 y=324 w=30 h=30 type=crate
+@obstacle x=1008 y=324 w=30 h=30 type=crate
+@obstacle x=1042 y=324 w=30 h=30 type=crate
+
+# 南部资源点（4x2）
+@obstacle x=940 y=1670 w=30 h=30 type=crate
+@obstacle x=974 y=1670 w=30 h=30 type=crate
+@obstacle x=1008 y=1670 w=30 h=30 type=crate
+@obstacle x=1042 y=1670 w=30 h=30 type=crate
+@obstacle x=940 y=1704 w=30 h=30 type=crate
+@obstacle x=974 y=1704 w=30 h=30 type=crate
+@obstacle x=1008 y=1704 w=30 h=30 type=crate
+@obstacle x=1042 y=1704 w=30 h=30 type=crate
+
+# 西部资源点（3x3）
+@obstacle x=290 y=970 w=30 h=30 type=crate
+@obstacle x=324 y=970 w=30 h=30 type=crate
+@obstacle x=358 y=970 w=30 h=30 type=crate
+@obstacle x=290 y=1004 w=30 h=30 type=crate
+@obstacle x=324 y=1004 w=30 h=30 type=crate
+@obstacle x=358 y=1004 w=30 h=30 type=crate
+@obstacle x=290 y=1038 w=30 h=30 type=crate
+@obstacle x=324 y=1038 w=30 h=30 type=crate
+@obstacle x=358 y=1038 w=30 h=30 type=crate
+
+# 东部资源点（3x3）
+@obstacle x=1680 y=970 w=30 h=30 type=crate
+@obstacle x=1714 y=970 w=30 h=30 type=crate
+@obstacle x=1748 y=970 w=30 h=30 type=crate
+@obstacle x=1680 y=1004 w=30 h=30 type=crate
+@obstacle x=1714 y=1004 w=30 h=30 type=crate
+@obstacle x=1748 y=1004 w=30 h=30 type=crate
+@obstacle x=1680 y=1038 w=30 h=30 type=crate
+@obstacle x=1714 y=1038 w=30 h=30 type=crate
+@obstacle x=1748 y=1038 w=30 h=30 type=crate
+
+# === 教学箱场（中心附近展示“箱群掩体”）===
+@obstacle x=740 y=960 w=30 h=30 type=crate
+@obstacle x=774 y=960 w=30 h=30 type=crate
+@obstacle x=808 y=960 w=30 h=30 type=crate
+@obstacle x=740 y=994 w=30 h=30 type=crate
+@obstacle x=774 y=994 w=30 h=30 type=crate
+@obstacle x=808 y=994 w=30 h=30 type=crate
+@obstacle x=740 y=1028 w=30 h=30 type=crate
+@obstacle x=774 y=1028 w=30 h=30 type=crate
+@obstacle x=808 y=1028 w=30 h=30 type=crate
+
+# === 主路节点箱群（4群：更稀疏、更开放）===
+# 北->中
+@obstacle x=980 y=680 w=30 h=30 type=crate
+@obstacle x=1014 y=680 w=30 h=30 type=crate
+@obstacle x=997 y=714 w=30 h=30 type=crate
+# 南->中
+@obstacle x=980 y=1290 w=30 h=30 type=crate
+@obstacle x=1014 y=1290 w=30 h=30 type=crate
+@obstacle x=997 y=1324 w=30 h=30 type=crate
+# 西->中（修复：整体左移，避免与教学箱场“擦边重叠”）
+@obstacle x=620 y=980 w=30 h=30 type=crate
+@obstacle x=654 y=980 w=30 h=30 type=crate
+@obstacle x=654 y=1014 w=30 h=30 type=crate
+# 东->中
+@obstacle x=1290 y=980 w=30 h=30 type=crate
+@obstacle x=1324 y=980 w=30 h=30 type=crate
+@obstacle x=1324 y=1014 w=30 h=30 type=crate
+
+# === AI生成点（展示所有角色，但新手压力更低）===
+# 1) 中心：基础AI（橙色，标准配置）——数量少，给新手练枪/练走位
+@aispawn x=1180 y=900 type=guard role=basic count=1 radius=180
+@aispawn x=820 y=1100 type=guard role=basic count=1 radius=180
+
+# 2) 轻巡逻：侦察兵（青色，1.5倍速度）——只放1个，路线短
+@aispawn x=1000 y=620 type=patrol role=scout count=1 patrol=north_resource,center_extract
+
+# 3) Hard Zone：狙击手（紫色）+ 重机枪手（红色）——展示高压玩法，但可绕开
+@aispawn x=1520 y=900 type=guard role=sniper count=1 radius=220
+@aispawn x=1600 y=1040 type=guard role=heavy_gunner count=1 radius=220
+
+# === 重刷配置（新手向：全图更多普通，Hard Zone 少量高价值展示）===
+@itemrespawn id=global_common mode=both intervalTicks=900 count=3 maxItems=120 rarityWeights=COMMON:90,RARE:9,EPIC:1
+
+@itemrespawn id=nw_common mode=both intervalTicks=900 count=1 maxItems=12 zoneId=northwest_zone rarityWeights=COMMON:88,RARE:11,EPIC:1
+@itemrespawn id=ne_common mode=both intervalTicks=900 count=1 maxItems=12 zoneId=northeast_zone rarityWeights=COMMON:88,RARE:11,EPIC:1
+@itemrespawn id=sw_common mode=both intervalTicks=900 count=1 maxItems=12 zoneId=southwest_zone rarityWeights=COMMON:88,RARE:11,EPIC:1
+@itemrespawn id=se_common mode=both intervalTicks=900 count=1 maxItems=12 zoneId=southeast_zone rarityWeights=COMMON:88,RARE:11,EPIC:1
+
+# 中心枢纽：中等价值（依旧偏普通，适合新手）
+@itemrespawn id=center_common mode=both intervalTicks=900 count=1 maxItems=14 zoneId=center_safe rarityWeights=COMMON:80,RARE:18,EPIC:2
+
+# Hard Zone：少量高价值“展示用”（用你已出现过的物品ID，避免解析失败）
+@itemrespawn id=hard_high mode=both intervalTicks=900 count=1 maxItems=6 zoneId=hard_zone items=w_minigun,w_grenade_launcher,w_sniper,armor_heavy,bag_military rarityWeights=COMMON:10,RARE:35,EPIC:55
+
+# AI重刷：更慢、更少（新手局压力低）
+@airespawn intervalTicks=1800 maxAIs=6
+
+@note "Beginner Showcase v1（2K大图）要点："
+@note "- 中心是教学枢纽：基础AI少，墙/箱/草/浅水都有演示，撤离点也在中心"
+@note "- 东侧 Hard Zone：展示狙击手+重机枪手+高价值物资（可绕开，不强迫进）"
+@note "- 全图资源点都有箱群；四边有小水池但不封路；墙只做视线切割不做迷宫"
+@comment "新手路线建议：先从出生点→最近资源点箱群→中心教学区练枪→想挑战再去Hard Zone，看完就回中心撤离。"
