@@ -6,6 +6,7 @@ import { DebugLog } from './debugLog.js'; // 修复: 添加 debug log 系统
 import { BulletTrackManager } from './bulletTracks.js'; // 子弹轨迹管理器（dead-reckoning + 本地预测）
 import { UIOverlay } from './uiOverlay.js'; // 新增: 屏幕 HUD 层
 import { ThrowingAim } from './throwingAim.js'; // 新增: 投掷瞄准系统
+import { AudioManager } from './audioManager.js'; // 新增: BGM 系统
 import type {
   S2C_SNAPSHOT,
   PLAYER_STATE,
@@ -318,6 +319,51 @@ inputManager.setStaminaShakeCallback(() => shakeStaminaHud());
 // 初始化HUD（使用 debugPanel 作为容器，右侧调试面板）
 const hud = new HUD('debugPanel');
 hud.addEvent('客户端已启动');
+
+// 初始化 BGM 系统
+const audioManager = AudioManager.getInstance();
+audioManager.init();
+
+// BGM UI 元素
+const bgmToggleBtn = document.getElementById('bgmToggleBtn') as HTMLButtonElement;
+const bgmVolumeSlider = document.getElementById('bgmVolumeSlider') as HTMLInputElement;
+const bgmTrackSelect = document.getElementById('bgmTrackSelect') as HTMLSelectElement;
+
+if (bgmToggleBtn && bgmVolumeSlider && bgmTrackSelect) {
+  // 初始化 UI 状态
+  bgmVolumeSlider.value = audioManager.getVolume().toString();
+  bgmTrackSelect.value = audioManager.getCurrentTrack().toString();
+  if (audioManager.getMuted()) {
+    bgmToggleBtn.classList.add('muted');
+    bgmToggleBtn.textContent = '🔇';
+  }
+
+  // 监听静音切换
+  bgmToggleBtn.addEventListener('click', () => {
+    const isMuted = audioManager.toggleMute();
+    bgmToggleBtn.classList.toggle('muted', isMuted);
+    bgmToggleBtn.textContent = isMuted ? '🔇' : '🎵';
+  });
+
+  // 监听音量调节
+  bgmVolumeSlider.addEventListener('input', () => {
+    audioManager.setVolume(parseFloat(bgmVolumeSlider.value));
+  });
+
+  // 监听音乐切换
+  bgmTrackSelect.addEventListener('change', () => {
+    audioManager.setTrack(parseInt(bgmTrackSelect.value));
+  });
+}
+
+// 监听首次交互以触发 BGM 播放
+const startBGM = () => {
+  audioManager.play();
+  window.removeEventListener('click', startBGM);
+  window.removeEventListener('keydown', startBGM);
+};
+window.addEventListener('click', startBGM);
+window.addEventListener('keydown', startBGM);
 
 // Debug 面板折叠功能（F1 切换）
 const hudContainer = document.getElementById('hudContainer');
