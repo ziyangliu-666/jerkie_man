@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8">
@@ -11,9 +11,28 @@
       box-sizing: border-box;
     }
 
+    /* ===== 设计系统变量 ===== */
+    :root {
+      /* 深色渐变层 */
+      --bg0: #0d0d0f;
+      --bg1: #12131a;
+      --bg2: #181a24;
+      /* 冷青蓝强调色（低饱和） */
+      --accent: rgba(120, 180, 200, 0.08);
+      --accent-line: rgba(120, 180, 200, 0.04);
+      /* 线条透明度 */
+      --lineA: 0.035;
+      /* 网格间距 */
+      --gridSize: 80px;
+      /* 暗角强度 */
+      --vignetteA: 0.7;
+      /* 颗粒强度 */
+      --noiseA: 0.02;
+    }
+
     body {
       font-family: 'Courier New', monospace;
-      background: #1a1a1a;
+      background: var(--bg0);
       color: #fff;
       overflow: hidden;
     }
@@ -27,11 +46,97 @@
       flex-direction: row;
     }
 
+    /* ===== 全局背景层（极简线条风格） ===== */
+    #app::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      z-index: 0;
+      pointer-events: none;
+      background:
+        /* 暗角 vignette */
+        radial-gradient(ellipse 120% 100% at 50% 50%, transparent 30%, rgba(0, 0, 0, var(--vignetteA)) 100%),
+        /* 淡弧形光斑（左上） */
+        radial-gradient(ellipse 60% 40% at 15% 20%, var(--accent), transparent 70%),
+        /* 淡弧形光斑（右下） */
+        radial-gradient(ellipse 50% 35% at 85% 75%, rgba(100, 140, 180, 0.04), transparent 70%),
+        /* 斜向细线 45deg */
+        repeating-linear-gradient(
+          45deg,
+          transparent,
+          transparent 200px,
+          rgba(255, 255, 255, var(--lineA)) 200px,
+          rgba(255, 255, 255, var(--lineA)) 201px
+        ),
+        /* 斜向细线 135deg */
+        repeating-linear-gradient(
+          135deg,
+          transparent,
+          transparent 240px,
+          rgba(255, 255, 255, calc(var(--lineA) * 0.7)) 240px,
+          rgba(255, 255, 255, calc(var(--lineA) * 0.7)) 241px
+        ),
+        /* 稀疏横向网格 */
+        repeating-linear-gradient(
+          0deg,
+          transparent,
+          transparent calc(var(--gridSize) - 1px),
+          rgba(255, 255, 255, calc(var(--lineA) * 0.5)) calc(var(--gridSize) - 1px),
+          rgba(255, 255, 255, calc(var(--lineA) * 0.5)) var(--gridSize)
+        ),
+        /* 稀疏纵向网格 */
+        repeating-linear-gradient(
+          90deg,
+          transparent,
+          transparent calc(var(--gridSize) - 1px),
+          rgba(255, 255, 255, calc(var(--lineA) * 0.5)) calc(var(--gridSize) - 1px),
+          rgba(255, 255, 255, calc(var(--lineA) * 0.5)) var(--gridSize)
+        ),
+        /* 底层柔和渐变 */
+        linear-gradient(160deg, var(--bg1) 0%, var(--bg0) 40%, var(--bg2) 100%);
+      background-size: 100% 100%, 100% 100%, 100% 100%, 400px 400px, 480px 480px, var(--gridSize) var(--gridSize), var(--gridSize) var(--gridSize), 100% 100%;
+      animation: bgDrift 90s linear infinite;
+    }
+
+    /* 第二层：节点光晕点缀 */
+    #app::after {
+      content: '';
+      position: absolute;
+      inset: 0;
+      z-index: 0;
+      pointer-events: none;
+      background:
+        /* 节点光晕 1 */
+        radial-gradient(circle 3px at 20% 30%, rgba(150, 200, 220, 0.12), transparent 8px),
+        /* 节点光晕 2 */
+        radial-gradient(circle 2px at 75% 25%, rgba(150, 200, 220, 0.08), transparent 6px),
+        /* 节点光晕 3 */
+        radial-gradient(circle 2px at 60% 70%, rgba(150, 200, 220, 0.10), transparent 6px),
+        /* 节点光晕 4 */
+        radial-gradient(circle 3px at 30% 80%, rgba(150, 200, 220, 0.08), transparent 8px),
+        /* 节点光晕 5 */
+        radial-gradient(circle 2px at 85% 60%, rgba(150, 200, 220, 0.06), transparent 6px);
+    }
+
+    /* 背景漂移动画（非常慢） */
+    @keyframes bgDrift {
+      0% { background-position: 0 0, 0 0, 0 0, 0 0, 0 0, 0 0, 0 0, 0 0; }
+      100% { background-position: 0 0, 0 0, 0 0, 400px 400px, -480px 480px, 80px 80px, 80px 80px, 0 0; }
+    }
+
+    /* 尊重用户减少动画偏好 */
+    @media (prefers-reduced-motion: reduce) {
+      #app::before {
+        animation: none;
+      }
+    }
+
     /* Canvas 容器（左侧） */
     #canvasContainer {
       position: relative;
       flex: 1;
       overflow: hidden;
+      z-index: 1;
     }
 
     /* Layer 0: World Canvas（世界层：地图、障碍物、玩家、子弹等） */
@@ -39,7 +144,17 @@
       position: absolute;
       inset: 0;
       display: block;
-      background: #2a2a2a;
+      background: transparent;
+    }
+
+    /* World Canvas 淡暗化层（保证游戏画面清晰） */
+    #canvasContainer::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      z-index: -1;
+      pointer-events: none;
+      background: radial-gradient(ellipse 100% 100% at 50% 50%, rgba(15, 15, 20, 0.3) 0%, rgba(10, 10, 15, 0.5) 100%);
     }
 
     /* Layer 1: UI Canvas（屏幕 HUD 层：准星、受伤红边、方向提示等） */
@@ -58,16 +173,23 @@
 
     /* ===== DOM HUD 样式 ===== */
 
-    /* HUD 容器（右侧，与canvas并列） */
+    /* HUD 容器（右侧，与canvas并列）- 玻璃面板风格 */
     #hudContainer {
       position: relative;
       width: 300px;
-      background: rgba(0, 0, 0, 0.85);
-      border-left: 2px solid #444;
+      background: rgba(12, 14, 18, 0.55);
+      -webkit-backdrop-filter: blur(12px) saturate(120%);
+      backdrop-filter: blur(12px) saturate(120%);
+      border-left: 1px solid rgba(120, 180, 200, 0.15);
+      box-shadow: 
+        inset 1px 0 0 rgba(255, 255, 255, 0.03),
+        inset 0 0 30px rgba(0, 0, 0, 0.2),
+        -4px 0 20px rgba(0, 0, 0, 0.3);
       display: flex;
       flex-direction: column;
       overflow: hidden;
       transition: width 0.2s ease;
+      z-index: 2;
     }
 
     /* 折叠状态（默认折叠，按 F1 切换） */
@@ -184,8 +306,10 @@
       right: 20px;
       bottom: 20px;
       width: 240px;
-      background: rgba(0, 0, 0, 0.65);
-      border: 1px solid #444;
+      background: rgba(12, 14, 18, 0.7);
+      -webkit-backdrop-filter: blur(10px);
+      backdrop-filter: blur(10px);
+      border: 1px solid rgba(120, 180, 200, 0.12);
       border-radius: 6px;
       padding: 10px;
       pointer-events: auto;
@@ -193,6 +317,7 @@
       opacity: 0;
       transform: translateX(50px);
       transition: opacity 0.5s ease, transform 0.5s ease;
+      box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
     }
 
     #raidEquipment.visible {
@@ -291,8 +416,8 @@
     }
 
     #raidEquipment .raid-slot {
-      border: 1px solid #333;
-      background: rgba(0, 0, 0, 0.35);
+      border: 1px solid rgba(120, 180, 200, 0.1);
+      background: rgba(15, 18, 25, 0.5);
       border-radius: 4px;
       padding: 8px;
       margin-bottom: 8px;
@@ -390,9 +515,11 @@
       width: 220px;
       padding: 12px;
       border-radius: 10px;
-      border: 1px solid #323232;
-      background: rgba(12, 12, 12, 0.85);
-      box-shadow: 0 6px 16px rgba(0, 0, 0, 0.45);
+      border: 1px solid rgba(120, 180, 200, 0.12);
+      background: rgba(12, 14, 18, 0.75);
+      -webkit-backdrop-filter: blur(10px);
+      backdrop-filter: blur(10px);
+      box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
       pointer-events: none;
       display: none;
       overflow: hidden;
@@ -484,18 +611,20 @@
       gap: 8px;
       padding: 12px;
       border-radius: 10px;
-      border: 1px solid #323232;
-      background: rgba(12, 12, 12, 0.85);
-      box-shadow: 0 6px 16px rgba(0, 0, 0, 0.45);
+      border: 1px solid rgba(120, 180, 200, 0.12);
+      background: rgba(12, 14, 18, 0.75);
+      -webkit-backdrop-filter: blur(10px);
+      backdrop-filter: blur(10px);
+      box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
       pointer-events: none;
     }
 
     #hotbarHud .hotbar-slot {
       width: 60px;
       height: 60px;
-      border: 2px solid #444;
+      border: 1px solid rgba(120, 180, 200, 0.15);
       border-radius: 8px;
-      background: rgba(0, 0, 0, 0.3);
+      background: rgba(15, 18, 25, 0.6);
       display: flex;
       flex-direction: column;
       align-items: center;
@@ -505,7 +634,7 @@
     }
 
     #hotbarHud .hotbar-slot.has-item {
-      border-color: #666;
+      border-color: rgba(120, 180, 200, 0.3);
     }
 
     #hotbarHud .hotbar-slot.medkit {
@@ -551,9 +680,11 @@
       width: 220px;
       padding: 12px;
       border-radius: 10px;
-      border: 1px solid #323232;
-      background: rgba(12, 12, 12, 0.85);
-      box-shadow: 0 6px 16px rgba(0, 0, 0, 0.45);
+      border: 1px solid rgba(120, 180, 200, 0.12);
+      background: rgba(12, 14, 18, 0.75);
+      -webkit-backdrop-filter: blur(10px);
+      backdrop-filter: blur(10px);
+      box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
       pointer-events: none;
       display: none;
     }
@@ -601,9 +732,11 @@
       width: 220px;
       padding: 12px;
       border-radius: 10px;
-      border: 1px solid #323232;
-      background: rgba(12, 12, 12, 0.85);
-      box-shadow: 0 6px 16px rgba(0, 0, 0, 0.45);
+      border: 1px solid rgba(120, 180, 200, 0.12);
+      background: rgba(12, 14, 18, 0.75);
+      -webkit-backdrop-filter: blur(10px);
+      backdrop-filter: blur(10px);
+      box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
       pointer-events: none;
       display: none;
     }
@@ -695,9 +828,11 @@
       width: 220px;
       padding: 10px 12px;
       border-radius: 10px;
-      border: 1px solid #323232;
-      background: rgba(12, 12, 12, 0.85);
-      box-shadow: 0 6px 16px rgba(0, 0, 0, 0.45);
+      border: 1px solid rgba(120, 180, 200, 0.12);
+      background: rgba(12, 14, 18, 0.75);
+      -webkit-backdrop-filter: blur(10px);
+      backdrop-filter: blur(10px);
+      box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
       pointer-events: none;
       display: none;
     }
@@ -803,12 +938,15 @@
     }
 
     #nameModal .modal-content {
-      background: #2a2a2a;
-      border: 2px solid #444;
+      background: linear-gradient(135deg, rgba(30, 35, 45, 0.95) 0%, rgba(20, 24, 32, 0.98) 100%);
+      -webkit-backdrop-filter: blur(12px);
+      backdrop-filter: blur(12px);
+      border: 1px solid rgba(120, 180, 200, 0.15);
       padding: 30px;
       border-radius: 8px;
       min-width: 300px;
       text-align: center;
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
     }
 
     #nameModal h2 {
@@ -836,12 +974,15 @@
     }
 
     #renameModal .modal-content {
-      background: #2a2a2a;
-      border: 2px solid #444;
+      background: linear-gradient(135deg, rgba(30, 35, 45, 0.95) 0%, rgba(20, 24, 32, 0.98) 100%);
+      -webkit-backdrop-filter: blur(12px);
+      backdrop-filter: blur(12px);
+      border: 1px solid rgba(120, 180, 200, 0.15);
       padding: 30px;
       border-radius: 8px;
       min-width: 300px;
       text-align: center;
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
     }
 
     #renameModal h2 {
@@ -859,8 +1000,8 @@
     #renameModal input {
       width: 100%;
       padding: 10px;
-      background: #1a1a1a;
-      border: 1px solid #444;
+      background: rgba(15, 18, 25, 0.9);
+      border: 1px solid rgba(120, 180, 200, 0.2);
       color: #fff;
       font-size: 16px;
       font-family: 'Courier New', monospace;
@@ -871,8 +1012,8 @@
 
     #renameModal input:focus {
       outline: none;
-      border-color: #0ff;
-      box-shadow: 0 0 8px rgba(0, 255, 255, 0.3);
+      border-color: rgba(0, 255, 255, 0.5);
+      box-shadow: 0 0 8px rgba(0, 255, 255, 0.2);
     }
 
     #renameModal .modal-actions {
@@ -922,18 +1063,20 @@
     #nameModal input {
       width: 100%;
       padding: 10px;
-      background: #1a1a1a;
-      border: 1px solid #444;
+      background: rgba(15, 18, 25, 0.9);
+      border: 1px solid rgba(120, 180, 200, 0.2);
       color: #fff;
       font-size: 16px;
       font-family: 'Courier New', monospace;
       margin-bottom: 15px;
       box-sizing: border-box;
+      border-radius: 4px;
     }
 
     #nameModal input:focus {
       outline: none;
-      border-color: #0ff;
+      border-color: rgba(0, 255, 255, 0.5);
+      box-shadow: 0 0 8px rgba(0, 255, 255, 0.2);
     }
 
     #nameModal button {
@@ -1157,26 +1300,55 @@
         inset 0 0 10px rgba(255, 255, 255, 0.2);
     }
 
-    /* HIDEOUT UI 样式 */
+    /* HIDEOUT UI 样式 - 统一背景语言 */
     #hideoutUI {
       position: fixed;
       inset: 0;
-      background: #1a1a1a;
       z-index: 900;
       pointer-events: auto;
       display: flex;
       flex-direction: column;
       font-family: 'Courier New', monospace;
+      /* 透明背景，让全局背景透出 */
+      background: transparent;
+    }
+
+    /* Hideout 专属背景层 */
+    #hideoutUI::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      z-index: -1;
+      pointer-events: none;
+      background:
+        /* 暗角 */
+        radial-gradient(ellipse 110% 90% at 50% 50%, transparent 40%, rgba(0, 0, 0, 0.6) 100%),
+        /* 柔和光斑 */
+        radial-gradient(ellipse 70% 50% at 25% 30%, rgba(100, 150, 180, 0.05), transparent 60%),
+        radial-gradient(ellipse 60% 45% at 80% 70%, rgba(80, 130, 160, 0.04), transparent 60%),
+        /* 稀疏斜线（比全局更淡） */
+        repeating-linear-gradient(
+          45deg,
+          transparent,
+          transparent 300px,
+          rgba(255, 255, 255, 0.02) 300px,
+          rgba(255, 255, 255, 0.02) 301px
+        ),
+        /* 底层渐变 */
+        linear-gradient(170deg, rgba(18, 20, 28, 0.95) 0%, rgba(13, 13, 17, 0.98) 50%, rgba(20, 22, 30, 0.95) 100%);
     }
 
     /* 顶部固定栏 */
     #hideoutTopBar {
-      background: #2a2a2a;
-      border-bottom: 2px solid #444;
+      background: rgba(20, 22, 28, 0.8);
+      -webkit-backdrop-filter: blur(8px);
+      backdrop-filter: blur(8px);
+      border-bottom: 1px solid rgba(120, 180, 200, 0.1);
       padding: 10px 20px;
       display: flex;
       justify-content: space-between;
       align-items: center;
+      box-shadow: 0 2px 12px rgba(0, 0, 0, 0.3);
     }
 
     .topBar-left {
@@ -1263,8 +1435,10 @@
     /* 左侧 Tab */
     #hideoutTabs {
       width: 120px;
-      background: #222;
-      border-right: 2px solid #444;
+      background: rgba(18, 20, 26, 0.7);
+      -webkit-backdrop-filter: blur(6px);
+      backdrop-filter: blur(6px);
+      border-right: 1px solid rgba(120, 180, 200, 0.08);
       display: flex;
       flex-direction: column;
       padding: 10px 0;
@@ -1288,9 +1462,10 @@
     }
 
     .tab-btn.active {
-      background: #2a2a2a;
+      background: rgba(30, 35, 45, 0.8);
       color: #0ff;
       border-left: 3px solid #0ff;
+      box-shadow: inset 0 0 20px rgba(0, 255, 255, 0.05);
     }
 
     /* 右侧内容区 */
@@ -1298,6 +1473,7 @@
       flex: 1;
       padding: 20px;
       overflow-y: auto;
+      background: rgba(15, 17, 22, 0.4);
     }
 
     .hideout-panel {
@@ -1328,8 +1504,8 @@
     }
 
     .item-row {
-      background: linear-gradient(135deg, #2a2a2a 0%, #1f1f1f 100%);
-      border: 1px solid #444;
+      background: linear-gradient(135deg, rgba(35, 38, 48, 0.8) 0%, rgba(25, 28, 35, 0.85) 100%);
+      border: 1px solid rgba(120, 180, 200, 0.1);
       border-radius: 8px;
       padding: 16px;
       display: flex;
@@ -1339,6 +1515,7 @@
       position: relative;
       overflow: hidden;
       margin-bottom: 8px;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
     }
 
     .item-row::before {
@@ -1357,8 +1534,8 @@
     }
 
     .item-row:hover {
-      border-color: #0ff;
-      box-shadow: 0 4px 16px rgba(0, 255, 255, 0.2);
+      border-color: rgba(0, 255, 255, 0.4);
+      box-shadow: 0 4px 16px rgba(0, 255, 255, 0.15), 0 0 1px rgba(0, 255, 255, 0.3);
       transform: translateX(4px);
     }
 
@@ -1467,13 +1644,13 @@
       gap: 8px;
       margin-bottom: 20px;
       padding-bottom: 12px;
-      border-bottom: 2px solid #444;
+      border-bottom: 1px solid rgba(120, 180, 200, 0.1);
     }
 
     .shop-tab-btn {
       padding: 8px 16px;
-      background: #2a2a2a;
-      border: 1px solid #444;
+      background: rgba(25, 28, 35, 0.8);
+      border: 1px solid rgba(120, 180, 200, 0.1);
       color: #aaa;
       cursor: pointer;
       font-family: 'Courier New', monospace;
@@ -1483,15 +1660,15 @@
     }
 
     .shop-tab-btn:hover {
-      background: #333;
+      background: rgba(35, 40, 50, 0.9);
       color: #fff;
-      border-color: #666;
+      border-color: rgba(120, 180, 200, 0.2);
     }
 
     .shop-tab-btn.active {
-      background: #2a2a2a;
+      background: rgba(30, 35, 45, 0.9);
       color: #0ff;
-      border-color: #0ff;
+      border-color: rgba(0, 255, 255, 0.4);
       border-bottom: 2px solid #0ff;
       margin-bottom: -2px;
     }
@@ -1521,14 +1698,14 @@
       justify-content: center;
       flex-wrap: wrap;
       padding-top: 12px;
-      border-top: 1px solid #333;
+      border-top: 1px solid rgba(120, 180, 200, 0.08);
       width: 100%;
     }
 
     .item-btn {
       padding: 8px 16px;
-      background: linear-gradient(135deg, #444 0%, #333 100%);
-      border: 1px solid #666;
+      background: linear-gradient(135deg, rgba(50, 55, 65, 0.9) 0%, rgba(40, 45, 55, 0.95) 100%);
+      border: 1px solid rgba(120, 180, 200, 0.15);
       border-radius: 6px;
       color: #fff;
       cursor: pointer;
@@ -1539,7 +1716,7 @@
       position: relative;
       overflow: hidden;
       min-width: 80px;
-      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+      box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
     }
 
     .item-btn::before {
@@ -1561,10 +1738,10 @@
     }
 
     .item-btn:hover:not(.loading):not(.success):not(.error) {
-      background: linear-gradient(135deg, #555 0%, #444 100%);
-      border-color: #0ff;
+      background: linear-gradient(135deg, rgba(60, 65, 75, 0.95) 0%, rgba(50, 55, 65, 1) 100%);
+      border-color: rgba(0, 255, 255, 0.4);
       transform: translateY(-2px) scale(1.05);
-      box-shadow: 0 4px 16px rgba(0, 255, 255, 0.4);
+      box-shadow: 0 4px 12px rgba(0, 255, 255, 0.2);
     }
 
     .item-btn:active:not(.loading):not(.success):not(.error) {
@@ -1712,7 +1889,7 @@
     .equipment-prep-row > .layout-col-prep {
       width: 280px;
       flex-shrink: 0;
-      border-right: 1px solid #333;
+      border-right: 1px solid rgba(120, 180, 200, 0.08);
       padding-right: 16px;
       display: flex;
       flex-direction: column;
@@ -1735,15 +1912,15 @@
     }
 
     .equipment-slot {
-      background: linear-gradient(135deg, #2a2a2a 0%, #1f1f1f 100%);
-      border: 2px solid #444;
+      background: linear-gradient(135deg, rgba(35, 38, 48, 0.8) 0%, rgba(25, 28, 35, 0.85) 100%);
+      border: 1px solid rgba(120, 180, 200, 0.12);
       border-radius: 6px;
       padding: 8px 10px;
       min-height: 70px;
       position: relative;
       overflow: hidden;
       transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
     }
 
     .equipment-slot::before {
@@ -1762,8 +1939,8 @@
     }
 
     .equipment-slot:hover {
-      border-color: #0ff;
-      box-shadow: 0 8px 24px rgba(0, 255, 255, 0.3);
+      border-color: rgba(0, 255, 255, 0.5);
+      box-shadow: 0 4px 16px rgba(0, 255, 255, 0.15);
       transform: translateY(-2px);
     }
 
@@ -1808,19 +1985,19 @@
     }
 
     .slot-empty {
-      color: #666;
+      color: #555;
       font-size: 12px;
       padding: 6px 8px;
       text-align: center;
       font-style: italic;
-      border: 1px dashed #444;
+      border: 1px dashed rgba(120, 180, 200, 0.15);
       border-radius: 4px;
-      background: rgba(0, 0, 0, 0.2);
+      background: rgba(15, 18, 25, 0.4);
     }
 
     .slot-item {
-      background: linear-gradient(135deg, #1a1a1a 0%, #151515 100%);
-      border: 1px solid #555;
+      background: linear-gradient(135deg, rgba(20, 22, 28, 0.9) 0%, rgba(15, 17, 22, 0.95) 100%);
+      border: 1px solid rgba(120, 180, 200, 0.15);
       border-radius: 4px;
       padding: 8px 10px;
       display: flex;
@@ -1848,8 +2025,8 @@
     }
 
     .slot-item:hover {
-      border-color: #0ff;
-      box-shadow: 0 4px 16px rgba(0, 255, 255, 0.2);
+      border-color: rgba(0, 255, 255, 0.4);
+      box-shadow: 0 2px 12px rgba(0, 255, 255, 0.12);
       transform: translateY(-2px);
     }
 
@@ -1876,7 +2053,7 @@
       gap: 6px;
       justify-content: center;
       padding-top: 4px;
-      border-top: 1px solid #333;
+      border-top: 1px solid rgba(120, 180, 200, 0.08);
     }
 
     /* 可点击的装备槽位 */
@@ -1884,9 +2061,10 @@
     /* ===== NEW WAREHOUSE UI STYLE ===== */
     .stash-card {
       position: relative;
-      background: rgba(40, 44, 52, 0.7);
+      background: rgba(30, 35, 45, 0.75);
+      -webkit-backdrop-filter: blur(8px);
       backdrop-filter: blur(8px);
-      border: 1px solid rgba(255, 255, 255, 0.1);
+      border: 1px solid rgba(120, 180, 200, 0.1);
       border-radius: 8px;
       padding: 12px;
       display: flex;
@@ -1894,7 +2072,7 @@
       gap: 10px;
       transition: all 0.25s ease;
       overflow: hidden;
-      box-shadow: 0 4px 6px rgba(0, 0, 0, 0.2);
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
     }
 
     .stash-card::before {
@@ -1909,8 +2087,8 @@
 
     .stash-card:hover {
       transform: translateY(-2px);
-      border-color: rgba(0, 255, 255, 0.4);
-      box-shadow: 0 8px 16px rgba(0, 0, 0, 0.3), 0 0 12px rgba(0, 255, 255, 0.1);
+      border-color: rgba(0, 255, 255, 0.35);
+      box-shadow: 0 6px 16px rgba(0, 0, 0, 0.25), 0 0 1px rgba(0, 255, 255, 0.2);
       z-index: 10;
     }
 
@@ -1986,13 +2164,13 @@
       gap: 8px;
       margin-top: auto;
       padding-top: 10px;
-      border-top: 1px solid rgba(255, 255, 255, 0.05);
+      border-top: 1px solid rgba(120, 180, 200, 0.06);
     }
 
     .stash-btn {
       flex: 1;
-      background: rgba(255, 255, 255, 0.05);
-      border: 1px solid rgba(255, 255, 255, 0.1);
+      background: rgba(255, 255, 255, 0.04);
+      border: 1px solid rgba(120, 180, 200, 0.1);
       color: #ccc;
       padding: 6px 10px;
       border-radius: 4px;
@@ -2007,21 +2185,21 @@
     }
 
     .stash-btn:hover:not(:disabled) {
-      background: rgba(255, 255, 255, 0.15);
+      background: rgba(255, 255, 255, 0.1);
       color: #fff;
-      border-color: rgba(255, 255, 255, 0.3);
+      border-color: rgba(120, 180, 200, 0.25);
     }
 
     .stash-btn.primary {
-      background: rgba(0, 255, 255, 0.1);
-      border-color: rgba(0, 255, 255, 0.3);
+      background: rgba(0, 255, 255, 0.08);
+      border-color: rgba(0, 255, 255, 0.25);
       color: #0ff;
     }
 
     .stash-btn.primary:hover:not(:disabled) {
-      background: rgba(0, 255, 255, 0.2);
-      border-color: #0ff;
-      box-shadow: 0 0 10px rgba(0, 255, 255, 0.2);
+      background: rgba(0, 255, 255, 0.15);
+      border-color: rgba(0, 255, 255, 0.4);
+      box-shadow: 0 0 8px rgba(0, 255, 255, 0.15);
     }
 
     .stash-btn:disabled {
@@ -2057,10 +2235,10 @@
     }
 
     .clickable-slot:hover {
-      border-color: #0ff;
-      background: linear-gradient(135deg, #333 0%, #2a2a2a 100%);
+      border-color: rgba(0, 255, 255, 0.4);
+      background: linear-gradient(135deg, rgba(40, 45, 55, 0.9) 0%, rgba(30, 35, 45, 0.95) 100%);
       transform: translateY(-4px);
-      box-shadow: 0 8px 24px rgba(0, 255, 255, 0.3);
+      box-shadow: 0 6px 18px rgba(0, 255, 255, 0.15);
     }
 
     .clickable-slot:active {
@@ -2098,8 +2276,8 @@
       cursor: wait;
       pointer-events: none;
       position: relative;
-      background: linear-gradient(135deg, #444 0%, #333 100%);
-      border-color: #0ff;
+      background: linear-gradient(135deg, rgba(50, 55, 65, 0.9) 0%, rgba(40, 45, 55, 0.95) 100%);
+      border-color: rgba(0, 255, 255, 0.3);
     }
 
     .item-btn.loading::after {
@@ -2171,19 +2349,19 @@
 
     /* 装备槽位点击反馈 */
     .equipment-slot.clicking {
-      border-color: #0ff;
-      background: linear-gradient(135deg, #333 0%, #2a2a2a 100%);
+      border-color: rgba(0, 255, 255, 0.5);
+      background: linear-gradient(135deg, rgba(40, 45, 55, 0.9) 0%, rgba(30, 35, 45, 0.95) 100%);
       animation: slotPulse 0.4s cubic-bezier(0.4, 0, 0.2, 1);
     }
 
     @keyframes slotPulse {
       0%, 100% { 
         transform: scale(1);
-        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
       }
       50% { 
         transform: scale(1.03);
-        box-shadow: 0 8px 24px rgba(0, 255, 255, 0.5);
+        box-shadow: 0 6px 18px rgba(0, 255, 255, 0.25);
       }
     }
 
@@ -2236,8 +2414,10 @@
     }
 
     #equipSelectModal .modal-content {
-      background: #2a2a2a;
-      border: 2px solid #444;
+      background: linear-gradient(135deg, rgba(30, 35, 45, 0.95) 0%, rgba(20, 24, 32, 0.98) 100%);
+      -webkit-backdrop-filter: blur(12px);
+      backdrop-filter: blur(12px);
+      border: 1px solid rgba(120, 180, 200, 0.15);
       border-radius: 8px;
       padding: 20px;
       min-width: 500px;
@@ -2245,6 +2425,7 @@
       max-height: 80vh;
       display: flex;
       flex-direction: column;
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
     }
 
     #equipSelectModal h3 {
@@ -2263,8 +2444,8 @@
     }
 
     .equip-select-item {
-      background: #1a1a1a;
-      border: 1px solid #444;
+      background: rgba(20, 24, 32, 0.8);
+      border: 1px solid rgba(120, 180, 200, 0.1);
       border-radius: 4px;
       padding: 12px;
       cursor: pointer;
@@ -2275,8 +2456,8 @@
     }
 
     .equip-select-item:hover {
-      border-color: #0ff;
-      background: #333;
+      border-color: rgba(0, 255, 255, 0.4);
+      background: rgba(35, 40, 50, 0.9);
     }
 
     .equip-select-item-info {
@@ -2308,8 +2489,8 @@
 
     #equipSelectModal .modal-actions button {
       padding: 8px 16px;
-      background: #444;
-      border: 1px solid #666;
+      background: rgba(50, 55, 65, 0.9);
+      border: 1px solid rgba(120, 180, 200, 0.15);
       color: #fff;
       cursor: pointer;
       font-family: 'Courier New', monospace;
@@ -2319,8 +2500,8 @@
     }
 
     #equipSelectModal .modal-actions button:hover {
-      background: #555;
-      border-color: #0ff;
+      background: rgba(60, 65, 75, 0.95);
+      border-color: rgba(0, 255, 255, 0.4);
     }
     /* BGM 控制样式 */
     #bgmControl {
@@ -2328,8 +2509,10 @@
       top: 10px;
       right: 320px; /* 避开 HUD 容器 */
       z-index: 2000;
-      background: rgba(0, 0, 0, 0.7);
-      border: 1px solid #444;
+      background: rgba(15, 18, 25, 0.75);
+      -webkit-backdrop-filter: blur(10px);
+      backdrop-filter: blur(10px);
+      border: 1px solid rgba(120, 180, 200, 0.15);
       border-radius: 20px;
       padding: 5px 15px;
       display: flex;
@@ -2337,13 +2520,13 @@
       gap: 10px;
       pointer-events: auto;
       transition: all 0.3s ease;
-      box-shadow: 0 0 10px rgba(0, 255, 255, 0.2);
+      box-shadow: 0 2px 12px rgba(0, 0, 0, 0.3);
     }
 
     #bgmControl:hover {
-      border-color: #0ff;
-      box-shadow: 0 0 15px rgba(0, 255, 255, 0.4);
-      background: rgba(20, 20, 20, 0.85);
+      border-color: rgba(0, 255, 255, 0.3);
+      box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+      background: rgba(20, 24, 32, 0.85);
     }
 
     #bgmToggleBtn {
@@ -2396,8 +2579,8 @@
     }
 
     #bgmTrackSelect {
-      background: rgba(0, 0, 0, 0.5);
-      border: 1px solid #444;
+      background: rgba(15, 18, 25, 0.8);
+      border: 1px solid rgba(120, 180, 200, 0.2);
       color: #0ff;
       font-size: 11px;
       padding: 2px 5px;
@@ -2408,11 +2591,11 @@
     }
 
     #bgmTrackSelect:hover {
-      border-color: #0ff;
+      border-color: rgba(0, 255, 255, 0.4);
     }
 
     #bgmTrackSelect option {
-      background: #1a1a1a;
+      background: #12141a;
       color: #fff;
     }
 

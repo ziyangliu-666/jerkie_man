@@ -6,8 +6,8 @@
 export const QUALITY_CONFIG = {
   // 世界画布（游戏场景、玩家、子弹等）
   world: {
-    maxDpr: 1.25,       // 限制 DPR 上限（推荐 1.25~1.75）
-    renderScale: 0.8,     // 额外分辨率缩放（推荐 0.6~1）
+    maxDpr: 1.75,       // 限制 DPR 上限（推荐 1.25~1.75）
+    renderScale: 1,     // 额外分辨率缩放（推荐 0.6~1）
   },
   // UI 覆盖层（受伤红边、命中标记、撤离进度等）
   ui: {
