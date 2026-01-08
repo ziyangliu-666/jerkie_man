@@ -707,7 +707,6 @@ export class Network {
         ...data,
       });
       this.ws.send(JSON.stringify(message));
-      console.log('[network] sent LOCAL_BULLET_HIT', data.bulletId);
       return true;
     } catch (error) {
       console.error('Failed to send local bullet hit report:', error);

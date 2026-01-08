@@ -50,9 +50,27 @@ export class Renderer {
   private disguisedPlayers: Set<string> = new Set();
   private fizzleEffects: Array<{ x: number; y: number; until: number; maxRadius: number }> = [];
 
+  // 性能优化: 障碍物精灵缓存
+  private obsSprite = new Map<string, HTMLCanvasElement>();
+  // 性能优化: 文字宽度缓存
+  private textWidthCache = new Map<string, number>();
+  // 性能优化: 复用 Set 对象，避免每帧 new
+  private activeIds = new Set<string>();
+  private currentDecoyIds = new Set<string>();
+  
+  // 性能优化: 画质控制（限制 DPR 和渲染分辨率）
+  private maxDpr: number = 1.5;     // 限制 dpr 上限（1.25~1.75 都行）
+  private renderScale: number = 0.85;  // 额外分辨率缩放（0.6~1）
+  
+  // 性能优化: 烟雾噪点缓存（避免每帧随机生成）
+  private smokeNoisePoints: Array<{ x: number; y: number; s: number; a: number }> = [];
+
   constructor(canvas: HTMLCanvasElement) {
     this.canvas = canvas;
-    const ctx = canvas.getContext('2d');
+    const ctx = canvas.getContext('2d', {
+      alpha: false,          // 画布不透明：合成更省
+      desynchronized: true,  // 降输入/渲染延迟：支持就赚
+    } as CanvasRenderingContext2DSettings);
     if (!ctx) {
       throw new Error('Failed to get 2d context');
     }
@@ -145,7 +163,14 @@ export class Renderer {
 
   // 绘制玩家（简单方块）
   // P0-3: 使用屏幕坐标绘制，考虑camera偏移
-  drawPlayer(player: PLAYER_STATE, isLocal: boolean = false, currentServerTick?: number): void {
+  drawPlayer(
+    player: PLAYER_STATE, 
+    isLocal: boolean = false, 
+    currentServerTick?: number,
+    nowMs: number = Date.now(),
+    flashTotalMs: number = 5000,
+    localInBushOverride?: boolean
+  ): void {
     // 🎭 伪装检测：如果该玩家伪装了，则渲染为AI（包括本地玩家自己）
     const isDisguised = player.buffs?.some(b => b.kind === 'disguise');
     const shouldRenderAsAi = isDisguised;
@@ -263,29 +288,43 @@ export class Renderer {
 
     // 1. 致盲状态 (isFlashed)
     if (player.isFlashed) {
-      const now = Date.now();
       const endTime = player.flashEndTime ?? 0;
-      const remainingMs = Math.max(0, endTime - now);
-      // 默认3000ms，或者需要从配置获取。这里简单处理，如果 remainingMs 很大则 progress=1
-      // 为了平滑显示，我们需要总时长。Snapshot里没有总时长，只给了结束时间。
-      // 近似处理：如果剩余时间大于3秒，认为刚开始。或者只显示剩余时间的比例（假设最大5秒）
-      // 实际上 drawFlashIndicator 的 progress 参数主要用于显示进度条长度。
-      // 我们可以简单地让进度条随时间缩短。假设最大时长 5000ms。
-      const totalMs = 5000; 
-      const progress = Math.min(1, Math.max(0, remainingMs / totalMs));
+      const remainingMs = Math.max(0, endTime - nowMs);
+      const progress = Math.min(1, Math.max(0, remainingMs / flashTotalMs));
       
       this.drawFlashIndicator(player.x, player.y, progress, indicatorIndex++);
     }
 
-    // 2. 隐蔽状态 (inBush) - 只有当玩家在草丛且对本地玩家可见时（例如队友或自己在草丛）
-    // 注意：如果隐蔽了通常渲染为草丛(isDisguised logic above covers 'disguise' buff). 
-    // 这里指普通的"进入草丛"状态.
-    // 如果玩家在草丛中，显示隐蔽标签
-    if (player.inBush) {
+    // 2. 隐蔽状态 (inBush) - 使用本地玩家覆盖值
+    const inBush = (localInBushOverride !== undefined) ? localInBushOverride : (player.inBush ?? false);
+    if (inBush) {
       this.drawConcealmentIndicator(player.x, player.y, indicatorIndex++);
     }
 
-    // 3. 其他 Buffs
+    // 3. 眩晕状态 (isStunned)
+    if ((player as any).isStunned) {
+      const stunnedEndTime = (player as any).stunnedEndTime ?? 0;
+      const remainingMs = Math.max(0, stunnedEndTime - nowMs);
+      const progress = Math.min(1, Math.max(0, remainingMs / 3000));
+      this.drawStunIndicator(player.x, player.y, progress, indicatorIndex++);
+    }
+
+    // 4. 使用物品状态
+    if (
+      player.usingItemTypeId &&
+      player.usingItemRemainingMs !== undefined &&
+      player.usingItemTotalMs !== undefined &&
+      player.usingItemTotalMs > 0
+    ) {
+      const usedMs = player.usingItemTotalMs - player.usingItemRemainingMs;
+      const progress = Math.max(0, Math.min(1, usedMs / player.usingItemTotalMs));
+      const isHealing = player.usingItemTypeId === 'medkit' || player.usingItemTypeId === 'advanced_medkit';
+      const statusText = isHealing ? '💊 治疗中' : `📦 ${player.usingItemTypeId}`;
+      const color = isHealing ? '#2ECC71' : '#F1C40F';
+      this.drawStatusIndicator(player.x, player.y, statusText, progress, color, indicatorIndex++);
+    }
+
+    // 5. 其他 Buffs
     if (player.buffs && player.buffs.length > 0) {
       for (const buff of player.buffs) {
         const remainingMs = Math.max(0, buff.remainingMs ?? 0);
@@ -436,8 +475,8 @@ export class Renderer {
         this.ctx.textBaseline = 'middle';
         
         const text = '🌿 伪装';
-        const metrics = this.ctx.measureText(text);
-        const textWidth = metrics.width;
+        // 性能优化: 使用缓存的文字宽度测量
+        const textWidth = this.measureCached('bold 12px monospace', text);
         const padding = 6;
         const boxWidth = textWidth + padding * 2;
         const boxHeight = 18;
@@ -538,8 +577,7 @@ export class Renderer {
       this.ctx.textAlign = 'center';
       this.ctx.textBaseline = 'middle';
 
-      const metrics = this.ctx.measureText(stateText);
-      const textWidth = metrics.width;
+      const textWidth = this.measureCached('bold 12px monospace', stateText);
       const padding = 6;
       const boxWidth = textWidth + padding * 2;
       const boxHeight = 20;
@@ -650,7 +688,7 @@ export class Renderer {
       this.ctx.fillStyle = '#f00';
       this.ctx.textAlign = 'center';
       this.ctx.fillText('! ERROR !', drawX, drawY - size / 2 - 5);
-      this.ctx.restore();
+      // 性能优化: 删除多余的 restore（没有对应的 save）
     }
     // 显示名字（模仿玩家）
     const displayName = decoy.name;
@@ -742,11 +780,20 @@ export class Renderer {
       trail.push({ x: player.x, y: player.y, alpha: effectiveAlpha });
     }
 
-    // 对全部拖影点做 alpha 衰减，并过滤掉几乎不可见的点
-    // 降低衰减速度（0.88 替代 0.82），让拖影保留更久
-    trail = trail
-      .map((p) => ({ ...p, alpha: p.alpha * 0.88 }))
-      .filter((p) => p.alpha > 0.02); // 降低过滤阈值，让更淡的点也能显示
+    // 性能优化: in-place 衰减和过滤，避免 map/filter 产生的 GC 压力
+    // 降低衰减速度（0.88），让拖影保留更久
+    for (let i = 0; i < trail.length; i++) {
+      trail[i].alpha *= 0.88;
+    }
+    
+    // in-place 过滤：只保留 alpha > 0.02 的点
+    let write = 0;
+    for (let i = 0; i < trail.length; i++) {
+      if (trail[i].alpha > 0.02) {
+        trail[write++] = trail[i];
+      }
+    }
+    trail.length = write;
 
     if (trail.length === 0 && strength === 0) {
       this.playerTrails.delete(id);
@@ -764,21 +811,24 @@ export class Renderer {
   /**
    * 新增: 绘制玩家拖影（使用屏幕坐标）
    * 颜色与玩家主体颜色保持一致，但更透明
+   * 性能优化: 使用 globalAlpha 而非每次拼接 rgba 字符串
    */
   private drawPlayerTrail(playerId: string, isLocal: boolean): void {
     const trail = this.playerTrails.get(playerId);
     if (!trail || trail.length === 0) return;
 
     const size = 20;
-    const baseColor = isLocal ? { r: 0, g: 170, b: 255 } : { r: 255, g: 68, b: 68 };
+    const rgb = isLocal ? '0,170,255' : '255,68,68';
 
-    for (const point of trail) {
-      const screenX = Math.round(point.x - this.camX);
-      const screenY = Math.round(point.y - this.camY);
-
-      this.ctx.fillStyle = `rgba(${baseColor.r}, ${baseColor.g}, ${baseColor.b}, ${point.alpha})`;
-      this.ctx.fillRect(screenX - size / 2, screenY - size / 2, size, size);
+    this.ctx.save();
+    this.ctx.fillStyle = `rgb(${rgb})`;
+    for (const p of trail) {
+      const sx = Math.round(p.x - this.camX);
+      const sy = Math.round(p.y - this.camY);
+      this.ctx.globalAlpha = p.alpha;
+      this.ctx.fillRect(sx - size / 2, sy - size / 2, size, size);
     }
+    this.ctx.restore();
   }
 
   /**
@@ -933,8 +983,7 @@ export class Renderer {
         this.ctx.textAlign = 'center';
         this.ctx.textBaseline = 'middle';
 
-        const metrics = this.ctx.measureText(stateText);
-        const textWidth = metrics.width;
+        const textWidth = this.measureCached('bold 12px monospace', stateText);
         const padding = 6;
         const boxWidth = textWidth + padding * 2;
         const boxHeight = 20;
@@ -957,13 +1006,7 @@ export class Renderer {
       }
     }
 
-    // Debug模式：显示原始状态名称
-    if (debug && ai.behaviorState) {
-      this.ctx.font = '9px monospace';
-      this.ctx.fillStyle = '#0ff';
-      this.ctx.textAlign = 'center';
-      this.ctx.fillText(`[${ai.behaviorState}]`, screenX, screenY - size / 2 - 28);
-    }
+
   }
 
   /**
@@ -1351,36 +1394,48 @@ export class Renderer {
   }
 
   // 新增: 绘制全屏烟雾覆盖（当本地玩家在烟雾中时）
+  // 性能优化: 使用简单的纯色填充代替每帧创建渐变
   private drawFullScreenSmokeOverlay(smokeCenterX: number, smokeCenterY: number, alpha: number): void {
     // 绘制全屏深色烟雾覆盖层（护眼黑色系），带透明度过渡
     if (alpha <= 0) return; // 完全透明时不绘制
     
     this.ctx.save();
     
-    // 使用径向渐变，中心对齐到烟雾弹位置（世界坐标转屏幕坐标）
-    const screenCenterX = smokeCenterX - this.camX;
-    const screenCenterY = smokeCenterY - this.camY;
-    const radius = Math.max(this.cssWidth, this.cssHeight) * 0.6;
-    
-    const gradient = this.ctx.createRadialGradient(screenCenterX, screenCenterY, 0, screenCenterX, screenCenterY, radius);
-    gradient.addColorStop(0, `rgba(60, 60, 60, ${0.93 * alpha})`); // 中心深灰色，更不透明 93%
-    gradient.addColorStop(0.4, `rgba(35, 35, 35, ${0.97 * alpha})`); // 中间区域更深更不透明 97%
-    gradient.addColorStop(1, `rgba(15, 15, 15, ${0.99 * alpha})`); // 边缘接近完全黑 99%
-    
-    this.ctx.fillStyle = gradient;
+    // 性能优化: 使用简单的纯色填充代替渐变（大幅减少 GPU 负担）
+    // 原来的渐变效果在大窗口下非常昂贵
+    this.ctx.globalAlpha = 0.95 * alpha;
+    this.ctx.fillStyle = '#1a1a1a'; // 深灰色
     this.ctx.fillRect(0, 0, this.cssWidth, this.cssHeight);
     
-    // 添加烟雾噪点效果（深色系），也应用过渡alpha
+    // 添加烟雾噪点效果（深色系），使用缓存的噪点位置
+    this.ensureSmokeNoise();
     this.ctx.globalAlpha = 0.08 * alpha;
-    for (let i = 0; i < 60; i++) {
-      const x = Math.random() * this.cssWidth;
-      const y = Math.random() * this.cssHeight;
-      const size = Math.random() * 3 + 1;
-      this.ctx.fillStyle = Math.random() > 0.5 ? 'rgba(70, 70, 70, 0.15)' : 'rgba(25, 25, 25, 0.25)';
+    for (const p of this.smokeNoisePoints) {
+      const x = p.x * this.cssWidth;
+      const y = p.y * this.cssHeight;
+      const size = p.s;
+      this.ctx.fillStyle = p.a > 0.2 ? 'rgba(70, 70, 70, 0.15)' : 'rgba(25, 25, 25, 0.25)';
       this.ctx.fillRect(x, y, size, size);
     }
+    this.ctx.globalAlpha = 1;
     
     this.ctx.restore();
+  }
+  
+  /**
+   * 性能优化: 预生成烟雾噪点位置（一次性），避免每帧随机生成
+   */
+  private ensureSmokeNoise(): void {
+    if (this.smokeNoisePoints.length > 0) return;
+    const n = 80;
+    for (let i = 0; i < n; i++) {
+      this.smokeNoisePoints.push({
+        x: Math.random(),
+        y: Math.random(),
+        s: 1 + Math.random() * 3,
+        a: Math.random() > 0.5 ? 0.15 : 0.25,
+      });
+    }
   }
 
 
@@ -1718,6 +1773,102 @@ export class Renderer {
     this.ctx.restore();
   }
 
+  /**
+   * 性能优化: 文字宽度缓存
+   * measureText 很贵，缓存结果避免重复计算
+   */
+  private measureCached(font: string, text: string): number {
+    const key = font + '|' + text;
+    const hit = this.textWidthCache.get(key);
+    if (hit !== undefined) return hit;
+    this.ctx.save();
+    this.ctx.font = font;
+    const w = this.ctx.measureText(text).width;
+    this.ctx.restore();
+    this.textWidthCache.set(key, w);
+    return w;
+  }
+
+  /**
+   * 性能优化: 障碍物精灵缓存
+   * 把复杂的障碍物绘制预先画到离屏画布，主循环只需 drawImage
+   */
+  private getObsSprite(type: string, w: number, h: number, seed: number, damageTier: number): HTMLCanvasElement {
+    const key = `${type}:${w}:${h}:${seed}:${damageTier}`;
+    const hit = this.obsSprite.get(key);
+    if (hit) return hit;
+    
+    const c = document.createElement('canvas');
+    c.width = Math.max(1, Math.ceil(w));
+    c.height = Math.max(1, Math.ceil(h));
+    const g = c.getContext('2d')!;
+    
+    // 临时切换 ctx 到离屏画布
+    const prev = this.ctx;
+    (this as any).ctx = g;
+    try {
+      // 调用原有的绘制函数，但画到离屏画布上（坐标从 0,0 开始）
+      if (type === 'wall') this.drawWall(0, 0, w, h, seed);
+      else if (type === 'crate') this.drawCrateImprove(0, 0, w, h, seed);
+      else if (type === 'bush') this.drawBushImprove(0, 0, w, h, seed);
+      else if (type === 'water') this.drawWaterImprove(0, 0, w, h, seed);
+      
+      // 绘制裂痕（根据 damageTier）
+      if (damageTier > 0) {
+        this.drawCracksOnSprite(g, w, h, seed, damageTier);
+      }
+    } finally {
+      (this as any).ctx = prev;
+    }
+    
+    this.obsSprite.set(key, c);
+    return c;
+  }
+
+  /**
+   * 性能优化: 在精灵上绘制裂痕（避免每帧重复计算）
+   */
+  private drawCracksOnSprite(ctx: CanvasRenderingContext2D, w: number, h: number, seed: number, damageTier: number): void {
+    // damageTier: 1=轻微(3条), 2=中度(5条), 3=严重(8条)
+    let crackCount = 0;
+    if (damageTier === 3) crackCount = 8;
+    else if (damageTier === 2) crackCount = 5;
+    else if (damageTier === 1) crackCount = 3;
+    
+    if (crackCount === 0) return;
+    
+    const centerX = w / 2 + ((seed % 20) - 10);
+    const centerY = h / 2 + (((seed * 7) % 20) - 10);
+    
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(0, 0, w, h);
+    ctx.clip();
+    
+    ctx.strokeStyle = 'rgba(0, 0, 0, 0.6)';
+    ctx.lineWidth = 1.8;
+    ctx.lineCap = 'round';
+    
+    for (let i = 0; i < crackCount; i++) {
+      const angle = ((seed + i * 137) % 360) * Math.PI / 180;
+      const dx = Math.cos(angle);
+      const dy = Math.sin(angle);
+      
+      let tMax = Infinity;
+      if (dx > 0) tMax = Math.min(tMax, (w - centerX) / dx);
+      if (dx < 0) tMax = Math.min(tMax, (0 - centerX) / dx);
+      if (dy > 0) tMax = Math.min(tMax, (h - centerY) / dy);
+      if (dy < 0) tMax = Math.min(tMax, (0 - centerY) / dy);
+      
+      ctx.beginPath();
+      ctx.moveTo(centerX, centerY);
+      ctx.lineTo(centerX + dx * tMax, centerY + dy * tMax);
+      ctx.stroke();
+    }
+    
+    ctx.restore();
+  }
+
   // 新增: 绘制墙壁 (石墙)
   private drawWall(screenX: number, screenY: number, w: number, h: number, seed: number): void {
     const ctx = this.ctx;
@@ -1911,7 +2062,23 @@ export class Renderer {
   }
 
   // Day4-2: 绘制障碍物（根据类型渲染）
+  // 性能优化: 视口裁剪 + 精灵缓存
   drawObstacle(obstacle: OBSTACLE_STATE): void {
+    // 性能优化 1: 视口裁剪 - 屏幕外的障碍物直接跳过
+    const viewX0 = this.camX - 50;
+    const viewY0 = this.camY - 50;
+    const viewX1 = this.camX + this.cssWidth + 50;
+    const viewY1 = this.camY + this.cssHeight + 50;
+    
+    const x0 = obstacle.x;
+    const y0 = obstacle.y;
+    const x1 = obstacle.x + obstacle.w;
+    const y1 = obstacle.y + obstacle.h;
+    
+    if (x1 < viewX0 || x0 > viewX1 || y1 < viewY0 || y0 > viewY1) {
+      return; // 完全在屏幕外，跳过
+    }
+    
     // 修复: round 到整数像素，避免子像素抗锯齿导致的重影
     const screenX = Math.round(obstacle.x - this.camX);
     const screenY = Math.round(obstacle.y - this.camY);
@@ -1924,92 +2091,33 @@ export class Renderer {
     const seedStr = obstacle.id || `${obstacle.x}_${obstacle.y}`;
     const seed = seedStr.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
 
-    this.ctx.save();
-    
-    // 添加阴影效果 (提升边缘美感)
-    if (obsType !== 'water' && obsType !== 'bush') {
-        this.ctx.shadowColor = 'rgba(0, 0, 0, 0.4)';
-        this.ctx.shadowBlur = 8;
-        this.ctx.shadowOffsetY = 4;
-    }
-
-    // 根据类型调用增强版绘制函数
-    switch (obsType) {
-      case 'wall':
-        this.drawWall(screenX, screenY, obstacle.w, obstacle.h, seed);
-        break;
-      case 'crate':
-        this.drawCrateImprove(screenX, screenY, obstacle.w, obstacle.h, seed);
-        break;
-      case 'bush':
-        this.drawBushImprove(screenX, screenY, obstacle.w, obstacle.h, seed);
-        break;
-      case 'water':
-        this.drawWaterImprove(screenX, screenY, obstacle.w, obstacle.h, seed);
-        break;
-      default:
-        // 后备渲染
-        this.ctx.fillStyle = '#666';
-        this.ctx.fillRect(screenX, screenY, obstacle.w, obstacle.h);
-        this.ctx.strokeStyle = '#333';
-        this.ctx.lineWidth = 2;
-        this.ctx.strokeRect(screenX, screenY, obstacle.w, obstacle.h);
-    }
-    
-    this.ctx.restore();
-
-    // 绘制破损裂痕（仅对可破坏物体）- 辐射状裂痕
+    // 计算破损等级（用于缓存key）
+    let damageTier = 0;
     if (obsHp !== undefined && obsMaxHp !== undefined && obsMaxHp > 0) {
       const hpRatio = obsHp / obsMaxHp;
-      
-      // 根据破损程度决定裂痕数量
-      let crackCount = 0;
-      if (hpRatio < 0.3) {
-        crackCount = 8; // 严重损坏：8条裂痕
-      } else if (hpRatio < 0.6) {
-        crackCount = 5; // 中度损坏：5条裂痕
-      } else if (hpRatio < 0.9) {
-        crackCount = 3; // 轻微损坏：3条裂痕
-      }
-
-      if (crackCount > 0) {
-        // 裂痕中心点（略微偏移，但保持在物体内）
-        const centerX = screenX + obstacle.w / 2 + ((seed % 20) - 10);
-        const centerY = screenY + obstacle.h / 2 + (((seed * 7) % 20) - 10);
-        
-        this.ctx.save();
-        // 裁剪区域，确保裂痕不超出物体边界
-        this.ctx.beginPath();
-        this.ctx.rect(screenX, screenY, obstacle.w, obstacle.h);
-        this.ctx.clip();
-        
-        this.ctx.strokeStyle = 'rgba(0, 0, 0, 0.6)';
-        this.ctx.lineWidth = 1.8;
-        this.ctx.lineCap = 'round';
-        
-        for (let i = 0; i < crackCount; i++) {
-          // 计算裂痕方向（辐射状）
-          const angle = ((seed + i * 137) % 360) * Math.PI / 180; // 黄金角度分布
-          
-          // 计算射线与物边界的交点（延伸到边缘）
-          const dx = Math.cos(angle);
-          const dy = Math.sin(angle);
-          
-          let tMax = Infinity;
-          if (dx > 0) tMax = Math.min(tMax, (screenX + obstacle.w - centerX) / dx);
-          if (dx < 0) tMax = Math.min(tMax, (screenX - centerX) / dx);
-          if (dy > 0) tMax = Math.min(tMax, (screenY + obstacle.h - centerY) / dy);
-          if (dy < 0) tMax = Math.min(tMax, (screenY - centerY) / dy);
-          
-          this.ctx.beginPath();
-          this.ctx.moveTo(centerX, centerY);
-          this.ctx.lineTo(centerX + dx * tMax, centerY + dy * tMax);
-          this.ctx.stroke();
-        }
-        
-        this.ctx.restore();
-      }
+      if (hpRatio < 0.3) damageTier = 3; // 严重
+      else if (hpRatio < 0.6) damageTier = 2; // 中度
+      else if (hpRatio < 0.9) damageTier = 1; // 轻微
     }
+
+    // 性能优化 2: 精灵缓存 - 使用预渲染的离屏画布
+    const sprite = this.getObsSprite(obsType, obstacle.w, obstacle.h, seed, damageTier);
+    
+    this.ctx.save();
+    
+    // 性能优化 3: 使用假阴影替代 shadowBlur（shadowBlur 非常耗 CPU）
+    // 用偏移的半透明矩形模拟阴影效果
+    if (obsType !== 'water' && obsType !== 'bush') {
+      this.ctx.globalAlpha = 0.25;
+      this.ctx.fillStyle = '#000';
+      this.ctx.fillRect(screenX + 4, screenY + 6, obstacle.w, obstacle.h);
+      this.ctx.globalAlpha = 1;
+    }
+    
+    // 直接绘制精灵（一次 drawImage 替代所有复杂绘制）
+    this.ctx.drawImage(sprite, screenX, screenY);
+    
+    this.ctx.restore();
   }
 
   // 辅助函数：使颜色变暗
@@ -2047,8 +2155,8 @@ export class Renderer {
     this.ctx.textAlign = 'center';
     this.ctx.textBaseline = 'middle';
 
-    const metrics = this.ctx.measureText(text);
-    const textWidth = metrics.width;
+    // 性能优化: 使用缓存的文字宽度测量
+    const textWidth = this.measureCached('bold 12px monospace', text);
     const padding = 6;
     const boxWidth = textWidth + padding * 2;
     const boxHeight = 18;
@@ -2122,6 +2230,8 @@ export class Renderer {
     ais: any[] = [], // 新增: AI实体列表
     decoys: DECOY_STATE[] = [] // 新增: 诱饵列表
   ): void {
+    const t0 = performance.now();
+    
     this.clear();
 
     // P0-3: 计算camera位置，让本地玩家显示在屏幕中心
@@ -2151,15 +2261,19 @@ export class Renderer {
     // 如果本地玩家不存在，camX/camY保持0（不移动camera）
 
     // 新增: 绘制地图背景和地板
+    const a0 = performance.now();
     this.drawFloor();
+    const a1 = performance.now();
 
     // 新增: 绘制地图边界框（背景层之一）
     this.drawWorldBounds();
 
     // Day4-2: 绘制障碍物
+    const b0 = performance.now();
     for (const obstacle of obstacles) {
       this.drawObstacle(obstacle);
     }
+    const b1 = performance.now();
 
     // Day3: 绘制撤离区（如果有）
     if (extractZone) {
@@ -2199,9 +2313,10 @@ export class Renderer {
     const localInSmokeId = localPlayer?.inSmokeId ?? null;
 
     // 绘制诱饵
-    const currentDecoyIds = new Set<string>();
+    // 性能优化: 复用 Set 对象
+    this.currentDecoyIds.clear();
     for (const decoy of decoys) {
-      currentDecoyIds.add(decoy.id);
+      this.currentDecoyIds.add(decoy.id);
       // 检查诱饵状态，检测受击
       let state = this.decoyStates.get(decoy.id);
       if (!state) {
@@ -2233,25 +2348,30 @@ export class Renderer {
     }
     // 清理已销毁的诱饵状态
     for (const id of this.decoyStates.keys()) {
-      if (!currentDecoyIds.has(id)) {
+      if (!this.currentDecoyIds.has(id)) {
         this.decoyStates.delete(id);
       }
     }
 
     // 清理已离场玩家的拖影（不在 snapshot 里的玩家）
-    const activeIds = new Set(players.map((p) => p.id));
+    // 性能优化: 复用 Set 对象
+    this.activeIds.clear();
+    for (const p of players) {
+      this.activeIds.add(p.id);
+    }
     for (const id of this.playerTrails.keys()) {
-      if (!activeIds.has(id)) {
+      if (!this.activeIds.has(id)) {
         this.playerTrails.delete(id);
         this.playerTrailStrength.delete(id);
       }
     }
     for (const id of this.playerLastSample.keys()) {
-      if (!activeIds.has(id)) {
+      if (!this.activeIds.has(id)) {
         this.playerLastSample.delete(id);
       }
     }
 
+    const c0 = performance.now();
     for (const player of players) {
       const isLocal = player.id === localPlayerId;
       const playerInBush = player.inBush ?? false;
@@ -2300,9 +2420,10 @@ export class Renderer {
         // 先更新拖影轨迹（基于视觉位置），再绘制拖影和主体
         this.updatePlayerTrail(visualPlayer, isFast);
         this.drawPlayerTrail(visualPlayer.id, isLocal);
-        this.drawPlayer(visualPlayer, isLocal, currentServerTick);
+        this.drawPlayer(visualPlayer, isLocal, currentServerTick, now, flashGrenadeDurationMs, isLocal ? isLocalPlayerInBush : undefined);
       }
     }
+    const c1 = performance.now();
     
     // 新增: 绘制屏幕外玩家的箭头指引
     if (localPlayerId && localPlayer) {
@@ -2361,9 +2482,11 @@ export class Renderer {
     }
 
     // Day2: 绘制所有子弹
+    const d0 = performance.now();
     for (const bullet of bullets) {
       this.drawBullet(bullet);
     }
+    const d1 = performance.now();
 
     // 爆炸特效（真实半径）
     for (const explosion of explosionEffects) {
@@ -2496,7 +2619,6 @@ export class Renderer {
           const stunnedEndTime = (p as any).stunnedEndTime ?? 0;
           const remainingMs = Math.max(0, stunnedEndTime - now);
           const progress = remainingMs / 3000; // 3秒眩晕时长
-          console.log('[Stun Debug] Drawing stun indicator:', { playerId: p.id, isStunned: (p as any).isStunned, stunnedEndTime, remainingMs, progress });
           this.drawStunIndicator(visualPlayer.x, visualPlayer.y, progress, statusIndex++);
         }
 
@@ -2566,6 +2688,7 @@ export class Renderer {
     }
     
     // 如果有alpha，绘制烟雾覆盖
+    const e0 = performance.now();
     if (this.smokeOverlayAlpha > 0 && localPlayer) {
       // 找到玩家所在的烟雾，获取其中心位置
       let smokeCenterX = localPlayer.x; // 默认使用玩家位置
@@ -2586,6 +2709,22 @@ export class Renderer {
       }
       
       this.drawFullScreenSmokeOverlay(smokeCenterX, smokeCenterY, this.smokeOverlayAlpha);
+    }
+    const e1 = performance.now();
+
+    // 性能测量输出（已禁用以提升性能）
+    if (false && debug) {
+      console.log({
+        floor: (a1 - a0).toFixed(2),
+        obstacles: (b1 - b0).toFixed(2),
+        players: (c1 - c0).toFixed(2),
+        bullets: (d1 - d0).toFixed(2),
+        smokeOverlay: (e1 - e0).toFixed(2),
+        total: (performance.now() - t0).toFixed(2),
+        bulletsCount: bullets.length,
+        obstaclesCount: obstacles.length,
+        playersCount: players.length,
+      });
     }
   }
 
@@ -2608,19 +2747,22 @@ export class Renderer {
   // Resize方法：由外部调用，负责所有canvas尺寸和transform设置
   // 单一真相：所有resize逻辑都在这里，不再有内部自动resize
   // P2 优化: 在 resize 时缓存 rect，避免每帧 getBoundingClientRect()
-
+  // 性能优化: 限制 DPR 和渲染分辨率，避免大窗口时像素数爆炸
   resize(cssWidth: number, cssHeight: number): void {
     this.cssWidth = cssWidth;
     this.cssHeight = cssHeight;
-    const dpr = window.devicePixelRatio || 1;
+    
+    const rawDpr = window.devicePixelRatio || 1;
+    const dpr = Math.min(rawDpr, this.maxDpr);
+    const scale = dpr * this.renderScale;
     
     // 设置CSS显示尺寸
     this.canvas.style.width = `${cssWidth}px`;
     this.canvas.style.height = `${cssHeight}px`;
 
-    // 设置实际渲染尺寸（backing store）
-    this.canvas.width = cssWidth * dpr;
-    this.canvas.height = cssHeight * dpr;
+    // 设置实际渲染尺寸（backing store）- 使用 scale 而非 rawDpr
+    this.canvas.width = Math.max(1, Math.floor(cssWidth * scale));
+    this.canvas.height = Math.max(1, Math.floor(cssHeight * scale));
 
     // P0-4 修复: resetTransform 兼容性（Safari 等环境可能不支持）
     // 使用 setTransform(1,0,0,1,0,0) 作为 fallback
@@ -2633,11 +2775,25 @@ export class Renderer {
     } catch {
       this.ctx.setTransform(1, 0, 0, 1, 0, 0);
     }
-    this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    this.scale = dpr;
+    this.ctx.setTransform(scale, 0, 0, scale, 0, 0);
+    this.scale = scale;
+    
+    // 像素风：关掉平滑（更清晰，也更省一点点）
+    this.ctx.imageSmoothingEnabled = false;
     
     // P2 优化: 缓存 canvas rect（resize 时更新，避免每帧读取 DOM）
     this.refreshRect();
+  }
+  
+  /**
+   * 性能优化: 设置画质控制参数
+   * @param opts.maxDpr - 限制 DPR 上限（推荐 1.25~1.75）
+   * @param opts.renderScale - 额外分辨率缩放（推荐 0.6~1）
+   */
+  setQuality(opts: { maxDpr?: number; renderScale?: number }): void {
+    if (opts.maxDpr !== undefined) this.maxDpr = Math.max(1, opts.maxDpr);
+    if (opts.renderScale !== undefined) this.renderScale = Math.max(0.5, Math.min(1, opts.renderScale));
+    // 注意：这里不主动 resize，因为外部已有统一 resize 调用点
   }
   
   // P1-2 修复: 提供 refreshRect 方法，在 layout shift 时手动刷新

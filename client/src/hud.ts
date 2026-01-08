@@ -50,6 +50,8 @@ export class HUD {
   private events: string[] = [];
   private readonly maxEvents = 30;
   private lastInventorySignature: string | null = null;
+  // 性能优化: 缓存上次渲染的事件数量，只在有新事件时才更新 DOM
+  private lastRenderedEventCount: number = 0;
 
   constructor(containerId: string) {
     const container = document.getElementById(containerId);
@@ -356,21 +358,28 @@ export class HUD {
     }
 
     // Events
-    // 修复: Event Log 使用 DOM 节点 + textContent，完全避免 XSS
+    // 性能优化: 只在有新事件时才更新 DOM，避免每帧重建所有节点
     const eventsEl = document.getElementById('hud-events');
     if (eventsEl) {
-      // 清空现有内容
-      eventsEl.textContent = '';
+      const currentEventCount = this.events.length;
       
-      // 为每个事件创建 DOM 节点
-      for (const event of this.events) {
-        const div = document.createElement('div');
-        div.textContent = event; // 使用 textContent，自动转义
-        eventsEl.appendChild(div);
+      // 只在事件数量变化时才更新（新增事件或事件被移除）
+      if (currentEventCount !== this.lastRenderedEventCount) {
+        // 清空现有内容
+        eventsEl.textContent = '';
+        
+        // 为每个事件创建 DOM 节点
+        for (const event of this.events) {
+          const div = document.createElement('div');
+          div.textContent = event; // 使用 textContent，自动转义
+          eventsEl.appendChild(div);
+        }
+        
+        // 滚动到底部（只在有新事件时才滚动，避免频繁 reflow）
+        eventsEl.scrollTop = eventsEl.scrollHeight;
+        
+        this.lastRenderedEventCount = currentEventCount;
       }
-      
-      // 滚动到底部
-      eventsEl.scrollTop = eventsEl.scrollHeight;
     }
   }
 }

@@ -61,6 +61,14 @@ export class UIOverlay {
   private cssWidth: number = 0;
   private cssHeight: number = 0;
   
+  // 性能优化: 缓存渐变对象（避免每帧创建）
+  private cachedDamageGradient: CanvasGradient | null = null;
+  private cachedGradientWidth: number = 0;
+  private cachedGradientHeight: number = 0;
+  
+  // 性能优化: 限制 DPR（与 renderer 保持一致）
+  private maxDpr: number = 1.5;
+  
   // UI 状态（外部更新，每帧读取绘制）
   private state: UIOverlayState = {
     damage: { alpha: 0 },
@@ -78,6 +86,13 @@ export class UIOverlay {
       throw new Error('Failed to get 2d context for UI overlay');
     }
     this.ctx = ctx;
+  }
+  
+  /**
+   * 性能优化: 设置最大 DPR（与 renderer 保持一致）
+   */
+  setMaxDpr(maxDpr: number): void {
+    this.maxDpr = Math.max(1, maxDpr);
   }
 
   /**
@@ -197,14 +212,28 @@ export class UIOverlay {
 
   /**
    * 绘制受伤红边 vignette
+   * 性能优化: 缓存渐变对象，只在尺寸变化时重建
    */
   private drawDamageVignette(ctx: CanvasRenderingContext2D, w: number, h: number, alpha: number): void {
-    const gradient = ctx.createRadialGradient(w / 2, h / 2, Math.min(w, h) * 0.3, w / 2, h / 2, Math.max(w, h) * 0.8);
-    gradient.addColorStop(0, 'rgba(255, 0, 0, 0)');
-    gradient.addColorStop(1, `rgba(200, 0, 0, ${alpha * 0.5})`);
+    // 检查是否需要重建渐变缓存
+    if (!this.cachedDamageGradient || this.cachedGradientWidth !== w || this.cachedGradientHeight !== h) {
+      this.cachedDamageGradient = ctx.createRadialGradient(
+        w / 2, h / 2, Math.min(w, h) * 0.3,
+        w / 2, h / 2, Math.max(w, h) * 0.8
+      );
+      // 使用固定的 alpha=0.5，实际透明度通过 globalAlpha 控制
+      this.cachedDamageGradient.addColorStop(0, 'rgba(255, 0, 0, 0)');
+      this.cachedDamageGradient.addColorStop(1, 'rgba(200, 0, 0, 0.5)');
+      this.cachedGradientWidth = w;
+      this.cachedGradientHeight = h;
+    }
 
-    ctx.fillStyle = gradient;
+    // 使用 globalAlpha 控制透明度，避免每帧重建渐变
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.fillStyle = this.cachedDamageGradient;
     ctx.fillRect(0, 0, w, h);
+    ctx.restore();
   }
 
   /**
@@ -439,16 +468,20 @@ export class UIOverlay {
 
   /**
    * 调整大小（跟随窗口）
+   * 性能优化: 限制 DPR，避免高分屏下像素数爆炸
    */
   resize(cssWidth: number, cssHeight: number): void {
     this.cssWidth = cssWidth;
     this.cssHeight = cssHeight;
-    const dpr = window.devicePixelRatio || 1;
+    
+    // 性能优化: 限制 DPR（与 renderer 保持一致）
+    const rawDpr = window.devicePixelRatio || 1;
+    const dpr = Math.min(rawDpr, this.maxDpr);
 
     this.canvas.style.width = `${cssWidth}px`;
     this.canvas.style.height = `${cssHeight}px`;
-    this.canvas.width = cssWidth * dpr;
-    this.canvas.height = cssHeight * dpr;
+    this.canvas.width = Math.floor(cssWidth * dpr);
+    this.canvas.height = Math.floor(cssHeight * dpr);
 
     try {
       if (this.ctx.resetTransform) {
@@ -461,5 +494,8 @@ export class UIOverlay {
     }
     this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     this.scale = dpr;
+    
+    // 清除渐变缓存（尺寸变化后需要重建）
+    this.cachedDamageGradient = null;
   }
 }

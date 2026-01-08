@@ -1,3 +1,4 @@
+import { QUALITY_CONFIG } from './config.js';
 import { Renderer } from './renderer.js';
 import { Network } from './network.js';
 import { InputManager } from './input.js';
@@ -242,9 +243,11 @@ if (!worldCanvas || !uiCanvas) {
 
 // 初始化渲染器（必须先初始化，才能调用resize）
 const renderer = new Renderer(worldCanvas);
+renderer.setQuality(QUALITY_CONFIG.world);
 
 // 初始化 UI 覆盖层（屏幕 HUD：准星、受伤红边等）
 const uiOverlay = new UIOverlay(uiCanvas);
+uiOverlay.setMaxDpr(QUALITY_CONFIG.ui.maxDpr);
 
 // 初始化投掷瞄准系统
 const throwingAim = new ThrowingAim(uiCanvas);
@@ -3598,8 +3601,8 @@ bulletTracks.onLocalHit(info => {
     spawnY: info.spawnY,
     timestamp: info.timestamp,
   });
-  console.log(`[LOCAL_BULLET_HIT] owner=${info.ownerId} bullet=${info.bulletId} target=${info.targetId} spawn=${info.spawnX.toFixed(1)},${info.spawnY.toFixed(1)} hit=${info.hitX.toFixed(1)},${info.hitY.toFixed(1)}`);
-  hud.addEvent(`[LOCAL HIT] bullet=${info.bulletId} target=${info.targetId} spawn=(${info.spawnX.toFixed(1)},${info.spawnY.toFixed(1)}) hit=(${info.hitX.toFixed(1)},${info.hitY.toFixed(1)})`);
+  // 移除性能影响的日志输出
+  // hud.addEvent(`[LOCAL HIT] bullet=${info.bulletId} target=${info.targetId} spawn=(${info.spawnX.toFixed(1)},${info.spawnY.toFixed(1)}) hit=(${info.hitX.toFixed(1)},${info.hitY.toFixed(1)})`);
 });
 
 // 修复: 输入发送已整合到 clientTick 中，不再需要单独的节流逻辑

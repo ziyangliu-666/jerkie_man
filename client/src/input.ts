@@ -25,6 +25,14 @@ export class InputManager {
     window.addEventListener('keydown', (e) => {
       const key = e.key.toLowerCase();
       
+      // 性能优化: 如果是重复按键（长按），且不是需要特殊处理的键，直接返回
+      // 这避免了长按 WASD 时每帧都执行完整的处理逻辑
+      if (e.repeat) {
+        // 只有特定键需要处理 repeat（目前没有）
+        // 其他键直接返回，避免重复设置 Map 和调用回调
+        return;
+      }
+      
       // 新增: 耐力限制检查（空格键）
       // 允许耐力消耗到0，但一旦为0后需要恢复到35%以上才能再按
       if (key === ' ') {
@@ -55,22 +63,21 @@ export class InputManager {
       this.keys.set(key, true);
       
       // Day3: 脉冲事件（edge-trigger）
-      // P1 修复: 处理 keydown repeat，避免长按导致疯狂发包
-      // 如果 e.repeat 为 true，说明是系统自动重复，忽略（只处理第一次按下）
-      if (key === 'r' && !e.repeat) {
+      // 注意: e.repeat 已在上面处理，这里不需要再检查
+      if (key === 'r') {
         this.reloadFlag = true;
         e.preventDefault();
-      } else if (key === 'e' && !e.repeat) {
+      } else if (key === 'e') {
         this.interactFlag = true;
         e.preventDefault();
-      } else if (key === 'f' && !e.repeat) {
+      } else if (key === 'f') {
         this.extractFlag = true;
         e.preventDefault();
       }
       
       // 新增: 数字键1-5使用物品
       const numKey = parseInt(key);
-      if (numKey >= 1 && numKey <= 5 && !e.repeat) {
+      if (numKey >= 1 && numKey <= 5) {
         this.useItemFlags[numKey - 1] = true;
         e.preventDefault();
       }
