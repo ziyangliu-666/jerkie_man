@@ -2,7 +2,8 @@ import type { PLAYER_STATE, OBSTACLE_STATE, PlayerInventory, ItemInstance, Weapo
 import { simulatePlayerMove, getItemType, getWeaponDef, getArmorDef, getBagDef, PositionHistory, calculateStaminaChange, canSprint, getSprintSpeedMultiplier, msToTicks, ticksToMs } from '@jerkie-man/shared';
 
 // 内部 Buff 运行时类型（仅服务端使用）
-type InternalBuffKind = 'speed' | 'damage_reduction' | 'regeneration';
+// 内部 Buff 运行时类型（仅服务端使用）
+type InternalBuffKind = 'speed' | 'damage_reduction' | 'regeneration' | 'disguise';
 
 type InternalBuff = {
   id: string;
@@ -48,11 +49,19 @@ export class Player {
   // 新增: 短效 Buff 列表（仅服务端运行时使用）
   private activeBuffs: InternalBuff[] = [];
   public flashedUntil: number = 0; // 新增: 闪光弹致盲结束时间（毫秒时间戳，0表示未被闪）
+  public stunnedUntil: number = 0; // 新增: 眩晕结束时间（毫秒时间戳，0表示未被眩晕）
   // 新增: 道具读条状态（例如急救包使用中）
   public usingItemTypeId: string | null = null;
   public usingItemIid: string | null = null;
   public usingItemEndTick: number = 0;
   public usingItemTotalDurationTicks: number = 0;
+
+  // 新增: 伪装AI行为状态（类似真实AI的字段）
+  public disguisedAimRad: number = 0; // 伪装玩家的枪口角度
+  public disguisedIdleLookTargetAngle?: number; // 当前要转向的目标角度
+  public disguisedIdleNextLookChangeTime?: number; // 下次改变视角的时间
+  public disguisedIdleBaseAngle?: number; // 基础角度（初始朝向）
+  public disguisedFirstSpottedTime?: number; // 首次发现目标的时间（用于SPOTTING状态）
 
   // 修复: 移动速度已移至 shared/sim.ts，这里不再需要（保留注释用于文档）
   // SPEED = 200 (在 shared/sim.ts 中定义)
@@ -237,6 +246,29 @@ export class Player {
       this.hp = 0;
       this.status = 'DEAD';
     }
+    // 受伤且伤害 > 0 时打破伪装
+    if (amount > 0) {
+      this.breakDisguise();
+    }
+  }
+
+  /**
+   * 新增: 检查是否处于伪装状态
+   */
+  isDisguised(): boolean {
+    return this.activeBuffs.some(b => b.kind === 'disguise' && b.durationTicks > 0);
+  }
+
+  /**
+   * 新增: 打破伪装
+   */
+  breakDisguise(): boolean {
+    const disguiseBuffIndex = this.activeBuffs.findIndex(b => b.kind === 'disguise');
+    if (disguiseBuffIndex !== -1) {
+      this.activeBuffs.splice(disguiseBuffIndex, 1);
+      return true;
+    }
+    return false;
   }
 
   /**
@@ -415,7 +447,225 @@ export class Player {
     });
   }
 
+  /**
+   * 新增: 更新伪装玩家的AI行为状态和枪口摆动
+   * @param allPlayers 所有玩家列表（用于检测附近玩家）
+   * @param currentTick 当前tick
+   */
+  public updateDisguisedAiBehavior(allPlayers: Player[], currentTick: number): void {
+    if (!this.isDisguised()) {
+      return;
+    }
+
+    const now = Date.now();
+    
+    // 初始化基础角度
+    if (this.disguisedIdleBaseAngle === undefined) {
+      this.disguisedIdleBaseAngle = this.disguisedAimRad || 0;
+    }
+
+    // 扫描附近玩家（模拟AI的视野检测）
+    const VISION_RANGE = 300; // 视野范围
+    let spottedPlayer: Player | null = null;
+    let minDist = Infinity;
+
+    for (const otherPlayer of allPlayers) {
+      if (otherPlayer.id === this.id || otherPlayer.status !== 'ALIVE') {
+        continue;
+      }
+      
+      // 忽略其他伪装玩家（伪装AI不会发现伪装玩家）
+      if (otherPlayer.isDisguised()) {
+        continue;
+      }
+
+      const dx = otherPlayer.x - this.x;
+      const dy = otherPlayer.y - this.y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+
+      if (dist <= VISION_RANGE && dist < minDist) {
+        // 检查是否在视野角度内（简化：使用当前枪口方向±90度）
+        const angleToTarget = Math.atan2(dy, dx);
+        let angleDiff = Math.abs(angleToTarget - this.disguisedAimRad);
+        while (angleDiff > Math.PI) angleDiff = Math.PI * 2 - angleDiff;
+        
+        // 视野角度180度（左右各90度）
+        if (angleDiff <= Math.PI / 2) {
+          spottedPlayer = otherPlayer;
+          minDist = dist;
+        }
+      }
+    }
+
+    // 根据是否发现玩家更新状态
+    if (spottedPlayer) {
+      // 发现玩家，进入SPOTTING状态
+      if (!this.disguisedFirstSpottedTime) {
+        this.disguisedFirstSpottedTime = now;
+      }
+      
+      // 瞄准发现的玩家
+      const dx = spottedPlayer.x - this.x;
+      const dy = spottedPlayer.y - this.y;
+      const targetAngle = Math.atan2(dy, dx);
+      
+      // 快速转向目标（类似AI的SPOTTING状态）
+      let angleDiff = targetAngle - this.disguisedAimRad;
+      while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
+      while (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
+      
+      const turnSpeed = (270 * Math.PI / 180) * 0.05; // 每tick转动的弧度
+      if (Math.abs(angleDiff) > turnSpeed) {
+        this.disguisedAimRad += Math.sign(angleDiff) * turnSpeed;
+      } else {
+        this.disguisedAimRad = targetAngle;
+      }
+      
+      // 规范化角度
+      while (this.disguisedAimRad < 0) this.disguisedAimRad += Math.PI * 2;
+      while (this.disguisedAimRad >= Math.PI * 2) this.disguisedAimRad -= Math.PI * 2;
+    } else {
+      // 没有发现玩家，执行IDLE状态的枪口摆动
+      this.disguisedFirstSpottedTime = undefined;
+      this.updateDisguisedIdleAim(now);
+    }
+  }
+
+  /**
+   * 新增: 更新伪装玩家IDLE状态的枪口摆动
+   */
+  private updateDisguisedIdleAim(now: number): void {
+    // 如果还没有目标角度，或者到了改变视角的时间
+    if (this.disguisedIdleLookTargetAngle === undefined || 
+        (this.disguisedIdleNextLookChangeTime && now >= this.disguisedIdleNextLookChangeTime)) {
+      
+      const baseAngle = this.disguisedIdleBaseAngle || 0;
+      
+      // 随机选择左右两侧的角度（±120度范围）
+      const leftRange = 120 * Math.PI / 180;
+      const rightRange = 120 * Math.PI / 180;
+      
+      // 随机选择一个角度（在基础角度±120度范围内）
+      const randomOffset = (Math.random() - 0.5) * (leftRange + rightRange);
+      this.disguisedIdleLookTargetAngle = baseAngle + randomOffset;
+      
+      // 规范化角度
+      while (this.disguisedIdleLookTargetAngle < 0) this.disguisedIdleLookTargetAngle += Math.PI * 2;
+      while (this.disguisedIdleLookTargetAngle >= Math.PI * 2) this.disguisedIdleLookTargetAngle -= Math.PI * 2;
+      
+      // 设置下次改变视角的时间（1.5-2.5秒）
+      this.disguisedIdleNextLookChangeTime = now + 1500 + Math.random() * 1000;
+    }
+
+    // 转向目标角度
+    if (this.disguisedIdleLookTargetAngle !== undefined) {
+      let angleDiff = this.disguisedIdleLookTargetAngle - this.disguisedAimRad;
+      while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
+      while (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
+
+      // 快速转向（每秒约270度）
+      const turnSpeed = (270 * Math.PI / 180) * 0.05; // 每tick转动的弧度
+      if (Math.abs(angleDiff) > turnSpeed) {
+        this.disguisedAimRad += Math.sign(angleDiff) * turnSpeed;
+      } else {
+        this.disguisedAimRad = this.disguisedIdleLookTargetAngle;
+      }
+      
+      // 规范化角度
+      while (this.disguisedAimRad < 0) this.disguisedAimRad += Math.PI * 2;
+      while (this.disguisedAimRad >= Math.PI * 2) this.disguisedAimRad -= Math.PI * 2;
+    }
+  }
+
+  /**
+   * 新增: 为伪装玩家生成伪AI行为状态（基于检测到的玩家）
+   */
+  private generateFakeAiBehavior(): 'IDLE' | 'PATROL' | 'SPOTTING' | 'CHASE' | 'ATTACK' | 'SEARCH' | 'RETURN' {
+    // 如果发现了玩家，返回SPOTTING状态
+    if (this.disguisedFirstSpottedTime) {
+      return 'SPOTTING';
+    }
+    
+    // 否则根据移动状态决定
+    const now = Date.now();
+    const pastPos = this.positionHistory.getPositionAt(now - 200);
+    
+    if (pastPos) {
+      const dx = this.x - pastPos.x;
+      const dy = this.y - pastPos.y;
+      const distance = Math.sqrt(dx * dx + dy * dy);
+      
+      if (distance > 5) {
+        return 'PATROL'; // 正在移动
+      }
+    }
+    
+    return 'IDLE'; // 静止状态
+  }
+
+  /**
+   * 新增: 计算玩家移动方向（用于伪装玩家的枪口指向）
+   * 基于positionHistory获取最近的位置变化
+   * 如果玩家没有移动，返回默认方向（向右，0度）
+   */
+  private calculateMovementDirection(): number {
+    // 使用当前位置（this.x, this.y）和之前记录的位置
+    const now = Date.now();
+    const pastPos = this.positionHistory.getPositionAt(now - 200); // 200ms前的位置
+
+    // 如果历史不足，尝试使用更早的位置
+    if (!pastPos) {
+      const olderPos = this.positionHistory.getPositionAt(now - 500); // 500ms前的位置
+      if (!olderPos) {
+        return 0; // 完全没有历史记录，返回默认方向（向右）
+      }
+      // 使用更早的位置
+      const dx = this.x - olderPos.x;
+      const dy = this.y - olderPos.y;
+      const distance = Math.sqrt(dx * dx + dy * dy);
+      
+      // 如果移动距离太小，返回默认方向
+      if (distance < 1) {
+        return 0; // 没有移动，返回默认方向（向右）
+      }
+      
+      return Math.atan2(dy, dx);
+    }
+
+    // 使用当前位置和之前的位置计算方向
+    const dx = this.x - pastPos.x;
+    const dy = this.y - pastPos.y;
+    const distance = Math.sqrt(dx * dx + dy * dy);
+
+    // 如果移动距离太小，返回默认方向（向右，0度）
+    if (distance < 1) {
+      return 0; // 没有移动，返回默认方向（向右）
+    }
+
+    // 计算角度
+    return Math.atan2(dy, dx);
+  }
+
+  /**
+   * 新增: 为伪装玩家生成伪AI角色（基于装备武器）
+   */
+  private generateFakeAiRole(): 'basic' | 'sniper' | 'heavy_gunner' | 'scout' {
+    const weaponType = this.weaponRuntime?.weaponTypeId || '';
+    
+    // 根据武器类型推断AI角色
+    if (weaponType.includes('sniper')) {
+      return 'sniper';
+    } else if (weaponType.includes('shotgun') || weaponType.includes('minigun') || weaponType.includes('grenade')) {
+      return 'heavy_gunner';
+    } else if (weaponType.includes('smg') || weaponType.includes('pistol')) {
+      return 'scout';
+    }
+    
+    return 'basic';
+  }
+
   toState(currentTick: number): PLAYER_STATE {
+
     const weaponRuntime = this.weaponRuntime
       ? { ...this.weaponRuntime, fireCredit: this.getFireCredit(currentTick) }
       : undefined;
@@ -440,6 +690,13 @@ export class Player {
       usingItemTotalMs = ticksToMs(this.usingItemTotalDurationTicks);
     }
 
+    // 为伪装玩家生成伪AI状态
+    const isDisguised = this.isDisguised();
+    const disguisedAsAiBehavior = isDisguised ? this.generateFakeAiBehavior() : undefined;
+    const disguisedAsAiRole = isDisguised ? this.generateFakeAiRole() : undefined;
+    // 使用更新后的枪口角度（已经在updateDisguisedAiBehavior中更新）
+    const disguisedAimRad = isDisguised ? this.disguisedAimRad : undefined;
+
     return {
       id: this.id,
       x: this.x,
@@ -462,6 +719,8 @@ export class Player {
       inSmokeId: null,
       isFlashed: false, // 新增: 闪光弹致盲状态（默认false，在getSnapshot中更新）
       flashEndTime: 0, // 新增: 致盲结束时间（毫秒时间戳）
+      isStunned: this.stunnedUntil > Date.now(), // 新增: 眩晕状态（根据stunnedUntil计算）
+      stunnedEndTime: this.stunnedUntil, // 新增: 眩晕结束时间（毫秒时间戳）
       raidEquipment: {
         weaponIid: this.equippedWeaponItem?.iid ?? null,
         bagIid: this.equippedBagItem?.iid ?? null,
@@ -475,6 +734,9 @@ export class Player {
       usingItemTypeId,
       usingItemRemainingMs,
       usingItemTotalMs,
+      disguisedAsAiBehavior, // 伪装玩家的伪AI行为
+      disguisedAsAiRole, // 伪装玩家的伪AI角色
+      disguisedAimRad, // 新增: 伪装玩家的枪口指向（基于移动方向）
     };
   }
 

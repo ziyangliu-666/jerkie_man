@@ -1,11 +1,13 @@
+
 import { Player } from './player.js';
 import { ProfileManager } from './profile.js';
-import type { PLAYER_STATE, BULLET_STATE, ITEM_STATE, C2S_INPUT, MAP_CONFIG, OBSTACLE_STATE, WorldItem, LootBag, ItemInstance, WeaponRuntime, WeaponDef, MapTemplate, SpawnPoint, AI_STATE, AISpawn } from '@jerkie-man/shared';
-import { loadMapConfig, loadItemTypes, circleVsAABB, createRng, rectIntersects, segmentIntersectsCircle, getItemType, getAllItemTypes, getItemTypesByRarity, getWeaponDef, getArmorDef, getBagDef, applySpread, msToTicks, getFireSchedule, shouldStartBurst, canFireTick, advanceFireCooldown, PLAYER_HIT_RADIUS, getBulletPenetration, isObstacleDestructible, isUsableItem, doesObstacleBlockPlayer, AI_ROLE_PRESETS } from '@jerkie-man/shared';
+import type { PLAYER_STATE, BULLET_STATE, ITEM_STATE, C2S_INPUT, MAP_CONFIG, OBSTACLE_STATE, WorldItem, LootBag, ItemInstance, WeaponRuntime, WeaponDef, MapTemplate, SpawnPoint, AI_STATE, AISpawn, DECOY_STATE } from '@jerkie-man/shared';
+import { loadMapConfig, loadItemTypes, circleVsAABB, createRng, rectIntersects, segmentIntersectsCircle, getItemType, getAllItemTypes, getItemTypesByRarity, getWeaponDef, getArmorDef, getBagDef, applySpread, msToTicks, getFireSchedule, shouldStartBurst, canFireTick, advanceFireCooldown, PLAYER_HIT_RADIUS, getBulletPenetration, isObstacleDestructible, isUsableItem, doesObstacleBlockPlayer, AI_ROLE_PRESETS, ticksToMs, ItemType } from '@jerkie-man/shared';
 import { log } from './logger.js';
 import { AI, type PatrolConfig, type GuardConfig } from './ai.js';
 import { NavigationGrid, Pathfinder } from './pathfinding.js';
 import { AIBehaviorController } from './aiBehavior.js';
+import { Decoy } from './decoy.js'; // Added import for Decoy
 
 // Step4: 内部子弹类型（包含spawnAt、damage和bulletLifeMs用于TTL检查和伤害计算）
 type Bullet = BULLET_STATE & { 
@@ -52,6 +54,10 @@ export class Room {
   public explosions: Array<{ x: number; y: number; radius: number }> = [];
   private smokes: Array<{ id: string; x: number; y: number; radius: number; durationMs: number; createdAt: number }> = [];
   private newSmokes: Array<{ id: string; x: number; y: number; radius: number; durationMs: number }> = []; // 新生成的烟雾（用于广播）
+
+  // Decoys
+  public decoys: Decoy[] = [];
+  private decoyIdCounter = 0;
 
   // AI系统字段
   public ais: Map<string, AI> = new Map();
@@ -1023,6 +1029,18 @@ export class Room {
       pos: `(${spawn.x.toFixed(1)},${spawn.y.toFixed(1)})`,
       tick: this.tick,
     });
+    // CHEAT: Add verification items
+    /*
+    try {
+        const decoyType = getItemType('w_decoy');
+        if (decoyType) player.addItem(decoyType.id, 5);
+        const disguiseType = getItemType('i_disguise');
+        if (disguiseType) player.addItem(disguiseType.id, 2);
+    } catch(e) {
+        console.error('Cheat items failed', e);
+    }
+    */
+    this.players.set(playerId, player); // Ensure it is added (just in case I missed it)
     return player;
   }
 
@@ -1580,6 +1598,12 @@ export class Room {
     const wasShooting = player.lastShoot;
     player.lastShoot = shootNow;
 
+    // 新增: 如果玩家被眩晕，禁止任何行动
+    const now = Date.now();
+    if (player.stunnedUntil > now) {
+      return;
+    }
+
     // 新增: 如果正在读条使用道具（例如急救包），本 tick 不处理任何行动
     if (player.isUsingItem(this.tick)) {
       return;
@@ -1723,7 +1747,7 @@ export class Room {
             }
           }
           
-          // 再检测AI（如果还没命中玩家）
+          // 再检测AI（优先级低于玩家）
           if (!hitPlayer) {
             for (const [aiId, ai] of this.ais.entries()) {
               if (ai.status !== 'ALIVE') continue;
@@ -1746,7 +1770,33 @@ export class Room {
             }
           }
           
-          if (hitPlayer || hitAI) {
+          // 检测诱饵（优先级低于玩家和AI）
+          let hitDecoy: Decoy | null = null;
+          if (!hitPlayer && !hitAI) {
+            for (const decoy of this.decoys) {
+              if (decoy.hp <= 0) continue;
+              
+              const dx = decoy.x - player.x;
+              const dy = decoy.y - player.y;
+              const dist = Math.sqrt(dx * dx + dy * dy);
+              
+              // 检查距离（使用PLAYER_HIT_RADIUS）
+              if (dist <= meleeRange + PLAYER_HIT_RADIUS && dist < minDist) {
+                // 检查是否在瞄准方向
+                const aimDir = Math.atan2(dy, dx);
+                const aimDiff = Math.abs(aimDir - input.aim);
+                const normalizedDiff = Math.min(aimDiff, Math.PI * 2 - aimDiff);
+                const extraAngle = dist > 0.001 ? Math.asin(Math.min(1, PLAYER_HIT_RADIUS / dist)) : 0;
+                
+                if (normalizedDiff < meleeArcRad / 2 + extraAngle) {
+                  hitDecoy = decoy;
+                  minDist = dist;
+                }
+              }
+            }
+          }
+          
+          if (hitPlayer || hitAI || hitDecoy) {
             // 命中！造成伤害
             const damage = weaponDef.damage;
             
@@ -1792,6 +1842,27 @@ export class Room {
                 aiHpRemaining: hitAI.hp,
                 tick: this.tick,
               });
+            } else if (hitDecoy) {
+              // 攻击诱饵
+              hitDecoy.takeDamage(damage);
+              
+              if (hitDecoy.hp <= 0) {
+                // 诱饵被摧毁，触发眩晕爆炸
+                this.createStunExplosion(hitDecoy.x, hitDecoy.y, 150, 3000, hitDecoy.ownerId);
+                // 添加爆炸视觉效果
+                this.explosions.push({ x: hitDecoy.x, y: hitDecoy.y, radius: 150 });
+                
+                log('DECOY_DESTROYED_MELEE', {
+                  room: this.id,
+                  decoyId: hitDecoy.id,
+                  owner: hitDecoy.ownerId,
+                  attacker: playerId,
+                  tick: this.tick,
+                });
+              }
+              
+              // 推送命中事件
+              this.pushEvent(`${playerId} melee hit decoy ${hitDecoy.id} (-${damage})`);
             }
             
             // 给攻击者发送命中事件
@@ -1800,7 +1871,7 @@ export class Room {
             }
             this.combatEvents.get(playerId)!.push({ kind: 'HIT' });
           } else {
-            // 没有命中玩家，检查是否命中可破坏障碍物
+            // 没有命中玩家/AI/诱饵，检查是否命中可破坏障碍物
             for (const obstacle of this.obstacles) {
               const obsType = (obstacle as any).type || 'wall';
               if (!isObstacleDestructible(obsType)) continue;
@@ -2031,7 +2102,7 @@ export class Room {
       log('AI_EXPLOSION_HIT', {
         room: this.id,
         ai: aiId,
-        shooter: bullet.ownerId || 'unknown',
+        attacker: bullet.ownerId || 'unknown',
         damage: finalDamage,
         aiHpRemaining: ai.hp,
         distance: Math.round(dist),
@@ -2286,6 +2357,68 @@ export class Room {
     });
   }
 
+  // 新增: 眩晕爆炸（眩晕范围内玩家和AI，无伤害）
+  private createStunExplosion(x: number, y: number, radius: number, durationMs: number, ownerId?: string): void {
+    const now = Date.now();
+    const stunnedEndTime = now + durationMs;
+
+    // 对范围内所有存活玩家施加眩晕效果
+    for (const [playerId, player] of this.players.entries()) {
+      if (player.status !== 'ALIVE') continue;
+
+      const dx = player.x - x;
+      const dy = player.y - y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+
+      if (dist <= radius) {
+        // 在范围内，设置眩晕时间
+        player.stunnedUntil = stunnedEndTime;
+
+        log('STUN_HIT', {
+          room: this.id,
+          owner: ownerId || 'unknown',
+          target: playerId,
+          distance: Math.round(dist),
+          durationMs,
+          tick: this.tick,
+        });
+      }
+    }
+
+    // 对范围内所有存活的AI施加眩晕效果
+    for (const [aiId, ai] of this.ais.entries()) {
+      if (ai.status !== 'ALIVE') continue;
+
+      const dx = ai.x - x;
+      const dy = ai.y - y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+
+      if (dist <= radius) {
+        // 在范围内，设置眩晕时间
+        ai.stunnedUntil = stunnedEndTime;
+
+        log('STUN_HIT_AI', {
+          room: this.id,
+          owner: ownerId || 'unknown',
+          target: aiId,
+          distance: Math.round(dist),
+          durationMs,
+          tick: this.tick,
+        });
+      }
+    }
+
+    this.pushEvent(`Decoy stun explosion at (${Math.round(x)}, ${Math.round(y)})`);
+    log('STUN_EXPLOSION', {
+      room: this.id,
+      x: Math.round(x),
+      y: Math.round(y),
+      radius,
+      durationMs,
+      tick: this.tick,
+    });
+  }
+
   updateBullets(deltaTime: number, playerLatencies: Map<string, number> = new Map()): void {
     const now = Date.now();
     const bulletsToRemove = new Set<string>(); // Step4: 用Set代替O(n^2)
@@ -2334,6 +2467,35 @@ export class Room {
             const explosionRadius = props.explosionRadius ?? 150;
             this.createFlashbang(bullet.x, bullet.y, flashRadius, flashDurationMs, bullet.ownerId);
             this.explosions.push({ x: bullet.x, y: bullet.y, radius: explosionRadius });
+          } else if (bullet.weaponTypeId === 'w_decoy') { // Handle decoy grenade timeout
+            const decoyId = `decoy_${this.seed}_${this.decoyIdCounter++}`;
+            const owner = this.players.get(bullet.ownerId);
+            let angle = 0;
+            if (bullet.targetX !== undefined && bullet.targetY !== undefined) {
+               angle = Math.atan2(bullet.targetY - bullet.spawnY, bullet.targetX - bullet.spawnX);
+            } else {
+               angle = Math.atan2(bullet.vy, bullet.vx);
+            }
+
+            const decoy = new Decoy(
+              decoyId,
+              bullet.x,
+              bullet.y,
+              bullet.ownerId,
+              owner?.name,
+              owner?.weaponRuntime?.weaponTypeId, // Mimic current weapon
+              owner?.equippedArmorTypeId ?? undefined,
+              angle
+            );
+            this.decoys.push(decoy);
+            
+            this.pushEvent(`Decoy deployed at (${Math.round(bullet.x)}, ${Math.round(bullet.y)})`);
+            log('DECOY_DEPLOYED', {
+              room: this.id,
+              decoyId,
+              owner: bullet.ownerId,
+              tick: this.tick
+            });
           } else {
             // 其他手雷：正常爆炸
             const props = this.getGrenadeProps(bullet.weaponTypeId);
@@ -2397,6 +2559,40 @@ export class Room {
               this.explosions.push({ x: bullet.x, y: bullet.y, radius: explosionRadius });
               bulletsToRemove.add(bullet.id);
               continue;
+            } else if (bullet.weaponTypeId === 'w_decoy') {
+              // Decoy Grenade: Spawns a Decoy
+              const decoyId = `decoy_${this.seed}_${this.decoyIdCounter++}`;
+              // Try to find owner to mimic name/loadout
+              const owner = this.players.get(bullet.ownerId);
+              let angle = 0;
+              if (bullet.targetX !== undefined && bullet.targetY !== undefined) {
+                 angle = Math.atan2(bullet.targetY - bullet.spawnY, bullet.targetX - bullet.spawnX);
+              } else {
+                 angle = Math.atan2(bullet.vy, bullet.vx);
+              }
+
+              const decoy = new Decoy(
+                decoyId,
+                bullet.x,
+                bullet.y,
+                bullet.ownerId,
+                owner?.name,
+                owner?.weaponRuntime?.weaponTypeId, // Mimic current weapon
+                owner?.equippedArmorTypeId ?? undefined,
+                angle
+              );
+              this.decoys.push(decoy);
+              
+              this.pushEvent(`Decoy deployed at (${Math.round(bullet.x)}, ${Math.round(bullet.y)})`);
+              log('DECOY_DEPLOYED', {
+                room: this.id,
+                decoyId,
+                owner: bullet.ownerId,
+                tick: this.tick
+              });
+              
+              bulletsToRemove.add(bullet.id);
+              continue;
             }
             // 其他手雷继续等待 TTL 爆炸
           } else {
@@ -2443,6 +2639,35 @@ export class Room {
             const explosionRadius = props.explosionRadius ?? 150;
             this.createFlashbang(bullet.x, bullet.y, flashRadius, flashDurationMs, bullet.ownerId);
             this.explosions.push({ x: bullet.x, y: bullet.y, radius: explosionRadius });
+          } else if (bullet.weaponTypeId === 'w_decoy') {
+            const decoyId = `decoy_${this.seed}_${this.decoyIdCounter++}`;
+            const owner = this.players.get(bullet.ownerId);
+            let angle = 0;
+            if (bullet.targetX !== undefined && bullet.targetY !== undefined) {
+               angle = Math.atan2(bullet.targetY - bullet.spawnY, bullet.targetX - bullet.spawnX);
+            } else {
+               angle = Math.atan2(bullet.vy, bullet.vx);
+            }
+
+            const decoy = new Decoy(
+              decoyId,
+              bullet.x,
+              bullet.y,
+              bullet.ownerId,
+              owner?.name,
+              owner?.weaponRuntime?.weaponTypeId, // Mimic current weapon
+              owner?.equippedArmorTypeId ?? undefined,
+              angle
+            );
+            this.decoys.push(decoy);
+            
+            this.pushEvent(`Decoy deployed at (${Math.round(bullet.x)}, ${Math.round(bullet.y)})`);
+            log('DECOY_DEPLOYED', {
+              room: this.id,
+              decoyId,
+              owner: bullet.ownerId,
+              tick: this.tick
+            });
           } else {
             const props = this.getGrenadeProps(bullet.weaponTypeId);
             const explosionRadius = props.explosionRadius ?? 100;
@@ -2782,6 +3007,54 @@ export class Room {
           }
         }
       }
+
+      // Decoy collision detection (similar to player collision)
+      for (const decoy of this.decoys) {
+        if (decoy.hp <= 0) continue; // Skip dead decoys
+
+        // Decoys don't have position history, so no rewind needed for them
+        if (segmentIntersectsCircle(oldX, oldY, bullet.x, bullet.y, decoy.x, decoy.y, PLAYER_HIT_RADIUS)) {
+          const baseDamage = bullet.damage;
+          const armorReduction = 0; // Decoys have no armor
+          const finalDamage = Math.floor(baseDamage * (1 - armorReduction));
+          decoy.takeDamage(finalDamage);
+
+          if (decoy.hp <= 0) {
+            // 诱饵被摧毁，触发眩晕爆炸
+            this.createStunExplosion(decoy.x, decoy.y, 150, 3000, decoy.ownerId);
+            // 添加爆炸视觉效果
+            this.explosions.push({ x: decoy.x, y: decoy.y, radius: 150 });
+            
+            log('DECOY_DESTROYED', {
+              room: this.id,
+              decoyId: decoy.id,
+              owner: decoy.ownerId,
+              shooter: bullet.ownerId,
+              tick: this.tick,
+            });
+            this.pushEvent(`Decoy ${decoy.id} destroyed by ${bullet.ownerId}`);
+          }
+
+          // Send hit event to shooter
+          if (!this.combatEvents.has(bullet.ownerId)) {
+            this.combatEvents.set(bullet.ownerId, []);
+          }
+          this.combatEvents.get(bullet.ownerId)!.push({ kind: 'HIT' });
+
+          log('DECOY_HIT', {
+            room: this.id,
+            decoyId: decoy.id,
+            shooter: bullet.ownerId,
+            damage: finalDamage,
+            decoyHpRemaining: decoy.hp,
+            tick: this.tick,
+          });
+
+          this.applyExplosion(bullet, decoy.x, decoy.y);
+          bulletsToRemove.add(bullet.id);
+          break; // Bullet hits one target
+        }
+      }
     }
 
     // Step4: 移除所有标记的子弹（用Set.has，O(1)查找）
@@ -2813,6 +3086,30 @@ export class Room {
         tick: this.tick,
       });
     }
+  }
+
+  // New: Update decoys (movement, lifetime)
+  public updateDecoys(deltaTime: number): void {
+    const decoysToRemove = new Set<string>();
+    for (const decoy of this.decoys) {
+      if (decoy.hp <= 0) {
+        decoysToRemove.add(decoy.id);
+        continue;
+      }
+
+      decoy.update(deltaTime, this.obstacles, this.mapConfig.width, this.mapConfig.height);
+ 
+      if (decoy.durationMs > 0 && Date.now() - decoy.createdAt > decoy.durationMs) {
+        log('DECOY_LIFETIME_END', {
+          room: this.id,
+          decoyId: decoy.id,
+          owner: decoy.ownerId,
+          tick: this.tick,
+        });
+        decoysToRemove.add(decoy.id);
+      }
+    }
+    this.decoys = this.decoys.filter(d => !decoysToRemove.has(d.id));
   }
 
   // ===== AI系统方法 =====
@@ -3207,6 +3504,7 @@ export class Room {
     lootBags: LootBag[];
     obstacles: OBSTACLE_STATE[];
     ais: AI_STATE[];
+    decoys: DECOY_STATE[]; // Added decoys to snapshot
   } {
     // 新增: 只包含 ALIVE/DEAD 状态的玩家（EXTRACTED 玩家不再出现在 snapshot 中）
     // 未来会改为检查 inWorld 字段
@@ -3262,6 +3560,32 @@ export class Room {
       lootBags: this.getLootBags(), // 新增: 掉落包
       obstacles: this.getObstacles(), // 新增: 障碍物（可破坏，需要同步）
       ais: aiStates, // 新增: AI实体
+      decoys: this.decoys
+        .filter(d => d.hp > 0) // 只同步存活的诱饵
+        .map(d => {
+          // 计算诱饵是否在草丛内
+          const bushId = this.isPlayerInBush(d.x, d.y);
+          // 计算诱饵是否在烟雾内
+          const smokeId = this.isPointInSmoke(d.x, d.y);
+          
+          return {
+            id: d.id,
+            x: d.x,
+            y: d.y,
+            vx: d.vx,
+            vy: d.vy,
+            ownerId: d.ownerId,
+            hp: d.hp,
+            maxHp: d.maxHp,
+            name: d.name,
+            weaponTypeId: d.weaponTypeId,
+            armorTypeId: d.armorTypeId,
+            inBush: !!bushId,
+            inBushId: bushId,
+            inSmoke: !!smokeId,
+            inSmokeId: smokeId,
+          };
+        }),
     };
   }
 
@@ -3849,6 +4173,8 @@ export class Room {
     return smokes;
   }
 
+
+
   // 新增: 自动交互（服务端选最近可交互目标）
   // 优先级：worldItems > lootBags
   handleAutoInteract(playerId: string): { success: boolean; message?: string; target?: string } {
@@ -4108,8 +4434,39 @@ export class Room {
 
         return { success: true, itemType: 'regeneration_serum' };
         
-      } else if (item.typeId === 'frag_grenade' || item.typeId === 'smoke_grenade') {
-        // 手雷/烟雾弹不能通过快捷栏直接使用，需要通过投掷系统
+      } else if (item.typeId === 'i_disguise') {
+        // 伪装工具包：使用后获得伪装 Buff
+        const itemType = getItemType(item.typeId);
+        const DURATION_MS = itemType.consumableProps?.disguiseDurationMs ?? 30000;
+
+        // 添加/刷新 Buff
+        player.addOrRefreshBuff(
+          {
+            id: 'disguise_kit',
+            name: '伪装',
+            kind: 'disguise',
+            durationMs: DURATION_MS,
+          },
+          this.tick
+        );
+
+        const removed = player.removeItem(item.iid, 1);
+        if (!removed) {
+          return { success: false, message: 'Failed to consume item' };
+        }
+        player.cleanupInventory();
+
+        this.pushEvent(`Player ${playerId} used Disguise Kit`);
+        log('USE_DISGUISE', {
+           room: this.id,
+           player: playerId,
+           durationMs: DURATION_MS,
+           tick: this.tick
+        });
+        return { success: true, itemType: 'i_disguise' };
+
+      } else if (item.typeId === 'frag_grenade' || item.typeId === 'smoke_grenade' || item.typeId === 'w_decoy') {
+        // 手雷/烟雾弹/诱饵 不能通过快捷栏直接使用，需要通过投掷系统
         return { success: false, message: 'Use number key to aim and throw grenade' };
       }
       

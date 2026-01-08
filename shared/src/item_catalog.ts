@@ -8,6 +8,7 @@ export const ITEM_CATALOG: Record<string, ItemType> = {
   // 消耗品
   ammo: {
     id: 'ammo',
+    category: 'consumable',
     name: '弹药',
     rarity: 'COMMON',
     value: 50,
@@ -15,6 +16,7 @@ export const ITEM_CATALOG: Record<string, ItemType> = {
   },
   medkit: {
     id: 'medkit',
+    category: 'consumable',
     name: '急救包',
     rarity: 'COMMON',
     value: 150,
@@ -28,6 +30,7 @@ export const ITEM_CATALOG: Record<string, ItemType> = {
   // COMMON items (2个)
   scrap_metal: {
     id: 'scrap_metal',
+    category: 'material',
     name: '废金属',
     rarity: 'COMMON',
     value: 5,
@@ -35,6 +38,7 @@ export const ITEM_CATALOG: Record<string, ItemType> = {
   },
   cloth: {
     id: 'cloth',
+    category: 'material',
     name: '布料',
     rarity: 'COMMON',
     value: 3,
@@ -44,6 +48,7 @@ export const ITEM_CATALOG: Record<string, ItemType> = {
   // RARE items (3个)
   electronics: {
     id: 'electronics',
+    category: 'material',
     name: '电子零件',
     rarity: 'RARE',
     value: 25,
@@ -51,6 +56,7 @@ export const ITEM_CATALOG: Record<string, ItemType> = {
   },
   medical_supplies: {
     id: 'medical_supplies',
+    category: 'material',
     name: '医疗材料',
     rarity: 'RARE',
     value: 30,
@@ -58,6 +64,7 @@ export const ITEM_CATALOG: Record<string, ItemType> = {
   },
   weapon_parts: {
     id: 'weapon_parts',
+    category: 'material',
     name: '武器零件',
     rarity: 'RARE',
     value: 40,
@@ -67,6 +74,7 @@ export const ITEM_CATALOG: Record<string, ItemType> = {
   // EPIC items (新增材料)
   rare_metal: {
     id: 'rare_metal',
+    category: 'material',
     name: '稀有金属',
     rarity: 'EPIC',
     value: 100,
@@ -74,6 +82,7 @@ export const ITEM_CATALOG: Record<string, ItemType> = {
   },
   advanced_circuit: {
     id: 'advanced_circuit',
+    category: 'material',
     name: '高级电路板',
     rarity: 'EPIC',
     value: 150,
@@ -81,6 +90,7 @@ export const ITEM_CATALOG: Record<string, ItemType> = {
   },
   combat_stim: {
     id: 'combat_stim',
+    category: 'consumable',
     name: '战斗兴奋剂',
     rarity: 'EPIC',
     value: 200,
@@ -93,6 +103,7 @@ export const ITEM_CATALOG: Record<string, ItemType> = {
   },
   regeneration_serum: {
     id: 'regeneration_serum',
+    category: 'consumable',
     name: '再生血清',
     rarity: 'EPIC',
     value: 250,
@@ -107,6 +118,7 @@ export const ITEM_CATALOG: Record<string, ItemType> = {
   // 武器
   w_pistol: {
     id: 'w_pistol',
+    category: 'weapon',
     name: '手枪',
     rarity: 'COMMON',
     value: 200,
@@ -114,6 +126,7 @@ export const ITEM_CATALOG: Record<string, ItemType> = {
   },
   w_smg: {
     id: 'w_smg',
+    category: 'weapon',
     name: '冲锋枪',
     rarity: 'RARE',
     value: 600,
@@ -121,6 +134,7 @@ export const ITEM_CATALOG: Record<string, ItemType> = {
   },
   w_burst: {
     id: 'w_burst',
+    category: 'weapon',
     name: '三连发步枪',
     rarity: 'RARE',
     value: 800,
@@ -128,6 +142,7 @@ export const ITEM_CATALOG: Record<string, ItemType> = {
   },
   w_dmr: {
     id: 'w_dmr',
+    category: 'weapon',
     name: '精确步枪',
     rarity: 'RARE',
     value: 1200,
@@ -135,6 +150,7 @@ export const ITEM_CATALOG: Record<string, ItemType> = {
   },
   w_shotgun: {
     id: 'w_shotgun',
+    category: 'weapon',
     name: '霰弹枪',
     rarity: 'RARE',
     value: 900,
@@ -142,6 +158,7 @@ export const ITEM_CATALOG: Record<string, ItemType> = {
   },
   w_sniper: {
     id: 'w_sniper',
+    category: 'weapon',
     name: '狙击步枪',
     rarity: 'RARE',
     value: 1800,
@@ -149,6 +166,7 @@ export const ITEM_CATALOG: Record<string, ItemType> = {
   },
   w_grenade_launcher: {
     id: 'w_grenade_launcher',
+    category: 'weapon',
     name: '榴弹炮',
     rarity: 'EPIC',
     value: 2200,
@@ -156,6 +174,7 @@ export const ITEM_CATALOG: Record<string, ItemType> = {
   },
   w_minigun: {
     id: 'w_minigun',
+    category: 'weapon',
     name: '加特林机枪',
     rarity: 'EPIC',
     value: 3000,
@@ -163,6 +182,7 @@ export const ITEM_CATALOG: Record<string, ItemType> = {
   },
   w_anti_material: {
     id: 'w_anti_material',
+    category: 'weapon',
     name: '反器材狙击枪',
     rarity: 'EPIC',
     value: 3500,
@@ -170,6 +190,7 @@ export const ITEM_CATALOG: Record<string, ItemType> = {
   },
   w_double_barrel: {
     id: 'w_double_barrel',
+    category: 'weapon',
     name: '双管霰弹枪',
     rarity: 'RARE',
     value: 1500,
@@ -177,6 +198,7 @@ export const ITEM_CATALOG: Record<string, ItemType> = {
   },
   w_laser_rifle: {
     id: 'w_laser_rifle',
+    category: 'weapon',
     name: '激光步枪',
     rarity: 'EPIC',
     value: 2500,
@@ -184,6 +206,7 @@ export const ITEM_CATALOG: Record<string, ItemType> = {
   },
   w_crossbow: {
     id: 'w_crossbow',
+    category: 'weapon',
     name: '弩',
     rarity: 'RARE',
     value: 1400,
@@ -191,6 +214,7 @@ export const ITEM_CATALOG: Record<string, ItemType> = {
   },
   w_auto_shotgun: {
     id: 'w_auto_shotgun',
+    category: 'weapon',
     name: '全自动霰弹枪',
     rarity: 'RARE',
     value: 1800,
@@ -198,6 +222,7 @@ export const ITEM_CATALOG: Record<string, ItemType> = {
   },
   w_precision_rifle: {
     id: 'w_precision_rifle',
+    category: 'weapon',
     name: '精确射手步枪',
     rarity: 'EPIC',
     value: 2000,
@@ -205,6 +230,7 @@ export const ITEM_CATALOG: Record<string, ItemType> = {
   },
   w_micro_smg: {
     id: 'w_micro_smg',
+    category: 'weapon',
     name: '微型冲锋枪',
     rarity: 'RARE',
     value: 1000,
@@ -212,6 +238,7 @@ export const ITEM_CATALOG: Record<string, ItemType> = {
   },
   w_chainsaw: {
     id: 'w_chainsaw',
+    category: 'weapon',
     name: '链锯',
     rarity: 'RARE',
     value: 1200,
@@ -221,6 +248,7 @@ export const ITEM_CATALOG: Record<string, ItemType> = {
   // 投掷物消耗品
   frag_grenade: {
     id: 'frag_grenade',
+    category: 'consumable',
     name: '破片手雷',
     rarity: 'RARE',
     value: 300,
@@ -233,6 +261,7 @@ export const ITEM_CATALOG: Record<string, ItemType> = {
   },
   flash_grenade: {
     id: 'flash_grenade',
+    category: 'consumable',
     name: '闪光弹',
     rarity: 'RARE',
     value: 200,
@@ -246,6 +275,7 @@ export const ITEM_CATALOG: Record<string, ItemType> = {
   },
   smoke_grenade: {
     id: 'smoke_grenade',
+    category: 'consumable',
     name: '烟雾弹',
     rarity: 'RARE',
     value: 180,
@@ -257,9 +287,38 @@ export const ITEM_CATALOG: Record<string, ItemType> = {
     },
   },
   
+  // 战术道具
+  w_decoy: {
+    id: 'w_decoy',
+    category: 'consumable',
+    name: '全息诱饵',
+    rarity: 'RARE',
+    value: 400,
+    stackMax: 3,
+    shortName: '诱饵',
+    consumableProps: {
+      // 诱饵不需要很多属性，由服务器逻辑处理生成实体
+      // 借用 explosionRadius 作为"触发"标记
+      explosionRadius: 1, 
+    },
+  },
+  i_disguise: {
+    id: 'i_disguise',
+    category: 'consumable',
+    name: '伪装工具包',
+    rarity: 'RARE',
+    value: 500,
+    stackMax: 2,
+    shortName: '伪装',
+    consumableProps: {
+      disguiseDurationMs: 30000, // 30秒伪装
+    },
+  },
+  
   // EPIC 消耗品
   advanced_medkit: {
     id: 'advanced_medkit',
+    category: 'consumable',
     name: '高级急救包',
     rarity: 'EPIC',
     value: 250,
@@ -271,6 +330,7 @@ export const ITEM_CATALOG: Record<string, ItemType> = {
   },
   armor_plate_item: {
     id: 'armor_plate_item',
+    category: 'consumable',
     name: '防弹插板',
     rarity: 'EPIC',
     value: 800,
@@ -280,6 +340,7 @@ export const ITEM_CATALOG: Record<string, ItemType> = {
   // 背包 (5个)
   bag_sling: {
     id: 'bag_sling',
+    category: 'bag',
     name: '小挎包',
     rarity: 'COMMON',
     value: 100,
@@ -287,6 +348,7 @@ export const ITEM_CATALOG: Record<string, ItemType> = {
   },
   bag_daypack: {
     id: 'bag_daypack',
+    category: 'bag',
     name: '小背包',
     rarity: 'RARE',
     value: 300,
@@ -294,6 +356,7 @@ export const ITEM_CATALOG: Record<string, ItemType> = {
   },
   bag_tactical: {
     id: 'bag_tactical',
+    category: 'bag',
     name: '战术背包',
     rarity: 'RARE',
     value: 700,
@@ -301,6 +364,7 @@ export const ITEM_CATALOG: Record<string, ItemType> = {
   },
   bag_expedition: {
     id: 'bag_expedition',
+    category: 'bag',
     name: '大背包',
     rarity: 'RARE',
     value: 1200,
@@ -308,6 +372,7 @@ export const ITEM_CATALOG: Record<string, ItemType> = {
   },
   bag_military: {
     id: 'bag_military',
+    category: 'bag',
     name: '军用背包',
     rarity: 'EPIC',
     value: 2000,
@@ -317,6 +382,7 @@ export const ITEM_CATALOG: Record<string, ItemType> = {
   // 防具 (5个)
   armor_light: {
     id: 'armor_light',
+    category: 'armor',
     name: '轻甲',
     rarity: 'RARE',
     value: 150,
@@ -324,6 +390,7 @@ export const ITEM_CATALOG: Record<string, ItemType> = {
   },
   armor_kevlar: {
     id: 'armor_kevlar',
+    category: 'armor',
     name: '凯夫拉甲',
     rarity: 'RARE',
     value: 400,
@@ -331,6 +398,7 @@ export const ITEM_CATALOG: Record<string, ItemType> = {
   },
   armor_plate: {
     id: 'armor_plate',
+    category: 'armor',
     name: '插板甲',
     rarity: 'RARE',
     value: 900,
@@ -338,6 +406,7 @@ export const ITEM_CATALOG: Record<string, ItemType> = {
   },
   armor_heavy: {
     id: 'armor_heavy',
+    category: 'armor',
     name: '重甲',
     rarity: 'EPIC',
     value: 3000,
@@ -345,6 +414,7 @@ export const ITEM_CATALOG: Record<string, ItemType> = {
   },
   armor_exo: {
     id: 'armor_exo',
+    category: 'armor',
     name: '外骨骼装甲',
     rarity: 'EPIC',
     value: 2500,

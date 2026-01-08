@@ -100,6 +100,7 @@ export const C2S_BUY_SCHEMA = z.object({
   type: z.literal('C2S_BUY'),
   typeId: z.string(),
   qty: z.number().int().positive(),
+  autoAction: z.enum(['none', 'equip', 'prep']).optional().default('none'),
 });
 
 // 新增: 进入战局
@@ -222,7 +223,7 @@ export const WEAPON_RUNTIME_SCHEMA = z.object({
 export const PLAYER_BUFF_SCHEMA = z.object({
   id: z.string(),
   name: z.string(),
-  kind: z.enum(['speed', 'damage_reduction', 'regeneration']),
+  kind: z.enum(['speed', 'damage_reduction', 'regeneration', 'disguise']),
   remainingMs: z.number().int().nonnegative(),
   totalMs: z.number().int().positive(),
   speedMultiplier: z.number().positive().optional(),
@@ -252,6 +253,8 @@ export const PLAYER_STATE_SCHEMA = z.object({
   inSmokeId: z.string().nullable().optional().default(null), // 新增: 所在的烟雾ID
   isFlashed: z.boolean().optional().default(false), // 新增: 是否被闪光弹致盲
   flashEndTime: z.number().optional().default(0), // 新增: 致盲结束时间（毫秒时间戳）
+  isStunned: z.boolean().optional().default(false), // 新增: 是否被眩晕
+  stunnedEndTime: z.number().optional().default(0), // 新增: 眩晕结束时间（毫秒时间戳）
   raidEquipment: PLAYER_RAID_EQUIPMENT_SCHEMA.optional(), // 新增: 局内装备状态
   killedBy: z.string().optional(), // 新增: 击杀者名字
   killedByWeaponName: z.string().optional(), // 新增: 击杀使用的武器名称
@@ -260,6 +263,10 @@ export const PLAYER_STATE_SCHEMA = z.object({
   usingItemTypeId: z.string().nullable().optional(),
   usingItemRemainingMs: z.number().int().nonnegative().optional(),
   usingItemTotalMs: z.number().int().positive().optional(),
+  // 伪装相关：当玩家伪装时，模拟AI的行为状态和角色（其他玩家看到伪装玩家时显示为AI）
+  disguisedAsAiBehavior: z.enum(['IDLE', 'PATROL', 'SPOTTING', 'CHASE', 'ATTACK', 'SEARCH', 'RETURN']).optional(),
+  disguisedAsAiRole: z.enum(['basic', 'sniper', 'heavy_gunner', 'scout']).optional(),
+  disguisedAimRad: z.number().optional(), // 新增: 伪装玩家的枪口指向（基于移动方向）
 });
 
 // AI实体状态 schema（用于服务端AI系统）
@@ -278,6 +285,29 @@ export const AI_STATE_SCHEMA = z.object({
   // 新增: 闪光弹状态（与玩家字段对齐）
   isFlashed: z.boolean().optional().default(false),
   flashEndTime: z.number().optional().default(0),
+  // 新增: 眩晕状态（与玩家字段对齐）
+  isStunned: z.boolean().optional().default(false),
+  stunnedEndTime: z.number().optional().default(0),
+  inBush: z.boolean().optional().default(false),
+  inBushId: z.string().nullable().optional().default(null),
+  inSmoke: z.boolean().optional().default(false),
+  inSmokeId: z.string().nullable().optional().default(null),
+});
+
+// Decoy 实体状态
+export const DECOY_STATE_SCHEMA = z.object({
+  id: z.string(),
+  x: z.number(),
+  y: z.number(),
+  vx: z.number(), // Decoys might move
+  vy: z.number(),
+  ownerId: z.string(),
+  name: z.string().optional(),
+  weaponTypeId: z.string().optional(),
+  armorTypeId: z.string().optional(),
+  hp: z.number(),
+  maxHp: z.number(),
+  // 新增: 草丛/烟雾可见性字段（与玩家/AI保持一致）
   inBush: z.boolean().optional().default(false),
   inBushId: z.string().nullable().optional().default(null),
   inSmoke: z.boolean().optional().default(false),
@@ -356,6 +386,7 @@ export const S2C_SNAPSHOT_SCHEMA = z.object({
   lootBags: z.array(LOOT_BAG_SCHEMA).optional(), // 新增: 掉落包列表
   obstacles: z.array(OBSTACLE_STATE_SCHEMA).optional(), // 新增: 障碍物列表（可破坏，需要同步）
   ais: z.array(AI_STATE_SCHEMA).default([]), // 新增: AI实体列表
+  decoys: z.array(DECOY_STATE_SCHEMA).optional(), // 新增: 诱饵列表
 });
 
 export const S2C_ERROR_SCHEMA = z.object({
@@ -481,6 +512,7 @@ export type AI_STATE = z.infer<typeof AI_STATE_SCHEMA>;
 export type BULLET_STATE = z.infer<typeof BULLET_STATE_SCHEMA>;
 export type ITEM_STATE = z.infer<typeof ITEM_STATE_SCHEMA>;
 export type OBSTACLE_STATE = z.infer<typeof OBSTACLE_STATE_SCHEMA>; // Day4-2: 障碍物类型
+export type DECOY_STATE = z.infer<typeof DECOY_STATE_SCHEMA>; // 新增: 诱饵类型
 export type S2C_SNAPSHOT = z.infer<typeof S2C_SNAPSHOT_SCHEMA>;
 export type S2C_ERROR = z.infer<typeof S2C_ERROR_SCHEMA>;
 export type S2C_WELCOME = z.infer<typeof S2C_WELCOME_SCHEMA>;

@@ -622,6 +622,8 @@ export class BulletTrackManager {
               inSmokeId: null,
               isFlashed: false,
               flashEndTime: 0,
+              isStunned: false,
+              stunnedEndTime: 0,
             };
             this.emitLocalHit(bullet, aiAsTarget);
             break;

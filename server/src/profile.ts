@@ -818,12 +818,14 @@ export class ProfileManager {
    * @param accountId 账号 ID
    * @param typeId 物品类型 ID
    * @param qty 数量
+   * @param autoAction 购买后的自动操作
    * @returns { success: boolean; money?: number; message?: string } - 成功时返回新的 money 值
    */
   buyItem(
     accountId: string,
     typeId: string,
-    qty: number
+    qty: number,
+    autoAction: 'none' | 'equip' | 'prep' = 'none'
   ): { success: boolean; money?: number; message?: string } {
     const profile = this.getProfileData(accountId);
     
@@ -844,19 +846,57 @@ export class ProfileManager {
     // 扣钱
     profile.money -= totalCost;
     
+    // 记录购买前的状态，以便找到新加的物品（如果是 autoAction）
+    // 对于不可堆叠物品，我们会生成新的 iid
+    const newIids: string[] = [];
+
     // 添加到仓库（根据stackMax决定是否堆叠）
     if (itemType.stackMax <= 1) {
       // 不可堆叠：每个实例独立（武器/防具/背包）
-      this.addNonStackableInstances(profile.stash, typeId, qty);
+      for (let i = 0; i < qty; i++) {
+        const iid = this.generateIid();
+        profile.stash.push({
+          iid,
+          typeId,
+          qty: 1,
+        });
+        newIids.push(iid);
+      }
     } else {
       // 可堆叠：自动拆栈
+      // 这里稍微复杂点，因为 addStackableToContainer 可能合并到旧栈，也可能新建栈
+      // 为了 autoAction，我们主要是针对装备（通常不可堆叠）
       this.addStackableToContainer(profile.stash, typeId, qty);
     }
     
     this.markDirty();
     this.normalizeContainers(profile);
     this.normalizeEquipment(profile);
-    log('BUY_ITEM', { accountId, typeId, qty, cost: totalCost, newMoney: profile.money });
+    log('BUY_ITEM', { accountId, typeId, qty, cost: totalCost, newMoney: profile.money, autoAction });
+
+    // 处理自动操作
+    if (autoAction !== 'none') {
+      // 找到刚刚购买的一个实例 iid
+      // 如果是可堆叠物品，目前 autoAction 可能没意义（不能装备或单独带入）
+      // 但我们还是尝试在 stash 中找一个对应的 typeId
+      let targetIid = newIids.length > 0 ? newIids[0] : null;
+      if (!targetIid) {
+        const foundInStash = profile.stash.find(item => item.typeId === typeId);
+        if (foundInStash) targetIid = foundInStash.iid;
+      }
+
+      if (targetIid) {
+        if (autoAction === 'prep') {
+          this.moveStashToPrep(accountId, targetIid, 1);
+        } else if (autoAction === 'equip') {
+          const slot = this.getItemSlot(typeId);
+          if (slot) {
+            this.equipItem(accountId, slot, targetIid);
+          }
+        }
+      }
+    }
+
     return { success: true, money: profile.money };
   }
 

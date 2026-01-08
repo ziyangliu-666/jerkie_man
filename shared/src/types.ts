@@ -4,11 +4,13 @@
  */
 
 export type Rarity = "COMMON" | "RARE" | "EPIC";
+export type ItemCategory = "weapon" | "armor" | "bag" | "consumable" | "material";
 
 export type ItemType = {
   id: string;        // "scrap_metal"
   name: string;      // "Scrap Metal"
   rarity: Rarity;
+  category: ItemCategory; // 物品分类（用于商店分类）
   value: number;     // sell price for 1 qty
   stackMax: number;  // e.g. 20
   weight?: number;   // optional future use
@@ -30,6 +32,8 @@ export type ItemType = {
     // 闪光弹属性
     flashRadius?: number;  // 致盲范围（像素）
     flashDurationMs?: number;  // 致盲持续时间（毫秒）
+    // 伪装属性
+    disguiseDurationMs?: number; // 伪装持续时间（毫秒）
   };
 };
 
@@ -70,7 +74,7 @@ export type PlayerEquipment = {
  * 短效 Buff 类型（用于局内战斗状态）
  * 只描述对客户端 UI 有用的公开信息，真正的过期/数值计算由服务端权威处理
  */
-export type BuffKind = 'speed' | 'damage_reduction' | 'regeneration';
+export type BuffKind = 'speed' | 'damage_reduction' | 'regeneration' | 'disguise';
 
 export type PlayerBuff = {
   /** Buff 唯一 ID，比如 'combat_stim' */

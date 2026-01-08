@@ -75,6 +75,7 @@ export class AI {
   public spawnId?: string; // 所属的 spawn 点 ID
   public spawnIndex?: number; // 在该 spawn 点中的索引（槽位）
   public flashedUntil: number = 0; // 新增: 闪光弹致盲结束时间（毫秒时间戳，0表示未被闪）
+  public stunnedUntil: number = 0; // 新增: 眩晕结束时间（毫秒时间戳，0表示未被眩晕）
 
   constructor(params: {
     id: string;
@@ -140,6 +141,18 @@ export class AI {
   }
 
   public toState(currentTick: number): AI_STATE {
+    // DEBUG: 记录眩晕状态
+    const isCurrentlyStunned = this.stunnedUntil > Date.now();
+    if (isCurrentlyStunned || this.stunnedUntil > 0) {
+      console.log('[Server AI.toState] Stun Debug:', {
+        aiId: this.id,
+        stunnedUntil: this.stunnedUntil,
+        now: Date.now(),
+        isStunned: isCurrentlyStunned,
+        remainingMs: Math.max(0, this.stunnedUntil - Date.now())
+      });
+    }
+    
     return {
       id: this.id,
       x: this.x,
@@ -154,6 +167,8 @@ export class AI {
       currentTargetId: this.currentTargetId, // 新增：当前目标ID（用于显示"瞄准中"）
       isFlashed: this.flashedUntil > Date.now(),
       flashEndTime: this.flashedUntil,
+      isStunned: this.stunnedUntil > Date.now(),
+      stunnedEndTime: this.stunnedUntil,
       inBush: false, // 默认false，在getSnapshot中更新
       inBushId: null,
       inSmoke: false, // 默认false，在getSnapshot中更新

@@ -1,4 +1,4 @@
-import type { PLAYER_STATE, BULLET_STATE, ITEM_STATE, OBSTACLE_STATE, WorldItem, LootBag } from '@jerkie-man/shared';
+import type { PLAYER_STATE, BULLET_STATE, ITEM_STATE, OBSTACLE_STATE, WorldItem, LootBag, DECOY_STATE } from '@jerkie-man/shared';
 import { getItemType, getWeaponDef, msToTicks, PLAYER_SPEED } from '@jerkie-man/shared';
 
 export class Renderer {
@@ -44,6 +44,11 @@ export class Renderer {
   private smokeOverlayAlpha: number = 0; // 当前覆盖层透明度 (0-1)
   private smokeOverlayTargetAlpha: number = 0; // 目标透明度 (0-1)
   private readonly SMOKE_TRANSITION_MS = 200; // 过渡时间 200ms
+
+  // 新增: 视觉反馈状态 (Decoy Glitch & Disguise Fizzle)
+  private decoyStates: Map<string, { lastHp: number, glitchUntil: number }> = new Map();
+  private disguisedPlayers: Set<string> = new Set();
+  private fizzleEffects: Array<{ x: number; y: number; until: number; maxRadius: number }> = [];
 
   constructor(canvas: HTMLCanvasElement) {
     this.canvas = canvas;
@@ -141,17 +146,28 @@ export class Renderer {
   // 绘制玩家（简单方块）
   // P0-3: 使用屏幕坐标绘制，考虑camera偏移
   drawPlayer(player: PLAYER_STATE, isLocal: boolean = false, currentServerTick?: number): void {
+    // 🎭 伪装检测：如果该玩家伪装了，则渲染为AI（包括本地玩家自己）
+    const isDisguised = player.buffs?.some(b => b.kind === 'disguise');
+    const shouldRenderAsAi = isDisguised;
+    
+    if (shouldRenderAsAi) {
+      // 🤖 渲染为AI样式（如果是本地玩家，会额外显示伪装进度条）
+      this.drawDisguisedPlayerAsAi(player, currentServerTick, isLocal);
+      return;
+    }
+    
+    // 正常玩家渲染...
     const size = 20; // 像素大小
     // 将世界坐标转换为屏幕坐标（减去camera偏移）
     // 修复: round 到整数像素，避免子像素抗锯齿导致的重影
     const screenX = Math.round(player.x - this.camX);
     const screenY = Math.round(player.y - this.camY);
 
-    // 玩家颜色（本地玩家蓝色，其他红色）
+    // 玩家颜色（本地玩家蓝色，其他玩家红色）
     this.ctx.fillStyle = isLocal ? '#00aaff' : '#ff4444';
     this.ctx.fillRect(screenX - size / 2, screenY - size / 2, size, size);
 
-    // 边框
+    // 白色边框（与AI统一）
     this.ctx.strokeStyle = '#fff';
     this.ctx.lineWidth = 2;
     this.ctx.strokeRect(screenX - size / 2, screenY - size / 2, size, size);
@@ -239,7 +255,462 @@ export class Renderer {
         }
       }
     }
+
+
+    // 新增: 绘制状态指示器 (Buffs / Debuffs)
+    // 渲染顺序：致盲 -> 隐蔽 -> Buffs
+    let indicatorIndex = 0;
+
+    // 1. 致盲状态 (isFlashed)
+    if (player.isFlashed) {
+      const now = Date.now();
+      const endTime = player.flashEndTime ?? 0;
+      const remainingMs = Math.max(0, endTime - now);
+      // 默认3000ms，或者需要从配置获取。这里简单处理，如果 remainingMs 很大则 progress=1
+      // 为了平滑显示，我们需要总时长。Snapshot里没有总时长，只给了结束时间。
+      // 近似处理：如果剩余时间大于3秒，认为刚开始。或者只显示剩余时间的比例（假设最大5秒）
+      // 实际上 drawFlashIndicator 的 progress 参数主要用于显示进度条长度。
+      // 我们可以简单地让进度条随时间缩短。假设最大时长 5000ms。
+      const totalMs = 5000; 
+      const progress = Math.min(1, Math.max(0, remainingMs / totalMs));
+      
+      this.drawFlashIndicator(player.x, player.y, progress, indicatorIndex++);
+    }
+
+    // 2. 隐蔽状态 (inBush) - 只有当玩家在草丛且对本地玩家可见时（例如队友或自己在草丛）
+    // 注意：如果隐蔽了通常渲染为草丛(isDisguised logic above covers 'disguise' buff). 
+    // 这里指普通的"进入草丛"状态.
+    // 如果玩家在草丛中，显示隐蔽标签
+    if (player.inBush) {
+      this.drawConcealmentIndicator(player.x, player.y, indicatorIndex++);
+    }
+
+    // 3. 其他 Buffs
+    if (player.buffs && player.buffs.length > 0) {
+      for (const buff of player.buffs) {
+        const remainingMs = Math.max(0, buff.remainingMs ?? 0);
+        const totalMs = Math.max(1, buff.totalMs ?? 1);
+        const progress = Math.min(1, Math.max(0, remainingMs / totalMs));
+
+        let label = buff.name;
+        let color = '#4CAF50'; // 默认绿色
+
+        // 根据 buff 类型定制颜色和图标
+        switch (buff.kind) {
+          case 'speed':
+            label = `⚡ 兴奋`; // 简化：战斗兴奋剂 → 兴奋
+            color = '#00BFFF'; // Deep Sky Blue
+            break;
+          case 'damage_reduction':
+            label = `🛡️ ${buff.name}`; // 坚韧
+            color = '#FFA500'; // Orange
+            break;
+          case 'regeneration':
+            label = `💖 再生`; // 简化：再生血清 → 再生
+            color = '#FF69B4'; // Hot Pink
+            break;
+          case 'disguise':
+            label = `🌿 伪装`; // 伪装也显示进度条
+            color = '#32CD32'; // Lime Green
+            break;
+        }
+
+        this.drawStatusIndicator(player.x, player.y, label, progress, color, indicatorIndex++);
+      }
+    }
   }
+
+  /**
+   * 新增: 将伪装玩家渲染为AI样式（其他玩家看到的伪装玩家，或伪装者自己看到的自己）
+   * @param isLocal 是否是本地玩家（本地玩家会显示伪装进度条）
+   */
+  private drawDisguisedPlayerAsAi(player: PLAYER_STATE, currentServerTick?: number, isLocal: boolean = false): void {
+    // 根据AI角色调整大小和颜色（与真实AI一致）
+    let size = 20;
+    let color = '#ff8800'; // 默认橙色
+    const role = player.disguisedAsAiRole || 'basic';
+
+    // 角色特定的视觉效果（与真实AI一致）
+    switch (role) {
+      case 'sniper':
+        size = 18; // 狙击手稍小
+        color = '#9966ff'; // 紫色
+        break;
+      case 'heavy_gunner':
+        size = 26; // 重机枪手更大
+        color = '#ff3333'; // 红色
+        break;
+      case 'scout':
+        size = 16; // 侦察兵最小
+        color = '#00ff99'; // 青色
+        break;
+      case 'basic':
+      default:
+        size = 20;
+        color = '#ff8800'; // 橙色
+        break;
+    }
+
+    const screenX = Math.round(player.x - this.camX);
+    const screenY = Math.round(player.y - this.camY);
+    
+    // 1. 绘制AI方块（根据角色调整颜色）
+    this.ctx.fillStyle = player.status === 'ALIVE' ? color : '#666666';
+    this.ctx.fillRect(screenX - size / 2, screenY - size / 2, size, size);
+    
+    // 2. 白色边框
+    this.ctx.strokeStyle = '#fff';
+    this.ctx.lineWidth = 2;
+    this.ctx.strokeRect(screenX - size / 2, screenY - size / 2, size, size);
+    
+    // 3. HP条（与真实AI一致：宽度30px）
+    if (player.status === 'ALIVE' && player.hp !== undefined) {
+      const hpBarWidth = 30; // 与真实AI一致
+      const hpBarHeight = 4;
+      const hpBarY = screenY - size / 2 - 8;
+
+      this.ctx.fillStyle = '#333';
+      this.ctx.fillRect(screenX - hpBarWidth / 2, hpBarY, hpBarWidth, hpBarHeight);
+
+      const hpRatio = player.hp / 100;
+      this.ctx.fillStyle = hpRatio > 0.5 ? '#0f0' : hpRatio > 0.25 ? '#ff0' : '#f00';
+      this.ctx.fillRect(screenX - hpBarWidth / 2, hpBarY, hpBarWidth * hpRatio, hpBarHeight);
+    }
+    
+    // 4. 绘制枪口指向（基于移动方向）
+    if (player.weaponRuntime && player.status === 'ALIVE' && player.disguisedAimRad !== undefined) {
+      const barrelLength = 15;
+      const barrelEndX = screenX + Math.cos(player.disguisedAimRad) * barrelLength;
+      const barrelEndY = screenY + Math.sin(player.disguisedAimRad) * barrelLength;
+
+      this.ctx.strokeStyle = '#fff';
+      this.ctx.lineWidth = 2;
+      this.ctx.beginPath();
+      this.ctx.moveTo(screenX, screenY);
+      this.ctx.lineTo(barrelEndX, barrelEndY);
+      this.ctx.stroke();
+    }
+
+    // 5. 新增: 绘制换弹进度条（与真实AI一致）
+    if (player.weaponRuntime && player.status === 'ALIVE' && currentServerTick !== undefined) {
+      const wr = player.weaponRuntime;
+      if (wr.reloadingUntilTick > 0 && currentServerTick < wr.reloadingUntilTick) {
+        try {
+          const weaponDef = getWeaponDef(wr.weaponTypeId);
+          const reloadTicks = msToTicks(weaponDef.reloadMs);
+          const startTick = wr.reloadingUntilTick - reloadTicks;
+          const progress = Math.min(1, (currentServerTick - startTick) / reloadTicks);
+          
+          const reloadBarWidth = size;
+          const reloadBarHeight = 3;
+          const reloadBarX = screenX - reloadBarWidth / 2;
+          const reloadBarY = screenY + size / 2 + 4;
+          
+          this.ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
+          this.ctx.fillRect(reloadBarX, reloadBarY, reloadBarWidth, reloadBarHeight);
+          
+          this.ctx.fillStyle = '#00aaff';
+          this.ctx.fillRect(reloadBarX, reloadBarY, reloadBarWidth * progress, reloadBarHeight);
+        } catch (e) {
+          // 忽略武器定义获取失败
+        }
+      }
+    }
+    
+    // 6. 显示伪AI状态标签（与真实AI样式一致）
+    const behavior = player.disguisedAsAiBehavior || 'IDLE';
+    const stateLabelY = this.drawDisguisedAiStateLabel(screenX, screenY, size, behavior);
+    
+    // 7. 如果是本地玩家，在状态标签下方显示伪装进度条（与致盲进度条样式一致）
+    if (isLocal) {
+      const disguiseBuff = player.buffs?.find(b => b.kind === 'disguise');
+      if (disguiseBuff) {
+        const progress = Math.min(1, Math.max(0, (disguiseBuff.remainingMs ?? 0) / (disguiseBuff.totalMs ?? 1)));
+        // 直接使用屏幕坐标绘制，避免 drawStatusIndicator 内部重新计算位置
+        // 状态标签在 stateLabelY（屏幕坐标），进度条应该在状态标签下方适当间距
+        const progressBarScreenY = stateLabelY + 25; // 状态标签下方25px（适当间距）
+        
+        this.ctx.save();
+        this.ctx.font = 'bold 12px monospace';
+        this.ctx.textAlign = 'center';
+        this.ctx.textBaseline = 'middle';
+        
+        const text = '🌿 伪装';
+        const metrics = this.ctx.measureText(text);
+        const textWidth = metrics.width;
+        const padding = 6;
+        const boxWidth = textWidth + padding * 2;
+        const boxHeight = 18;
+        const boxX = screenX - boxWidth / 2;
+        const boxY = progressBarScreenY - boxHeight / 2;
+        
+        // 背景框
+        this.ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
+        this.ctx.fillRect(boxX, boxY, boxWidth, boxHeight);
+        
+        // 进度条背景
+        const clampedProgress = Math.max(0, Math.min(1, progress));
+        const progressWidth = boxWidth * clampedProgress;
+        if (progressWidth > 0) {
+          this.ctx.fillStyle = 'rgba(50, 205, 50, 0.8)'; // 绿色
+          this.ctx.fillRect(boxX, boxY, progressWidth, boxHeight);
+        }
+        
+        // 描边
+        this.ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
+        this.ctx.lineWidth = 1;
+        this.ctx.strokeRect(boxX, boxY, boxWidth, boxHeight);
+        
+        // 文字
+        this.ctx.fillStyle = '#FFFFFF';
+        this.ctx.shadowColor = 'rgba(0, 0, 0, 0.8)';
+        this.ctx.shadowBlur = 2;
+        this.ctx.shadowOffsetX = 0;
+        this.ctx.shadowOffsetY = 0;
+        this.ctx.fillText(text, screenX, progressBarScreenY);
+        this.ctx.shadowBlur = 0;
+        this.ctx.restore();
+      }
+    }
+  }
+
+  /**
+   * 新增: 绘制伪装AI状态标签（与真实AI样式一致）
+   * @returns 状态标签的Y坐标（用于在其下方绘制其他元素）
+   */
+  private drawDisguisedAiStateLabel(
+    screenX: number,
+    screenY: number,
+    size: number,
+    behavior: string
+  ): number {
+    let stateText = '';
+    let bgColor = 'rgba(0, 0, 0, 0.8)';
+    let borderColor = '#fff';
+
+    switch (behavior) {
+      case 'IDLE':
+        stateText = '💤 摸鱼';
+        bgColor = 'rgba(100, 100, 100, 0.8)';
+        borderColor = '#aaa';
+        break;
+      case 'PATROL':
+        stateText = '🚶 巡逻';
+        bgColor = 'rgba(70, 130, 180, 0.85)';
+        borderColor = '#87CEEB';
+        break;
+      case 'SPOTTING':
+        stateText = '⚠️ 发现';
+        bgColor = 'rgba(255, 165, 0, 0.85)';
+        borderColor = '#FFD700';
+        break;
+      case 'CHASE':
+        stateText = '🏃 追击';
+        bgColor = 'rgba(255, 215, 0, 0.85)';
+        borderColor = '#FFD700';
+        break;
+      case 'ATTACK':
+        stateText = '🔥 攻击';
+        bgColor = 'rgba(220, 20, 60, 0.85)';
+        borderColor = '#FF6347';
+        break;
+      case 'SEARCH':
+        stateText = '🔍 搜索';
+        bgColor = 'rgba(255, 140, 0, 0.85)';
+        borderColor = '#FFA500';
+        break;
+      case 'RETURN':
+        stateText = '↩ 返回';
+        bgColor = 'rgba(50, 205, 50, 0.85)';
+        borderColor = '#90EE90';
+        break;
+      default:
+        stateText = '💤 摸鱼';
+        bgColor = 'rgba(100, 100, 100, 0.8)';
+        borderColor = '#aaa';
+        break;
+    }
+
+    if (stateText) {
+      this.ctx.save();
+
+      this.ctx.font = 'bold 12px monospace';
+      this.ctx.textAlign = 'center';
+      this.ctx.textBaseline = 'middle';
+
+      const metrics = this.ctx.measureText(stateText);
+      const textWidth = metrics.width;
+      const padding = 6;
+      const boxWidth = textWidth + padding * 2;
+      const boxHeight = 20;
+      const textY = screenY + size / 2 + 15;
+
+      // 绘制背景框
+      this.ctx.fillStyle = bgColor;
+      this.ctx.fillRect(screenX - boxWidth / 2, textY - boxHeight / 2, boxWidth, boxHeight);
+
+      // 绘制边框
+      this.ctx.strokeStyle = borderColor;
+      this.ctx.lineWidth = 1.5;
+      this.ctx.strokeRect(screenX - boxWidth / 2, textY - boxHeight / 2, boxWidth, boxHeight);
+
+      // 绘制文字
+      this.ctx.fillStyle = '#FFFFFF';
+      this.ctx.fillText(stateText, screenX, textY);
+
+      this.ctx.restore();
+      
+      // 返回状态标签的Y坐标（用于在其下方绘制其他元素）
+      return textY;
+    }
+    
+    // 如果没有状态文本，返回默认位置
+    return screenY + size / 2 + 15;
+  }
+
+  // 新增: 绘制诱饵（外观模仿玩家）
+  drawDecoy(decoy: DECOY_STATE, isOwner: boolean = false): void {
+    const size = 20; // 像素大小
+    const screenX = Math.round(decoy.x - this.camX);
+    const screenY = Math.round(decoy.y - this.camY);
+
+    // 诱饵颜色：如果是拥有者，显示为蓝色但半透明（区分）；敌人看到的是红色（完全模仿玩家）
+    // 为了达到迷惑效果，敌人看到的必须和普通玩家一模一样（红色）
+    this.ctx.fillStyle = isOwner ? 'rgba(0, 170, 255, 0.7)' : '#ff4444'; 
+    this.ctx.fillRect(screenX - size / 2, screenY - size / 2, size, size);
+
+    // 边框
+    this.ctx.strokeStyle = '#fff';
+    this.ctx.lineWidth = 2;
+    // HP条
+    const barWidth = size;
+    const barHeight = 4;
+    
+    // Glitch Effect: 如果受击，添加随机抖动和色差
+    const state = this.decoyStates.get(decoy.id);
+    const isGlitching = state && Date.now() < state.glitchUntil;
+    let drawX = screenX;
+    let drawY = screenY;
+    
+    this.ctx.save();
+    
+    if (isGlitching) {
+      // 随机偏移
+      drawX += (Math.random() - 0.5) * 10;
+      drawY += (Math.random() - 0.5) * 10;
+      
+      // 色差错位效果 (模拟全息投影不稳定) - 绘制青色和红色残影
+      this.ctx.globalAlpha = 0.6;
+      this.ctx.fillStyle = '#0ff'; // Cyan
+      this.ctx.fillRect(drawX - size / 2 - 2, drawY - size / 2, size, size);
+      
+      this.ctx.fillStyle = '#f0f'; // Magenta
+      this.ctx.fillRect(drawX - size / 2 + 2, drawY - size / 2, size, size);
+      
+      this.ctx.globalAlpha = 1.0;
+      
+      // 偶尔闪烁透明度
+      if (Math.random() < 0.3) {
+        this.ctx.globalAlpha = 0.3;
+      }
+    }
+
+    // 🎭 核心改变：诱饵完全模仿真实玩家外观
+    // 对于拥有者：显示为略带蓝色的敌人（让你知道这是你的诱饵）
+    // 对于其他人：显示为完全的红色敌人（无法区分）
+    if (isOwner) {
+      // 拥有者看到的：蓝紫色（介于蓝色和红色之间，暗示这是"假的敌人"）
+      this.ctx.fillStyle = 'rgba(138, 43, 226, 0.85)'; // BlueViolet with slight transparency
+    } else {
+      // 其他人看到的：完全和真实敌方玩家一样的红色
+      this.ctx.fillStyle = '#ff4444';
+    }
+    this.ctx.fillRect(drawX - size / 2, drawY - size / 2, size, size);
+
+    // 白色边框（与真实玩家完全一致）
+    this.ctx.strokeStyle = '#fff';
+    this.ctx.lineWidth = 2;
+    this.ctx.strokeRect(drawX - size / 2, drawY - size / 2, size, size);
+    
+    this.ctx.restore();
+
+    // HP条（与玩家位置一致：在方块上方）
+    const barX = drawX - barWidth / 2;
+    const barY = drawY - size / 2 - 8;
+
+    this.ctx.fillStyle = '#333';
+    this.ctx.fillRect(barX, barY, barWidth, barHeight);
+
+    const hpPercent = decoy.hp / decoy.maxHp;
+    this.ctx.fillStyle = hpPercent > 0.5 ? '#0f0' : hpPercent > 0.25 ? '#ff0' : '#f00';
+    this.ctx.fillRect(barX, barY, barWidth * hpPercent, barHeight);
+    
+    // 如果Glitch中，显示 "ERROR" 或 "FAIL" 文本
+    if (isGlitching) {
+      this.ctx.fillStyle = '#f00';
+      this.ctx.textAlign = 'center';
+      this.ctx.fillText('! ERROR !', drawX, drawY - size / 2 - 5);
+      this.ctx.restore();
+    }
+    // 显示名字（模仿玩家）
+    const displayName = decoy.name;
+    if (displayName) {
+      const nameY = screenY - size / 2 - 12;
+      // 只在屏幕内才绘制名字
+      if (nameY >= 0 && nameY < this.cssHeight && screenX >= 0 && screenX < this.cssWidth) {
+        this.ctx.save();
+        this.ctx.fillStyle = '#fff';
+        this.ctx.font = 'bold 12px monospace';
+        this.ctx.textAlign = 'center';
+        this.ctx.textBaseline = 'bottom';
+        this.ctx.strokeStyle = '#000';
+        this.ctx.lineWidth = 3;
+        this.ctx.miterLimit = 2;
+        this.ctx.strokeText(displayName, screenX, nameY);
+        this.ctx.fillText(displayName, screenX, nameY);
+        this.ctx.restore();
+      }
+    }
+  }
+
+  // 新增: 绘制伪装失效特效 (Fizzle)
+  private drawFizzleEffect(effect: { x: number; y: number; until: number; maxRadius: number }, now: number): void {
+    const screenX = Math.round(effect.x - this.camX);
+    const screenY = Math.round(effect.y - this.camY);
+    
+    // 剩下多少时间
+    const remaining = Math.max(0, effect.until - now);
+    const totalDuration = 500; // 与之前设置的 一致
+    const progress = 1 - (remaining / totalDuration); // 0 -> 1
+    
+    this.ctx.save();
+    
+    // 扩散的像素圆环
+    const radius = effect.maxRadius * progress;
+    this.ctx.beginPath();
+    this.ctx.arc(screenX, screenY, radius, 0, Math.PI * 2);
+    this.ctx.strokeStyle = `rgba(100, 255, 255, ${1 - progress})`; // 青色消失
+    this.ctx.lineWidth = 2;
+    this.ctx.stroke();
+    
+    // 随机像素块飞散
+    const particleCount = 8;
+    for (let i = 0; i < particleCount; i++) {
+        // 让粒子旋转并扩散
+        const angle = (i / particleCount) * Math.PI * 2 + progress * 5; 
+        const dist = radius * (0.8 + Math.random() * 0.4);
+        const px = screenX + Math.cos(angle) * dist;
+        const py = screenY + Math.sin(angle) * dist;
+        
+        this.ctx.fillStyle = `rgba(200, 255, 255, ${1 - progress})`;
+        const pSize = 3 * (1 - progress);
+        this.ctx.fillRect(px - pSize/2, py - pSize/2, pSize, pSize);
+    }
+    
+    this.ctx.restore();
+  }
+
+
 
   /**
    * 新增: 更新玩家拖影轨迹（基于世界坐标）
@@ -1364,6 +1835,11 @@ export class Renderer {
     this.drawStatusIndicator(entityX, entityY, '⚡ 致盲', progress, 'rgba(255, 255, 255, 0.8)', index);
   }
 
+  // 绘制眩晕状态提示
+  private drawStunIndicator(entityX: number, entityY: number, progress: number = 1.0, index: number = 0): void {
+    this.drawStatusIndicator(entityX, entityY, '💫 眩晕', progress, 'rgba(255, 200, 0, 0.8)', index);
+  }
+
   // 绘制隐蔽状态提示
   private drawConcealmentIndicator(entityX: number, entityY: number, index: number = 0): void {
     this.drawStatusIndicator(entityX, entityY, '🌿 隐蔽', 1.0, 'rgba(34, 139, 34, 0.8)', index);
@@ -1391,7 +1867,8 @@ export class Renderer {
     nearbyInteractable?: { type: 'worldItem' | 'lootBag' | 'extractZone'; name: string; distance: number } | null, // 新增: 附近可交互目标
     localPlayer?: PLAYER_STATE | null, // 新增: 本地玩家（用于计算相对位置）
     isLocalPlayerInBush: boolean = false, // 新增: 本地玩家是否在草丛内
-    ais: any[] = [] // 新增: AI实体列表
+    ais: any[] = [], // 新增: AI实体列表
+    decoys: DECOY_STATE[] = [] // 新增: 诱饵列表
   ): void {
     this.clear();
 
@@ -1466,6 +1943,46 @@ export class Renderer {
     const localInBushId = localPlayer?.inBushId ?? null;
     const localInSmokeId = localPlayer?.inSmokeId ?? null;
 
+    // 绘制诱饵
+    const currentDecoyIds = new Set<string>();
+    for (const decoy of decoys) {
+      currentDecoyIds.add(decoy.id);
+      // 检查诱饵状态，检测受击
+      let state = this.decoyStates.get(decoy.id);
+      if (!state) {
+        state = { lastHp: decoy.hp, glitchUntil: 0 };
+        this.decoyStates.set(decoy.id, state);
+      } else {
+        if (decoy.hp < state.lastHp) {
+          // 受到伤害，触发 Glitch 效果 (300ms)
+          state.glitchUntil = now + 300;
+        }
+        state.lastHp = decoy.hp;
+      }
+
+      // 诱饵可见性规则：
+      // 诱饵的目的是吸引注意力和迷惑敌人，所以应该几乎总是可见
+      // 唯一例外：烟雾完全遮挡视线时（与玩家规则一致）
+      // 注意：诱饵不受草丛影响，因为它们需要被看到才能起到诱骗作用
+      const decoyInSmoke = decoy.inSmoke ?? false;
+      const localInSmoke = localPlayer?.inSmoke ?? false;
+      
+      // 烟雾可见性规则：如果诱饵在烟雾内，或本地玩家在烟雾内，则不可见
+      const isVisible = !decoyInSmoke && !localInSmoke;
+
+      if (!isVisible) {
+        continue; // 跳过被烟雾遮挡的诱饵
+      }
+
+      this.drawDecoy(decoy, decoy.ownerId === localPlayerId);
+    }
+    // 清理已销毁的诱饵状态
+    for (const id of this.decoyStates.keys()) {
+      if (!currentDecoyIds.has(id)) {
+        this.decoyStates.delete(id);
+      }
+    }
+
     // 清理已离场玩家的拖影（不在 snapshot 里的玩家）
     const activeIds = new Set(players.map((p) => p.id));
     for (const id of this.playerTrails.keys()) {
@@ -1499,6 +2016,28 @@ export class Renderer {
         // - 对本地玩家，优先使用预测/平滑后的 localPlayer
         // - 其他玩家使用 snapshot/interpolated 的 player
         const visualPlayer = isLocal && localPlayer ? localPlayer : player;
+
+        // 检测伪装破碎 (Disguise Fizzle)
+        // 逻辑：如果上一帧在 disguisedPlayers 中，但当前 buff 中没有 disguise，则触发 Fizzle
+        const wasDisguised = this.disguisedPlayers.has(visualPlayer.id);
+        const isDisguised = visualPlayer.buffs?.some(b => b.kind === 'disguise') ?? false;
+        
+        if (wasDisguised && !isDisguised) {
+          // 伪装刚刚失效，触发 Fizzle 特效
+          this.fizzleEffects.push({
+            x: visualPlayer.x,
+            y: visualPlayer.y,
+            until: now + 500, // 500ms 动画
+            maxRadius: 35,
+          });
+        }
+        
+        // 更新状态
+        if (isDisguised) {
+          this.disguisedPlayers.add(visualPlayer.id);
+        } else {
+          this.disguisedPlayers.delete(visualPlayer.id);
+        }
 
         // 判断该视觉位置下是否处于“高速”状态（>100% 基础速度）
         const isFast = this.isPlayerFast(visualPlayer);
@@ -1584,6 +2123,13 @@ export class Renderer {
     // 绘制命中特效（简易闪光）
     for (const effect of hitEffects) {
       this.drawHitEffect(effect);
+    }
+
+    // 绘制 Disguise Fizzle 特效 (Holographic glitch/fade out)
+    // 渲染在玩家之上
+    this.fizzleEffects = this.fizzleEffects.filter(eff => eff.until > now);
+    for (const eff of this.fizzleEffects) {
+      this.drawFizzleEffect(eff, now);
     }
 
     // 新增: 绘制物品信息提示框（当接近物品时）
@@ -1690,7 +2236,16 @@ export class Renderer {
           this.drawFlashIndicator(visualPlayer.x, visualPlayer.y, progress, statusIndex++);
         }
 
-        // 3. 正在使用物品 (治疗中)
+        // 3. 眩晕状态
+        if ((p as any).isStunned) {
+          const stunnedEndTime = (p as any).stunnedEndTime ?? 0;
+          const remainingMs = Math.max(0, stunnedEndTime - now);
+          const progress = remainingMs / 3000; // 3秒眩晕时长
+          console.log('[Stun Debug] Drawing stun indicator:', { playerId: p.id, isStunned: (p as any).isStunned, stunnedEndTime, remainingMs, progress });
+          this.drawStunIndicator(visualPlayer.x, visualPlayer.y, progress, statusIndex++);
+        }
+
+        // 4. 正在使用物品 (治疗中)
         if (
           p.usingItemTypeId &&
           p.usingItemRemainingMs !== undefined &&
@@ -1718,11 +2273,21 @@ export class Renderer {
       if (localPlayer?.isFlashed) continue;
       
       let statusIndex = 0;
+      
+      // 1. 致盲状态
       if ((ai as any).isFlashed) {
         const flashEndTime = (ai as any).flashEndTime ?? 0;
         const remainingMs = Math.max(0, flashEndTime - now);
         const progress = remainingMs / flashGrenadeDurationMs;
         this.drawFlashIndicator(ai.x, ai.y, progress, statusIndex++);
+      }
+      
+      // 2. 眩晕状态
+      if ((ai as any).isStunned) {
+        const stunnedEndTime = (ai as any).stunnedEndTime ?? 0;
+        const remainingMs = Math.max(0, stunnedEndTime - now);
+        const progress = remainingMs / 3000; // 3秒眩晕时长
+        this.drawStunIndicator(ai.x, ai.y, progress, statusIndex++);
       }
     }
     

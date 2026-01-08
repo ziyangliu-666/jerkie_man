@@ -2,6 +2,10 @@ import type { Room } from './room.js';
 import type { AI, PatrolConfig, GuardConfig } from './ai.js';
 import type { Pathfinder } from './pathfinding.js';
 import { Player } from './player.js';
+import { Decoy } from './decoy.js';
+
+type AITarget = Player | Decoy;
+const DISGUISE_DETECTION_RADIUS = 150;
 import type { OBSTACLE_STATE } from '@jerkie-man/shared';
 import { msToTicks, getWeaponDef, advanceFireCooldown } from '@jerkie-man/shared';
 
@@ -51,8 +55,8 @@ export class AIBehaviorController {
     this.moveAlongPath(ai, currentTick);
   }
 
-  private scanForTargets(ai: AI): Player | null {
-    let closestTarget: Player | null = null;
+  private scanForTargets(ai: AI): AITarget | null {
+    let closestTarget: AITarget | null = null;
     let closestDist = Infinity;
 
     // 如果AI处于致盲状态，完全丧失目标感知能力
@@ -61,28 +65,39 @@ export class AIBehaviorController {
       return null;
     }
 
-    // 预先计算AI是否在烟雾内：在烟雾中的AI无法攻击玩家
+    // 预先计算AI是否在烟雾内：在烟雾中的AI无法攻击任何目标
     const aiInSmoke = this.room.isPointInSmoke(ai.x, ai.y);
 
-    // 只扫描玩家作为目标，AI之间不互相攻击
-    for (const [playerId, player] of this.room.players.entries()) {
-      if (player.status !== 'ALIVE') {
-        continue;
+    // 收集所有潜在目标（玩家 + 诱饵）
+    const potentialTargets: AITarget[] = [];
+    for (const player of this.room.players.values()) {
+      if (player.status === 'ALIVE') {
+        potentialTargets.push(player);
       }
+    }
+    for (const decoy of this.room.decoys) {
+      if (decoy.hp > 0) {
+        potentialTargets.push(decoy);
+      }
+    }
 
-      const dx = player.x - ai.x;
-      const dy = player.y - ai.y;
+    for (const target of potentialTargets) {
+      const dx = target.x - ai.x;
+      const dy = target.y - ai.y;
       const dist = Math.sqrt(dx * dx + dy * dy);
 
       if (dist > ai.visionRange) {
         continue;
       }
 
-      // 烟雾遮蔽逻辑：
-      // - 在烟雾中的玩家无法被AI攻击
-      // - 在烟雾中的AI也无法攻击任何玩家
-      const playerInSmoke = this.room.isPointInSmoke(player.x, player.y);
-      if (aiInSmoke || playerInSmoke) {
+      // 伪装检查：AI完全忽略伪装的玩家（简化逻辑）
+      if (target instanceof Player && target.isDisguised()) {
+        continue;
+      }
+
+      // 烟雾遮蔽逻辑
+      const targetInSmoke = this.room.isPointInSmoke(target.x, target.y);
+      if (aiInSmoke || targetInSmoke) {
         continue;
       }
 
@@ -96,53 +111,48 @@ export class AIBehaviorController {
         }
       }
 
-      // 检查玩家是否在草丛中
-      const playerInBush = this.isPlayerInBush(player.x, player.y);
+      // 检查目标是否在草丛中
+      // 重用 isTargetInBush (原 isPlayerInBush)
+      const targetInBush = this.isTargetInBush(target.x, target.y);
       
-      // 检查AI是否已经追踪过这个玩家（用于半遮挡机制）
-      // 只有当AI已经发现过玩家时，才能感知草丛中的玩家
-      const hasTrackedPlayer = ai.currentTargetId === playerId || 
+      // 检查AI是否已经追踪过这个目标
+      const hasTrackedTarget = ai.currentTargetId === target.id || 
         (ai.lastSeenTargetX !== undefined && 
          ai.lastSeenTargetY !== undefined &&
          Math.sqrt(
-           Math.pow(ai.lastSeenTargetX - player.x, 2) + 
-           Math.pow(ai.lastSeenTargetY - player.y, 2)
-         ) < 100); // 最后已知位置距离玩家小于100像素，认为AI追踪过这个玩家
+           Math.pow(ai.lastSeenTargetX - target.x, 2) + 
+           Math.pow(ai.lastSeenTargetY - target.y, 2)
+         ) < 100); 
       
-      // 视线遮挡检测（返回结果包含是否被草丛遮挡）
-      // 如果目标在草丛中且AI已经追踪过，AI可以"感知"到位置（半遮挡机制）
-      const allowBushConcealment = playerInBush && hasTrackedPlayer;
-      const losResult = this.hasLineOfSight(ai.x, ai.y, player.x, player.y, allowBushConcealment);
+      const allowBushConcealment = targetInBush && hasTrackedTarget;
+      const losResult = this.hasLineOfSight(ai.x, ai.y, target.x, target.y, allowBushConcealment);
       
       if (!losResult.visible) {
-        continue; // 完全被遮挡，无法感知
+        continue; // 完全被遮挡
       }
 
-      // AI可以感知到目标（可能是半遮挡）
       if (dist < closestDist) {
-        closestTarget = player;
+        closestTarget = target;
         closestDist = dist;
-        // 标记目标是否在草丛中（用于半遮挡扫射机制）
-        // 只有当AI已经追踪过玩家时，才标记为在草丛中
-        ai.targetInBush = playerInBush && losResult.blockedByBush && hasTrackedPlayer;
+        ai.targetInBush = targetInBush && losResult.blockedByBush && hasTrackedTarget;
       }
     }
 
     return closestTarget;
   }
 
-  // 新增: 检测玩家是否在草丛中
-  private isPlayerInBush(x: number, y: number): boolean {
-    const PLAYER_RADIUS = 10;
+  // 新增: 检测目标(玩家或诱饵)是否在草丛中
+  private isTargetInBush(x: number, y: number): boolean {
+    const TARGET_RADIUS = 10;
     for (const obstacle of this.room.obstacles) {
       const obsType = (obstacle as any).type || 'wall';
       if (obsType === 'bush') {
         // 使用圆形与AABB碰撞检测
         if (
-          x + PLAYER_RADIUS >= obstacle.x &&
-          x - PLAYER_RADIUS <= obstacle.x + obstacle.w &&
-          y + PLAYER_RADIUS >= obstacle.y &&
-          y - PLAYER_RADIUS <= obstacle.y + obstacle.h
+          x + TARGET_RADIUS >= obstacle.x &&
+          x - TARGET_RADIUS <= obstacle.x + obstacle.w &&
+          y + TARGET_RADIUS >= obstacle.y &&
+          y - TARGET_RADIUS <= obstacle.y + obstacle.h
         ) {
           return true;
         }
@@ -443,7 +453,7 @@ export class AIBehaviorController {
     return { visible: true, blockedByBush: false };
   }
 
-  private handleIdleState(ai: AI, target: Player | null, currentTick: number): void {
+  private handleIdleState(ai: AI, target: AITarget | null, currentTick: number): void {
     if (target) {
       // 发现目标，立即进入SPOTTING状态（反应延迟期）
       const now = Date.now();
@@ -633,7 +643,7 @@ export class AIBehaviorController {
     }
   }
 
-  private handlePatrolState(ai: AI, target: Player | null, currentTick: number): void {
+  private handlePatrolState(ai: AI, target: AITarget | null, currentTick: number): void {
     if (target) {
       // 发现目标，立即进入SPOTTING状态（反应延迟期）
       const now = Date.now();
@@ -663,18 +673,21 @@ export class AIBehaviorController {
     const dy = targetPoint.y - ai.y;
     const dist = Math.sqrt(dx * dx + dy * dy);
 
-    if (dist < 30) {
+    // 修复：只有在AI已经有路径的情况下，才认为"到达巡逻点"
+    // 这样可以避免AI在生成时距离巡逻点很近时，错误地进入等待状态
+    if (dist < 30 && ai.currentPath.length > 0) {
       // 到达巡逻点
       patrol.currentIndex = (patrol.currentIndex + 1) % patrol.points.length;
       patrol.waitUntil = now + patrol.waitTimeMs;
       ai.currentPath = [];
     } else {
+      // 未到达或刚生成，生成前往巡逻点的路径
       this.updatePath(ai, targetPoint.x, targetPoint.y);
     }
   }
 
   // 新增：处理SPOTTING状态（反应延迟期，发现目标后的1秒）
-  private handleSpottingState(ai: AI, target: Player | null, currentTick: number): void {
+  private handleSpottingState(ai: AI, target: AITarget | null, currentTick: number): void {
     if (target) {
       const now = Date.now();
 
@@ -724,7 +737,7 @@ export class AIBehaviorController {
     }
   }
 
-  private handleChaseState(ai: AI, target: Player | null, currentTick: number): void {
+  private handleChaseState(ai: AI, target: AITarget | null, currentTick: number): void {
     if (target) {
       const dx = target.x - ai.x;
       const dy = target.y - ai.y;
@@ -751,7 +764,7 @@ export class AIBehaviorController {
     }
   }
 
-  private handleAttackState(ai: AI, target: Player | null, currentTick: number): void {
+  private handleAttackState(ai: AI, target: AITarget | null, currentTick: number): void {
     if (target) {
       const dx = target.x - ai.x;
       const dy = target.y - ai.y;
@@ -813,7 +826,7 @@ export class AIBehaviorController {
     }
   }
 
-  private handleSearchState(ai: AI, target: Player | null, currentTick: number): void {
+  private handleSearchState(ai: AI, target: AITarget | null, currentTick: number): void {
     if (target) {
       // 重新发现目标时，同样先进入 SPOTTING 状态，统一使用反应延迟
       const now = Date.now();
@@ -850,7 +863,7 @@ export class AIBehaviorController {
     }
   }
 
-  private handleReturnState(ai: AI, target: Player | null, currentTick: number): void {
+  private handleReturnState(ai: AI, target: AITarget | null, currentTick: number): void {
     if (target) {
       // 返回途中发现目标时，也先进入 SPOTTING 状态，使用统一的 1 秒反应延迟
       const now = Date.now();

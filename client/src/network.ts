@@ -531,7 +531,7 @@ export class Network {
   }
 
   // 新增: 发送商店购买物品
-  sendBuy(typeId: string, qty: number): boolean {
+  sendBuy(typeId: string, qty: number, autoAction: 'none' | 'equip' | 'prep' = 'none'): boolean {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
       return false;
     }
@@ -540,6 +540,7 @@ export class Network {
         type: 'C2S_BUY',
         typeId,
         qty,
+        autoAction,
       });
       this.ws.send(JSON.stringify(message));
       return true;

@@ -1,4 +1,4 @@
-import type { S2C_SNAPSHOT, PLAYER_STATE, BULLET_STATE, ITEM_STATE, WorldItem, LootBag, OBSTACLE_STATE } from '@jerkie-man/shared';
+import type { S2C_SNAPSHOT, PLAYER_STATE, BULLET_STATE, ITEM_STATE, WorldItem, LootBag, OBSTACLE_STATE, DECOY_STATE } from '@jerkie-man/shared';
 import { lerp } from '@jerkie-man/shared';
 
 interface SnapshotEntry {
@@ -48,6 +48,7 @@ export class SnapshotBuffer {
     lootBags: LootBag[];
     obstacles?: OBSTACLE_STATE[];
     ais: any[];
+    decoys?: DECOY_STATE[];
   } {
     // P0-1: 使用服务器时间域计算renderTime，避免跨机器时钟偏移导致插值失败
     // 将客户端时间转换为服务器时间域：clientNow + offset = serverNow
@@ -57,7 +58,7 @@ export class SnapshotBuffer {
     const renderTimeServer = serverNow - renderDelay;
 
     if (this.buffer.length === 0) {
-      return { players: [], bullets: [], items: [], worldItems: [], lootBags: [], obstacles: [], ais: [] };
+      return { players: [], bullets: [], items: [], worldItems: [], lootBags: [], obstacles: [], ais: [], decoys: [] };
     }
 
     if (this.buffer.length === 1) {
@@ -69,6 +70,7 @@ export class SnapshotBuffer {
         lootBags: this.buffer[0].snapshot.lootBags ?? [],
         obstacles: this.buffer[0].snapshot.obstacles ?? [],
         ais: this.buffer[0].snapshot.ais ?? [],
+        decoys: this.buffer[0].snapshot.decoys ?? [],
       };
     }
 
@@ -106,6 +108,7 @@ export class SnapshotBuffer {
           lootBags: latest.snapshot.lootBags ?? [],
           obstacles: latest.snapshot.obstacles ?? [],
           ais: latest.snapshot.ais ?? [],
+          decoys: latest.snapshot.decoys ?? [],
         };
       }
     }
@@ -131,15 +134,16 @@ export class SnapshotBuffer {
     for (const id of allPlayerIds) {
       const p0 = playerMap0.get(id);
       const p1 = playerMap1.get(id);
-
+      
       if (p0 && p1) {
-        // 两个快照都有，插值（玩家使用 clampedAlphaPlayers）
-        // 注意：状态字段（如 isFlashed, flashEndTime）使用最新值，不插值
+        // 两个快照都有：
+        //  - 位置使用插值（平滑移动）
+        //  - 其他状态字段（包括伪装AI状态/枪口方向等）使用最新快照 p1 的值
         interpolatedPlayers.push({
-          ...p0,
+          ...p1,
           x: lerp(p0.x, p1.x, clampedAlphaPlayers),
           y: lerp(p0.y, p1.y, clampedAlphaPlayers),
-          // 使用最新的状态字段（不插值），如果 p1 没有则使用 p0 的值
+          // 显式保证致盲相关字段也使用最新值（兜底）
           isFlashed: p1.isFlashed ?? p0.isFlashed ?? false,
           flashEndTime: p1.flashEndTime ?? p0.flashEndTime ?? 0,
         });
@@ -177,6 +181,31 @@ export class SnapshotBuffer {
       }
     }
 
+    // Decoy插值 (类似AI插值)
+    const interpolatedDecoys: DECOY_STATE[] = [];
+    const decoyMap0 = new Map((t0.snapshot.decoys ?? []).map((d) => [d.id, d]));
+    const decoyMap1 = new Map((t1.snapshot.decoys ?? []).map((d) => [d.id, d]));
+    
+    const allDecoyIds = new Set([
+      ...(t0.snapshot.decoys ?? []).map((d) => d.id),
+      ...(t1.snapshot.decoys ?? []).map((d) => d.id),
+    ]);
+
+    for (const id of allDecoyIds) {
+        const d0 = decoyMap0.get(id);
+        const d1 = decoyMap1.get(id);
+
+        if (d0 && d1) {
+            interpolatedDecoys.push({
+                ...d1,
+                x: lerp(d0.x, d1.x, clampedAlphaPlayers),
+                y: lerp(d0.y, d1.y, clampedAlphaPlayers),
+            })
+        } else if (d1) {
+            interpolatedDecoys.push(d1);
+        }
+    }
+
     // 子弹渲染已完全由 BulletTrackManager 负责，此处不再插值
     // 仅保留字段用于向后兼容（如服务端调试等）
 
@@ -188,6 +217,7 @@ export class SnapshotBuffer {
       lootBags: t1.snapshot.lootBags ?? [],
       obstacles: t1.snapshot.obstacles ?? [],
       ais: interpolatedAIs,
+      decoys: interpolatedDecoys,
     };
   }
 

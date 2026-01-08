@@ -1704,66 +1704,8 @@ function updateBuffHud(localPlayer: PLAYER_STATE | null): void {
     return;
   }
 
-  if (currentPhase !== 'RAID' || !localPlayer || localPlayer.status !== 'ALIVE') {
-    buffHud.style.display = 'none';
-    return;
-  }
-
-  const buffs = Array.isArray(localPlayer.buffs) ? localPlayer.buffs : [];
-  if (buffs.length === 0) {
-    buffHud.style.display = 'none';
-    return;
-  }
-
-  buffHud.style.display = 'block';
-
-  if (buffHudList) {
-    // 只展示 4 个以内的 Buff，避免列表过长
-    const topBuffs = buffs.slice(0, 4);
-    const rows = topBuffs
-      .map((buff) => {
-        const remainingMs = Math.max(0, buff.remainingMs ?? 0);
-        const totalMs = Math.max(1, buff.totalMs ?? 1);
-        const progress = Math.min(1, Math.max(0, remainingMs / totalMs));
-        const progressPercent = Math.round(progress * 100);
-        
-        const remainSec = remainingMs / 1000;
-        const remainText = remainSec >= 1 ? `${remainSec.toFixed(1)}s` : `${Math.round(remainingMs)}ms`;
-        
-        // 根据剩余时间百分比设置进度条颜色
-        let progressClass = '';
-        if (progress < 0.2) {
-          progressClass = 'danger'; // 红色：剩余 < 20%
-        } else if (progress < 0.5) {
-          progressClass = 'warning'; // 橙色：剩余 < 50%
-        }
-        
-        // 生成效果描述文本
-        let effectText = '';
-        if (buff.kind === 'speed' && buff.speedMultiplier) {
-          const percent = Math.round((buff.speedMultiplier - 1) * 100);
-          effectText = `速度+${percent}%`;
-        } else if (buff.kind === 'damage_reduction' && buff.damageReductionBonus) {
-          const percent = Math.round(buff.damageReductionBonus * 100);
-          effectText = `减伤+${percent}%`;
-        } else if (buff.kind === 'regeneration' && buff.hpPerSecond) {
-          effectText = `回血+${buff.hpPerSecond}/s`;
-        }
-        
-        return `<div class="buff-row">
-          <div class="buff-row-header">
-            <span class="buff-name">${escapeHtml(buff.name)}</span>
-            <span class="buff-remaining">${escapeHtml(remainText)}</span>
-          </div>
-          ${effectText ? `<div class="buff-effect">${escapeHtml(effectText)}</div>` : ''}
-          <div class="buff-progress-bar">
-            <div class="buff-progress-fill ${progressClass}" style="width: ${progressPercent}%"></div>
-          </div>
-        </div>`;
-      })
-      .join('');
-    buffHudList.innerHTML = rows;
-  }
+  // 禁用左侧 HUD 显示，改为在 Entity 上方渲染
+  buffHud.style.display = 'none';
 }
 
 // 新增: 检查物品是否已装备
@@ -1912,7 +1854,9 @@ function initShopTabs(): void {
 function updateStashList(): void {
   if (!stashList || !playerProfile || !playerProfile.stash) return;
   
-  stashList.innerHTML = '';
+  // 保存滚动位置
+  const scrollTop = stashList.scrollTop;
+  
   const availableStashItems = playerProfile.stash.filter(item => !isItemEquipped(item));
   
   if (availableStashItems.length === 0) {
@@ -1920,6 +1864,9 @@ function updateStashList(): void {
     return;
   }
   
+  // 使用 Fragment 减少重绘
+  const fragment = document.createDocumentFragment();
+
   // 按分类分组
   const categories: Record<string, ItemInstance[]> = {
     weapon: [],
@@ -2008,8 +1955,15 @@ function updateStashList(): void {
     }
     
     raritySection.appendChild(rarityItemsDiv);
-    stashList.appendChild(raritySection);
+    fragment.appendChild(raritySection);
   }
+
+  // 一次性更新 DOM
+  stashList.innerHTML = '';
+  stashList.appendChild(fragment);
+  
+  // 恢复滚动位置
+  stashList.scrollTop = scrollTop;
 }
 
 // 初始化仓库 Tab 切换
@@ -2037,27 +1991,11 @@ function initStashTabs(): void {
 // 获取物品分类
 function getItemCategory(typeId: string): string {
     try {
-      getWeaponDef(typeId);
-      return 'weapon';
-    } catch {}
-    try {
-      getArmorDef(typeId);
-      return 'armor';
-    } catch {}
-    try {
-      getBagDef(typeId);
-      return 'bag';
-    } catch {}
-    
-    // 判断是否为消耗品
-    if (typeId === 'ammo' || typeId === 'medkit' || typeId === 'advanced_medkit' || 
-        typeId === 'frag_grenade' || typeId === 'flash_grenade' || typeId === 'smoke_grenade' ||
-        typeId === 'armor_plate_item' || typeId === 'combat_stim' || typeId === 'regeneration_serum') {
-      return 'consumable';
+      const itemType = getItemType(typeId);
+      return itemType.category;
+    } catch {
+      return 'material'; // fallback
     }
-    
-    // 其他为材料
-    return 'material';
   }
 
   function getItemCategoryOrder(typeId: string): number {
@@ -2366,6 +2304,13 @@ function getItemDescription(itemType: any): string {
     if (props.hpPerSecond) {
       desc.push(`持续回复: ${props.hpPerSecond}HP/秒`);
     }
+    if (props.disguiseDurationMs) {
+      desc.push(`伪装: ${Math.floor(props.disguiseDurationMs / 1000)}秒 | AI无法发现`);
+    }
+    // 诱饵特殊标记（explosionRadius=1表示诱饵）
+    if (itemType.id === 'w_decoy') {
+      desc.push(`投掷诱饵 | 吸引AI火力`);
+    }
     if (desc.length > 0) {
       return desc.join(' | ');
     }
@@ -2401,7 +2346,18 @@ function createShopRow(itemType: any): HTMLElement {
   
   const buyBtn = document.createElement('button');
   buyBtn.className = 'item-btn primary';
-  
+  buyBtn.style.flex = '1';
+
+  const buyEquipBtn = document.createElement('button');
+  buyEquipBtn.className = 'item-btn secondary';
+  buyEquipBtn.textContent = '购买并装备';
+  buyEquipBtn.style.flex = '1';
+
+  const buyPrepBtn = document.createElement('button');
+  buyPrepBtn.className = 'item-btn secondary';
+  buyPrepBtn.textContent = '购买并带入';
+  buyPrepBtn.style.flex = '1';
+
   // 获取当前购买数量
   const getBuyCount = (): number => shopBuyCounts.get(itemType.id) || 0;
   
@@ -2422,7 +2378,7 @@ function createShopRow(itemType: any): HTMLElement {
         buyBtn.style.animation = 'none';
       }
     } else {
-      buyBtn.textContent = `购买 (${itemType.value})`;
+      buyBtn.textContent = '购买'; // 不再包含金额
       buyBtn.classList.remove('success');
       buyBtn.classList.add('primary');
       buyBtn.style.animation = 'none';
@@ -2432,27 +2388,49 @@ function createShopRow(itemType: any): HTMLElement {
   // 初始化按钮状态
   updateButtonText(getBuyCount());
   
-  buyBtn.onclick = () => {
+  const handleBuy = (autoAction: 'none' | 'equip' | 'prep' = 'none') => {
     const currentCount = getBuyCount();
     const newCount = currentCount + 1;
-    const totalCost = itemType.value * newCount;
-    
+    const totalCost = itemType.value; // 单个价格
+
     if (playerProfile && playerProfile.money >= totalCost) {
-      network.sendBuy(itemType.id, 1);
-      hud.addEvent(`购买: ${itemType.name} x${newCount}`);
+      network.sendBuy(itemType.id, 1, autoAction);
+      
+      let actionLabel = '';
+      if (autoAction === 'equip') actionLabel = '并装备';
+      else if (autoAction === 'prep') actionLabel = '并带入';
+
+      hud.addEvent(`购买${actionLabel}: ${itemType.name}`);
       
       // 更新购买计数
       shopBuyCounts.set(itemType.id, newCount);
       
       // 立即更新按钮状态
       updateButtonText(newCount, true); // 播放成功动画
+
+      // 为快捷按钮提供反馈
+      if (autoAction === 'equip') addButtonFeedback(buyEquipBtn, true, '已装备');
+      else if (autoAction === 'prep') addButtonFeedback(buyPrepBtn, true, '已带入');
     } else {
       // 立即显示错误反馈
-      addButtonFeedback(buyBtn, false, '金钱不足');
+      const targetBtn = autoAction === 'equip' ? buyEquipBtn : (autoAction === 'prep' ? buyPrepBtn : buyBtn);
+      addButtonFeedback(targetBtn, false, '金钱不足');
       hud.addEvent(`金钱不足: 需要 ${totalCost}，当前 ${playerProfile?.money ?? 0}`);
     }
   };
+
+  buyBtn.onclick = () => handleBuy('none');
+  buyEquipBtn.onclick = () => handleBuy('equip');
+  buyPrepBtn.onclick = () => handleBuy('prep');
+
   actions.appendChild(buyBtn);
+  // 只有可装备物品（武器/背包/防具）显示"购买并装备"，其它显示"购买并带入"
+  const slot = getItemSlot(itemType.id);
+  if (slot) {
+    actions.appendChild(buyEquipBtn);
+  } else {
+    actions.appendChild(buyPrepBtn);
+  }
   
   row.appendChild(info);
   row.appendChild(actions);
@@ -3193,6 +3171,7 @@ const network = new Network(getWebSocketUrl(), 'local', {
           ...serverPlayer,
           x: predictedPos.x,
           y: predictedPos.y,
+          buffs: serverPlayer.buffs, // 🔧 修复: 保留服务端的 buffs 数据
         };
 
         // 同步本地弹药预测计数（使用服务端权威值）
@@ -3450,34 +3429,25 @@ function renderLoop(): void {
         // 撞墙后的短时间内，加速 smooth 收敛（避免"慢慢贴墙"但也不"吸附瞬移"）
         const halfLife = performance.now() < fastConvergeUntil ? HALF_LIFE_BLOCKED : HALF_LIFE_NORMAL;
         
+        // 计算目标位置（平滑移动或瞬移）
+        let nextX = renderLocalPlayer.x;
+        let nextY = renderLocalPlayer.y;
+
         // 大回滚/需要snap时直接瞬移，避免慢慢"飘回去"
         if (dist > 80 || shouldSnap) {
-          renderLocalPlayer.x = predictedLocalPlayer.x;
-          renderLocalPlayer.y = predictedLocalPlayer.y;
+          nextX = predictedLocalPlayer.x;
+          nextY = predictedLocalPlayer.y;
         } else {
-          renderLocalPlayer.x = smoothTo(renderLocalPlayer.x, predictedLocalPlayer.x, dtSec, halfLife);
-          renderLocalPlayer.y = smoothTo(renderLocalPlayer.y, predictedLocalPlayer.y, dtSec, halfLife);
+          nextX = smoothTo(renderLocalPlayer.x, predictedLocalPlayer.x, dtSec, halfLife);
+          nextY = smoothTo(renderLocalPlayer.y, predictedLocalPlayer.y, dtSec, halfLife);
         }
-        
-        // 其他字段保持最新（别让血量/状态落后一拍）
-        renderLocalPlayer.hp = predictedLocalPlayer.hp;
-        renderLocalPlayer.stamina = predictedLocalPlayer.stamina; // 新增: 同步耐力
-        renderLocalPlayer.maxStamina = predictedLocalPlayer.maxStamina; // 新增: 同步最大耐力
-        renderLocalPlayer.isSprinting = predictedLocalPlayer.isSprinting; // 新增: 同步冲刺状态
-        renderLocalPlayer.status = predictedLocalPlayer.status;
-        renderLocalPlayer.isFlashed = predictedLocalPlayer.isFlashed; // 新增: 同步闪光弹致盲状态
-        renderLocalPlayer.flashEndTime = predictedLocalPlayer.flashEndTime; // 新增: 同步闪光弹结束时间
-        renderLocalPlayer.lootCount = predictedLocalPlayer.lootCount;
-        renderLocalPlayer.lastInputSeq = predictedLocalPlayer.lastInputSeq;
-        renderLocalPlayer.lastInputTick = predictedLocalPlayer.lastInputTick;
-        renderLocalPlayer.extractProgress = predictedLocalPlayer.extractProgress;
-        renderLocalPlayer.weaponRuntime = predictedLocalPlayer.weaponRuntime; // 修复: 更新武器运行时状态（包括弹药数）
-        renderLocalPlayer.inventory = predictedLocalPlayer.inventory;
-        renderLocalPlayer.raidEquipment = predictedLocalPlayer.raidEquipment;
-        // 新增: 同步道具读条状态（例如急救包使用中）
-        (renderLocalPlayer as any).usingItemTypeId = (predictedLocalPlayer as any).usingItemTypeId;
-        (renderLocalPlayer as any).usingItemRemainingMs = (predictedLocalPlayer as any).usingItemRemainingMs;
-        (renderLocalPlayer as any).usingItemTotalMs = (predictedLocalPlayer as any).usingItemTotalMs;
+
+        // 关键重构: 使用 Object.assign 自动同步所有字段（包括将来新增的字段）
+        Object.assign(renderLocalPlayer, predictedLocalPlayer);
+
+        // 恢复计算好的平滑坐标（覆盖掉 Object.assign 带来的瞬移坐标）
+        renderLocalPlayer.x = nextX;
+        renderLocalPlayer.y = nextY;
       }
       
       // 使用平滑后的 renderLocalPlayer 渲染本地玩家
@@ -3630,7 +3600,8 @@ function renderLoop(): void {
           nearbyInteractableForRender, // 新增: 附近可交互目标
           renderLocalPlayerForTooltip, // 新增: 本地玩家（用于计算相对位置）
           renderLocalPlayerForTooltip?.inBush ?? false, // 新增: 本地玩家是否在草丛内
-          state.ais ?? [] // 新增: AI实体列表
+          state.ais ?? [], // 新增: AI实体列表
+          state.decoys ?? [] // 新增: 诱饵列表
         );
       } else {
         // 非 RAID phase: 只清屏（显示暗背景）
@@ -3734,7 +3705,9 @@ function renderLoop(): void {
         (localPlayer as any).usingItemTypeId &&
         (localPlayer as any).usingItemRemainingMs !== undefined &&
         (localPlayer as any).usingItemRemainingMs > 0;
-      const canControlInputs = canControl && !isUsingItemNow;
+      // 新增: 如果被眩晕，客户端本地也禁止一切操作（类似读条）
+      const isStunnedNow = !!localPlayer && (localPlayer as any).isStunned === true;
+      const canControlInputs = canControl && !isUsingItemNow && !isStunnedNow;
       
       // 1. 读取输入（非 ALIVE 或正在读条时清零）
       const rawKeys = inputManager.getKeys();

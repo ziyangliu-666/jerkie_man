@@ -787,7 +787,7 @@ ws.on('message', (data: Buffer) => {
           return;
         }
         
-        const result = room.profileManager.buyItem(accountId, parsed.typeId, parsed.qty);
+        const result = room.profileManager.buyItem(accountId, parsed.typeId, parsed.qty, parsed.autoAction);
         if (!result.success) {
           ws.send(
             JSON.stringify(
@@ -1626,6 +1626,14 @@ setInterval(() => {
   // 更新AI（行为、寻路、战斗）
   room.updateAIs(room.tick);
 
+  // 新增: 更新伪装玩家的AI行为（枪口摆动和状态检测）
+  const allPlayersArray = Array.from(room.players.values());
+  for (const player of allPlayersArray) {
+    if (player.isDisguised()) {
+      player.updateDisguisedAiBehavior(allPlayersArray, room.tick);
+    }
+  }
+
   // 新增: 检查并执行物品和AI重刷
   room.checkAndRespawnItems();
   room.checkAndRespawnAIs();
@@ -1749,6 +1757,7 @@ setInterval(() => {
     lootBags: snapshot.lootBags, // 新增: 掉落包列表
     obstacles: snapshot.obstacles, // 新增: 障碍物列表（可破坏，需要同步）
     ais: snapshot.ais, // 新增: AI实体列表
+    decoys: snapshot.decoys, // 修复: 诱饵列表（之前遗漏导致客户端收不到诱饵）
   });
 
   // 广播给所有连接
