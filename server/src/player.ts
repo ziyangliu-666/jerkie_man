@@ -457,7 +457,9 @@ export class Player {
       name: this.name, // 新增: 包含玩家昵称
       weaponRuntime, // 新增: 包含武器运行时状态
       inBush: false, // 新增: 草丛状态（默认false，在getSnapshot中更新）
+      inBushId: null,
       inSmoke: false, // 新增: 烟雾状态（默认false，在getSnapshot中更新）
+      inSmokeId: null,
       isFlashed: false, // 新增: 闪光弹致盲状态（默认false，在getSnapshot中更新）
       flashEndTime: 0, // 新增: 致盲结束时间（毫秒时间戳）
       raidEquipment: {

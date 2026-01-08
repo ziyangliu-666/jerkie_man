@@ -381,6 +381,7 @@ export function parseMapTemplateText(text: string): MapTemplate {
       const type = kv.type || 'wall';
       const obstacle: any = {
         ...rect,
+        id: kv.id || `obs_${template.obstacles.length}`, // 确保每个障碍物有唯一ID（草丛逻辑依赖此ID）
         type, // 支持 type 参数，默认为 wall
       };
 

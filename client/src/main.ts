@@ -39,6 +39,7 @@ import {
   getUsableItemTypeIds,
   isUsableItem,
   isThrowableItem,
+  PLAYER_HIT_RADIUS,
 } from '@jerkie-man/shared';
 
 // 本地发射 ID 计数器（用于客户端预测子弹对齐）
@@ -3556,8 +3557,9 @@ function renderLoop(): void {
         const renderLocalPlayerForTooltip = renderLocalPlayer ?? predictedLocalPlayer ?? 
           (localPlayerId ? state.players.find((p) => p.id === localPlayerId) : null);
         
-        // 本地计算玩家是否在草丛内（用于显示隐蔽提示）
-        let isLocalPlayerInBush = false;
+        // 本地计算玩家是否在草丛内（用于显示隐蔽提示和视野判定）
+        let localBushId: string | null = null;
+        let localSmokeId: string | null = null;
         if (renderLocalPlayerForTooltip && renderLocalPlayerForTooltip.status === 'ALIVE') {
           const PLAYER_RADIUS = 10;
           for (const obstacle of obstaclesForRender) {
@@ -3570,11 +3572,31 @@ function renderLoop(): void {
               const distY = renderLocalPlayerForTooltip.y - closestY;
               const distSq = distX * distX + distY * distY;
               if (distSq <= PLAYER_RADIUS * PLAYER_RADIUS) {
-                isLocalPlayerInBush = true;
+                localBushId = (obstacle as any).id || 'bush_unknown';
                 break;
               }
             }
           }
+
+          // 本地计算玩家是否在烟雾内
+          for (const smoke of smokesToRender) {
+            const dx = renderLocalPlayerForTooltip.x - smoke.x;
+            const dy = renderLocalPlayerForTooltip.y - smoke.y;
+            const distSq = dx * dx + dy * dy;
+            if (distSq <= smoke.radius * smoke.radius) {
+              localSmokeId = (smoke as any).id || 'smoke_unknown';
+              break;
+            }
+          }
+        }
+        
+        // 确保 renderLocalPlayerForTooltip (预测状态) 包含了本地计算的 bushId 和 smokeId，
+        // 这样 renderer 内部比较 player.inBushId === localPlayer.inBushId 时能立即响应
+        if (renderLocalPlayerForTooltip) {
+          renderLocalPlayerForTooltip.inBushId = localBushId;
+          renderLocalPlayerForTooltip.inBush = !!localBushId;
+          renderLocalPlayerForTooltip.inSmokeId = localSmokeId;
+          renderLocalPlayerForTooltip.inSmoke = !!localSmokeId;
         }
         
         // 计算最近可交互目标（用于在canvas中显示物品信息提示框）
@@ -3607,7 +3629,7 @@ function renderLoop(): void {
           network.getConnectionState().lastServerTick, // 新增: 当前服务器 tick（用于计算换弹进度）
           nearbyInteractableForRender, // 新增: 附近可交互目标
           renderLocalPlayerForTooltip, // 新增: 本地玩家（用于计算相对位置）
-          isLocalPlayerInBush, // 新增: 本地玩家是否在草丛内
+          renderLocalPlayerForTooltip?.inBush ?? false, // 新增: 本地玩家是否在草丛内
           state.ais ?? [] // 新增: AI实体列表
         );
       } else {
@@ -3924,12 +3946,15 @@ function renderLoop(): void {
             if (localP) {
               const baseRange = weaponDef.meleeRange ?? DEFAULT_MELEE_RANGE;
               const baseArcRad = ((weaponDef.meleeArcDeg ?? DEFAULT_MELEE_ARC_DEG) * Math.PI) / 180;
+              const visualRange = baseRange;
+              const visualArcRad = baseArcRad;
+
               meleeSwings.push({
                 x: localP.x,
                 y: localP.y,
                 aimRad: tickAim,
-                range: baseRange,
-                arcRad: baseArcRad,
+                range: visualRange,
+                arcRad: visualArcRad,
                 spawnTimeMs: nowPerf2,
               });
               lastLocalMeleeMs = nowPerf2;

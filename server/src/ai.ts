@@ -72,6 +72,8 @@ export class AI {
 
   public spawnX: number;
   public spawnY: number;
+  public spawnId?: string; // 所属的 spawn 点 ID
+  public spawnIndex?: number; // 在该 spawn 点中的索引（槽位）
   public flashedUntil: number = 0; // 新增: 闪光弹致盲结束时间（毫秒时间戳，0表示未被闪）
 
   constructor(params: {
@@ -95,12 +97,17 @@ export class AI {
     fireRateMultiplier?: number;
     aggroRange?: number;
     chaseRange?: number;
+    // 重生槽位相关
+    spawnId?: string;
+    spawnIndex?: number;
   }) {
     this.id = params.id;
     this.x = params.x;
     this.y = params.y;
     this.spawnX = params.x;
     this.spawnY = params.y;
+    this.spawnId = params.spawnId;
+    this.spawnIndex = params.spawnIndex;
     this.hp = params.hp ?? 100;
     this.maxHp = params.maxHp ?? 100;
     this.status = 'ALIVE';
@@ -147,6 +154,10 @@ export class AI {
       currentTargetId: this.currentTargetId, // 新增：当前目标ID（用于显示"瞄准中"）
       isFlashed: this.flashedUntil > Date.now(),
       flashEndTime: this.flashedUntil,
+      inBush: false, // 默认false，在getSnapshot中更新
+      inBushId: null,
+      inSmoke: false, // 默认false，在getSnapshot中更新
+      inSmokeId: null,
     };
   }
 

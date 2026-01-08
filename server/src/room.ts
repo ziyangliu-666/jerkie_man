@@ -39,7 +39,9 @@ export class Room {
   private readonly spawnPoints: SpawnPoint[];
   private itemIdCounter = 0;
   private bulletIdCounter = 0;
+  private aiIdCounter = 0;
   private worldItemIdCounter = 0;
+  private smokeIdCounter = 0; // 新增: 烟雾ID计数器
   private lootBagIdCounter = 0;
   private events: Array<{ tick: number; timestamp: number; message: string }> = [];
   private readonly MAX_EVENTS = 50;
@@ -48,15 +50,14 @@ export class Room {
   public combatEvents: Map<string, Array<{ kind: 'DRY_FIRE' | 'HIT' | 'DAMAGE_TAKEN'; direction?: number }>> = new Map();
   public meleeSwings: Array<{ playerId: string; x: number; y: number; aimRad: number; range: number; arcRad: number }> = [];
   public explosions: Array<{ x: number; y: number; radius: number }> = [];
-  private smokes: Array<{ x: number; y: number; radius: number; durationMs: number; createdAt: number }> = [];
-  private newSmokes: Array<{ x: number; y: number; radius: number; durationMs: number }> = []; // 新生成的烟雾（用于广播）
+  private smokes: Array<{ id: string; x: number; y: number; radius: number; durationMs: number; createdAt: number }> = [];
+  private newSmokes: Array<{ id: string; x: number; y: number; radius: number; durationMs: number }> = []; // 新生成的烟雾（用于广播）
 
   // AI系统字段
   public ais: Map<string, AI> = new Map();
   private navGrid!: NavigationGrid;
   private pathfinder!: Pathfinder;
   private aiBehaviorController!: AIBehaviorController;
-  private aiIdCounter = 0;
 
   // 重刷系统字段
   private mapTemplate?: MapTemplate; // 保存地图模板引用
@@ -99,7 +100,10 @@ export class Room {
     this.tick = 0;
 
     if (mapTemplate) {
-      this.obstacles = mapTemplate.obstacles.map((obs) => ({ ...obs }));
+      this.obstacles = mapTemplate.obstacles.map((obs, idx) => ({ 
+        ...obs,
+        id: obs.id || `obs_${idx}` // 防御性逻辑：确保从模板加载的障碍物也有唯一ID
+      }));
     } else {
       this.generateObstacles();
     }
@@ -119,9 +123,10 @@ export class Room {
     // 从地图模板生成AI（如果有）
     if (mapTemplate?.aiSpawns) {
       // 建立AI spawn点映射（用于重刷时查找）
-      for (const aiSpawn of mapTemplate.aiSpawns) {
+      for (let i = 0; i < mapTemplate.aiSpawns.length; i++) {
+        const aiSpawn = mapTemplate.aiSpawns[i];
         // 为每个spawn点生成唯一ID（如果没有的话）
-        const spawnId = `spawn_${this.aiSpawnMap.size}`;
+        const spawnId = `spawn_${i}`;
         this.aiSpawnMap.set(spawnId, aiSpawn);
       }
       this.spawnAIsFromTemplate(mapTemplate);
@@ -1090,33 +1095,33 @@ export class Room {
     }
   }
 
-  // 新增: 检查玩家是否在草丛内
-  private isPlayerInBush(x: number, y: number): boolean {
+  // 修改: 检查玩家是否在草丛内，并返回草丛ID
+  private isPlayerInBush(x: number, y: number): string | null {
     const PLAYER_RADIUS = 10;
     for (const obstacle of this.obstacles) {
       const obsType = (obstacle as any).type || 'wall';
       if (obsType === 'bush') {
         // 使用圆形与AABB碰撞检测
         if (circleVsAABB(x, y, PLAYER_RADIUS, obstacle)) {
-          return true;
+          return (obstacle as any).id || 'bush_unknown';
         }
       }
     }
-    return false;
+    return null;
   }
 
-  // 新增: 检查某个点是否在烟雾内（玩家/AI 通用）
-  public isPointInSmoke(x: number, y: number): boolean {
+  // 修改: 检查某个点是否在烟雾内，并返回烟雾ID
+  public isPointInSmoke(x: number, y: number): string | null {
     for (const smoke of this.smokes) {
       // 检查玩家是否在烟雾圆形区域内
       const dx = x - smoke.x;
       const dy = y - smoke.y;
       const distSq = dx * dx + dy * dy;
       if (distSq < smoke.radius * smoke.radius) {
-        return true;
+        return smoke.id;
       }
     }
-    return false;
+    return null;
   }
 
   // 新增: 更新武器运行时状态（处理换弹完成）
@@ -1681,9 +1686,8 @@ export class Room {
           const hitRadius = PLAYER_HIT_RADIUS; // 目标半径（用于边缘命中修正）
           const meleeRange = baseRange;
           const meleeArcRad = baseArcRad;
-          const visualRange = baseRange + hitRadius;
-          const visualExtraAngle = Math.asin(Math.min(1, hitRadius / Math.max(visualRange, 0.001)));
-          const visualArcRad = baseArcRad + visualExtraAngle * 2;
+          const visualRange = baseRange;
+          const visualArcRad = baseArcRad;
           let hitPlayer: Player | null = null;
           let hitAI: AI | null = null;
           let minDist = meleeRange + 1;
@@ -2312,7 +2316,9 @@ export class Room {
               tick: this.tick,
             });
             const props = this.getGrenadeProps(bullet.weaponTypeId);
+            const smokeId = `smoke_${this.seed}_${this.smokeIdCounter++}`;
             const smoke = { 
+              id: smokeId,
               x: bullet.x, 
               y: bullet.y, 
               radius: props.smokeRadius ?? 140, 
@@ -2370,7 +2376,9 @@ export class Room {
                 tick: this.tick,
               });
               const props = this.getGrenadeProps(bullet.weaponTypeId);
+              const smokeId = `smoke_${this.seed}_${this.smokeIdCounter++}`;
               const smoke = { 
+                id: smokeId,
                 x: bullet.x, 
                 y: bullet.y, 
                 radius: props.smokeRadius ?? 140, 
@@ -2418,7 +2426,9 @@ export class Room {
               tick: this.tick,
             });
             const props = this.getGrenadeProps(bullet.weaponTypeId);
+            const smokeId = `smoke_${this.seed}_${this.smokeIdCounter++}`; // Assign unique ID
             const smoke = { 
+              id: smokeId, // Add ID property
               x: bullet.x, 
               y: bullet.y, 
               radius: props.smokeRadius ?? 140, 
@@ -2810,7 +2820,10 @@ export class Room {
   private spawnAIsFromTemplate(mapTemplate: MapTemplate): void {
     if (!mapTemplate.aiSpawns) return;
 
-    for (const aiSpawn of mapTemplate.aiSpawns) {
+    for (let spawnIdx = 0; spawnIdx < mapTemplate.aiSpawns.length; spawnIdx++) {
+      const aiSpawn = mapTemplate.aiSpawns[spawnIdx];
+      const spawnId = `spawn_${spawnIdx}`;
+
       for (let i = 0; i < aiSpawn.count; i++) {
         const aiId = `ai_${this.aiIdCounter++}`;
 
@@ -2868,10 +2881,13 @@ export class Room {
           fireRateMultiplier: rolePreset.fireRateMultiplier,
           aggroRange: rolePreset.aggroRange,
           chaseRange: rolePreset.chaseRange,
+          // 槽位信息
+          spawnId: spawnId,
+          spawnIndex: i,
         });
 
         this.ais.set(aiId, ai);
-        log('AI_SPAWNED', { room: this.id, aiId, type: aiSpawn.type, role, weapon: ai.weaponRuntime.weaponTypeId });
+        log('AI_SPAWNED', { room: this.id, aiId, type: aiSpawn.type, role, weapon: ai.weaponRuntime.weaponTypeId, spawnId, spawnIndex: i });
       }
     }
   }
@@ -3046,32 +3062,50 @@ export class Room {
   private respawnAIs(count: number, spawnId?: string): void {
     if (!this.mapTemplate?.aiSpawns || this.mapTemplate.aiSpawns.length === 0) return;
 
-    let spawnsToUse: AISpawn[] = [];
-    
-    if (spawnId) {
-      // 如果指定了spawnId，尝试从aiSpawnMap中查找
-      const mappedSpawn = this.aiSpawnMap.get(spawnId);
-      if (mappedSpawn) {
-        spawnsToUse = [mappedSpawn];
-      } else {
-        // 如果没找到，尝试按索引查找
-        const index = parseInt(spawnId.replace('spawn_', ''), 10);
-        if (!isNaN(index) && index >= 0 && index < this.mapTemplate.aiSpawns.length) {
-          spawnsToUse = [this.mapTemplate.aiSpawns[index]];
-        }
+    // 1. 整理出所有可用的空闲槽位
+    // 每个 AISpawn.count 代表该点位有多少个槽位
+    const allAis = Array.from(this.ais.values());
+    const occupiedSlots = new Set<string>(); // "spawnId:slotIndex"
+    for (const ai of allAis) {
+      if (ai.status === 'ALIVE' && ai.spawnId !== undefined && ai.spawnIndex !== undefined) {
+        occupiedSlots.add(`${ai.spawnId}:${ai.spawnIndex}`);
       }
-    } else {
-      // 随机选择一个spawn点
-      spawnsToUse = this.mapTemplate.aiSpawns;
     }
 
-    if (spawnsToUse.length === 0) return;
+    const freeSlots: Array<{ spawn: AISpawn; spawnId: string; index: number }> = [];
+    
+    // 如果指定了 spawnId，只在那个点找，否则全图找
+    const spawnsToIterate = spawnId ? [spawnId] : Array.from(this.aiSpawnMap.keys());
 
-    // 随机选择一个spawn点
+    for (const sid of spawnsToIterate) {
+      const spawn = this.aiSpawnMap.get(sid);
+      if (!spawn) continue;
+
+      for (let i = 0; i < spawn.count; i++) {
+        if (!occupiedSlots.has(`${sid}:${i}`)) {
+          freeSlots.push({ spawn, spawnId: sid, index: i });
+        }
+      }
+    }
+
+    if (freeSlots.length === 0) {
+      log('AI_RESPAWN_FAILED', { room: this.id, reason: 'no_free_slots', spawnId });
+      return;
+    }
+
+    // 2. 随机排序空闲槽位，从中抽取 count 个
     const rng = createRng(this.seed + 3000000 + this.tick);
-    const selectedSpawn = spawnsToUse[Math.floor(rng() * spawnsToUse.length)];
+    const shuffledSlots = [...freeSlots];
+    for (let i = shuffledSlots.length - 1; i > 0; i--) {
+      const j = Math.floor(rng() * (i + 1));
+      [shuffledSlots[i], shuffledSlots[j]] = [shuffledSlots[j], shuffledSlots[i]];
+    }
 
-    for (let i = 0; i < count; i++) {
+    const numToSpawn = Math.min(count, shuffledSlots.length);
+
+    for (let i = 0; i < numToSpawn; i++) {
+      const slot = shuffledSlots[i];
+      const selectedSpawn = slot.spawn;
       const aiId = `ai_${this.aiIdCounter++}`;
 
       // 构建巡逻配置
@@ -3128,10 +3162,13 @@ export class Room {
         fireRateMultiplier: rolePreset.fireRateMultiplier,
         aggroRange: rolePreset.aggroRange,
         chaseRange: rolePreset.chaseRange,
+        // 槽位信息
+        spawnId: slot.spawnId,
+        spawnIndex: slot.index,
       });
 
       this.ais.set(aiId, ai);
-      log('AI_RESPAWNED', { room: this.id, aiId, type: selectedSpawn.type, weapon: selectedSpawn.weaponTypeId });
+      log('AI_RESPAWNED', { room: this.id, aiId, type: selectedSpawn.type, weapon: ai.weaponRuntime.weaponTypeId, spawnId: slot.spawnId, spawnIndex: slot.index });
     }
   }
 
@@ -3178,9 +3215,13 @@ export class Room {
       .map((p) => {
         const state = p.toState(this.tick);
         // 计算玩家是否在草丛内
-        state.inBush = this.isPlayerInBush(p.x, p.y);
+        const bushId = this.isPlayerInBush(p.x, p.y);
+        state.inBush = !!bushId;
+        state.inBushId = bushId;
         // 计算玩家是否在烟雾内
-        state.inSmoke = this.isPointInSmoke(p.x, p.y);
+        const smokeId = this.isPointInSmoke(p.x, p.y);
+        state.inSmoke = !!smokeId;
+        state.inSmokeId = smokeId;
         // 计算玩家是否被闪光弹致盲
         const now = Date.now();
         state.isFlashed = p.flashedUntil > now;
@@ -3199,7 +3240,18 @@ export class Room {
 
     const aiStates = Array.from(this.ais.values())
       .filter(ai => ai.status === 'ALIVE')
-      .map(ai => ai.toState(this.tick));
+      .map(ai => {
+        const state = ai.toState(this.tick);
+        // 计算AI是否在草丛内
+        const bushId = this.isPlayerInBush(ai.x, ai.y);
+        state.inBush = !!bushId;
+        state.inBushId = bushId;
+        // 计算AI是否在烟雾内
+        const smokeId = this.isPointInSmoke(ai.x, ai.y);
+        state.inSmoke = !!smokeId;
+        state.inSmokeId = smokeId;
+        return state;
+      });
 
     return {
       players: visiblePlayers,

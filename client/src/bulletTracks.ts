@@ -617,7 +617,9 @@ export class BulletTrackManager {
               lastInputTick: 0,
               extractProgress: 0,
               inBush: false,
+              inBushId: null,
               inSmoke: false,
+              inSmokeId: null,
               isFlashed: false,
               flashEndTime: 0,
             };

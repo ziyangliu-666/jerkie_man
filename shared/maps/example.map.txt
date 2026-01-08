@@ -309,7 +309,7 @@
 # - 数量明显低于外围总量，保证中心是“少量但优质”
 @itemrespawn id=center_high mode=both intervalTicks=900 count=1 maxItems=8 zoneId=center_zone items=w_minigun,w_grenade_launcher,w_sniper,armor_heavy,bag_military rarityWeights=COMMON:10,RARE:40,EPIC:70
 
-@airespawn intervalTicks=1800 maxAIs=10
+@airespawn intervalTicks=600 maxAIs=10
 
 @note "v4 AI角色系统升级（2K大图）："
 @note "- 中心：2个重机枪手(红色26px,200HP,30%护甲,2倍射速疯狂扫射)"

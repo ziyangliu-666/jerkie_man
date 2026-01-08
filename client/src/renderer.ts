@@ -39,6 +39,11 @@ export class Renderer {
   private playerTrailStrength: Map<string, number> = new Map();
   // 新增: 速度采样（基于世界位置 + 时间），用于判断当前“视觉速度”
   private playerLastSample: Map<string, { x: number; y: number; t: number }> = new Map();
+  
+  // 新增: 烟雾全屏覆盖过渡动画状态
+  private smokeOverlayAlpha: number = 0; // 当前覆盖层透明度 (0-1)
+  private smokeOverlayTargetAlpha: number = 0; // 目标透明度 (0-1)
+  private readonly SMOKE_TRANSITION_MS = 200; // 过渡时间 200ms
 
   constructor(canvas: HTMLCanvasElement) {
     this.canvas = canvas;
@@ -853,6 +858,40 @@ export class Renderer {
     this.ctx.restore();
   }
 
+  // 新增: 绘制全屏烟雾覆盖（当本地玩家在烟雾中时）
+  private drawFullScreenSmokeOverlay(smokeCenterX: number, smokeCenterY: number, alpha: number): void {
+    // 绘制全屏深色烟雾覆盖层（护眼黑色系），带透明度过渡
+    if (alpha <= 0) return; // 完全透明时不绘制
+    
+    this.ctx.save();
+    
+    // 使用径向渐变，中心对齐到烟雾弹位置（世界坐标转屏幕坐标）
+    const screenCenterX = smokeCenterX - this.camX;
+    const screenCenterY = smokeCenterY - this.camY;
+    const radius = Math.max(this.cssWidth, this.cssHeight) * 0.6;
+    
+    const gradient = this.ctx.createRadialGradient(screenCenterX, screenCenterY, 0, screenCenterX, screenCenterY, radius);
+    gradient.addColorStop(0, `rgba(60, 60, 60, ${0.93 * alpha})`); // 中心深灰色，更不透明 93%
+    gradient.addColorStop(0.4, `rgba(35, 35, 35, ${0.97 * alpha})`); // 中间区域更深更不透明 97%
+    gradient.addColorStop(1, `rgba(15, 15, 15, ${0.99 * alpha})`); // 边缘接近完全黑 99%
+    
+    this.ctx.fillStyle = gradient;
+    this.ctx.fillRect(0, 0, this.cssWidth, this.cssHeight);
+    
+    // 添加烟雾噪点效果（深色系），也应用过渡alpha
+    this.ctx.globalAlpha = 0.08 * alpha;
+    for (let i = 0; i < 60; i++) {
+      const x = Math.random() * this.cssWidth;
+      const y = Math.random() * this.cssHeight;
+      const size = Math.random() * 3 + 1;
+      this.ctx.fillStyle = Math.random() > 0.5 ? 'rgba(70, 70, 70, 0.15)' : 'rgba(25, 25, 25, 0.25)';
+      this.ctx.fillRect(x, y, size, size);
+    }
+    
+    this.ctx.restore();
+  }
+
+
   // 近战挥击特效（扇形弧线）
   drawMeleeSwing(effect: { x: number; y: number; aimRad: number; range: number; arcRad: number; age: number }): void {
     const screenX = effect.x - this.camX;
@@ -1260,175 +1299,74 @@ export class Renderer {
     return `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`;
   }
 
-  // 绘制隐蔽状态提示（当玩家在草丛中时）
-  private drawConcealmentIndicator(playerX: number, playerY: number): void {
-    // 将玩家世界坐标转换为屏幕坐标
-    const screenX = Math.round(playerX - this.camX);
-    const screenY = Math.round(playerY - this.camY);
-    
-    // 在玩家下方显示小型"隐蔽"提示
-    const textY = screenY + 25; // 玩家下方25px
-    
-    this.ctx.save();
-    
-    // 绘制小型提示
-    const text = '🌿 隐蔽';
-    this.ctx.font = 'bold 12px monospace';
-    this.ctx.textAlign = 'center';
-    this.ctx.textBaseline = 'middle';
-    
-    const metrics = this.ctx.measureText(text);
-    const textWidth = metrics.width;
-    const padding = 6;
-    const boxWidth = textWidth + padding * 2;
-    const boxHeight = 20;
-    
-    // 绘制背景框（深绿色半透明）
-    this.ctx.fillStyle = 'rgba(34, 139, 34, 0.8)';
-    this.ctx.fillRect(screenX - boxWidth / 2, textY - boxHeight / 2, boxWidth, boxHeight);
-    
-    // 绘制边框（亮绿色）
-    this.ctx.strokeStyle = '#90EE90';
-    this.ctx.lineWidth = 1.5;
-    this.ctx.strokeRect(screenX - boxWidth / 2, textY - boxHeight / 2, boxWidth, boxHeight);
-    
-    // 绘制文字
-    this.ctx.fillStyle = '#FFFFFF';
-    this.ctx.fillText(text, screenX, textY);
-    
-    this.ctx.restore();
-  }
 
   /**
-   * 新增: 绘制本地玩家使用道具读条指示（例如急救包）
-   * 以玩家为中心绘制圆环进度条和道具名称
+   * 绘制通用的横向状态条（位于实体下方）
    */
-  private drawUsingItemIndicator(player: PLAYER_STATE): void {
-    if (
-      !player.usingItemTypeId ||
-      player.usingItemRemainingMs === undefined ||
-      player.usingItemTotalMs === undefined
-    ) {
-      return;
-    }
-
-    // 如果总时间异常，直接返回
-    if (player.usingItemTotalMs <= 0) return;
-
-    const screenX = Math.round(player.x - this.camX);
-    const screenY = Math.round(player.y - this.camY);
-
-    // 调试日志：只对本地玩家调用时在外面包一层，这里打印原始数据一次
-    // 为避免刷屏，这里只在 10%/50%/90% 等关键进度附近打印
-    const usedMs = player.usingItemTotalMs - player.usingItemRemainingMs;
-    const progress = Math.max(0, Math.min(1, usedMs / player.usingItemTotalMs));
-    const debugPercent = Math.round(progress * 100);
-    if (debugPercent === 10 || debugPercent === 50 || debugPercent === 90) {
-      // eslint-disable-next-line no-console
-      console.log('[Render] using item progress', {
-        typeId: player.usingItemTypeId,
-        remainingMs: player.usingItemRemainingMs,
-        totalMs: player.usingItemTotalMs,
-        percent: debugPercent,
-      });
-    }
-
-    // 圆环参数
-    const radius = 26;
-    const lineWidth = 4;
-
-    this.ctx.save();
-
-    // 背景圆环（灰色底）
-    this.ctx.strokeStyle = 'rgba(0, 0, 0, 0.55)';
-    this.ctx.lineWidth = lineWidth;
-    this.ctx.beginPath();
-    this.ctx.arc(screenX, screenY, radius, 0, Math.PI * 2);
-    this.ctx.stroke();
-
-    // 前景进度圆弧（绿色，从上方向顺时针）
-    const startAngle = -Math.PI / 2;
-    const endAngle = startAngle + progress * Math.PI * 2;
-    this.ctx.strokeStyle = '#4CAF50';
-    this.ctx.lineWidth = lineWidth;
-    this.ctx.beginPath();
-    this.ctx.arc(screenX, screenY, radius, startAngle, endAngle);
-    this.ctx.stroke();
-
-    // 百分比文字
-    const percent = Math.round(progress * 100);
-    this.ctx.fillStyle = '#ffffff';
-    this.ctx.font = 'bold 10px monospace';
-    this.ctx.textAlign = 'center';
-    this.ctx.textBaseline = 'middle';
-    this.ctx.fillText(`${percent}%`, screenX, screenY);
-
-    // 道具名称放在玩家上方一点
-    let itemName = player.usingItemTypeId;
-    try {
-      const itemType = getItemType(player.usingItemTypeId);
-      itemName = itemType.name;
-    } catch {
-      // ignore, fallback to id
-    }
-    this.ctx.font = 'bold 12px monospace';
-    this.ctx.textAlign = 'center';
-    this.ctx.textBaseline = 'bottom';
-    this.ctx.fillStyle = '#ffffff';
-    const nameY = screenY - radius - 4;
-    if (nameY >= 0) {
-      this.ctx.fillText(itemName, screenX, nameY);
-    }
-
-    this.ctx.restore();
-  }
-
-  // 绘制致盲状态提示（当玩家或AI被闪光弹致盲时）
-  private drawFlashIndicator(entityX: number, entityY: number, progress: number = 1.0): void {
-    // 将世界坐标转换为屏幕坐标
+  private drawStatusIndicator(
+    entityX: number,
+    entityY: number,
+    text: string,
+    progress: number = 1.0,
+    color: string = '#4CAF50',
+    index: number = 0
+  ): void {
     const screenX = Math.round(entityX - this.camX);
     const screenY = Math.round(entityY - this.camY);
-    
-    // 在实体下方显示小型"致盲"提示（与隐蔽类似位置）
-    const textY = screenY + 25;
-    
+
+    // 计算位置，支持多个状态条堆叠
+    const baseY = screenY + 25;
+    const spacing = 22;
+    const indicatorY = baseY + index * spacing;
+
     this.ctx.save();
-    
-    const text = '⚡ 致盲';
     this.ctx.font = 'bold 12px monospace';
     this.ctx.textAlign = 'center';
     this.ctx.textBaseline = 'middle';
-    
+
     const metrics = this.ctx.measureText(text);
     const textWidth = metrics.width;
     const padding = 6;
     const boxWidth = textWidth + padding * 2;
-    const boxHeight = 20;
+    const boxHeight = 18;
     const boxX = screenX - boxWidth / 2;
-    const boxY = textY - boxHeight / 2;
-    
-    // 背景框：白色半透明
-    this.ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
+    const boxY = indicatorY - boxHeight / 2;
+
+    // 背景框
+    this.ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
     this.ctx.fillRect(boxX, boxY, boxWidth, boxHeight);
-    
-    // 进度条：黑色，从左到右表示剩余时间（进度越小，黑条越短）
+
+    // 进度条背景
     const clampedProgress = Math.max(0, Math.min(1, progress));
     const progressWidth = boxWidth * clampedProgress;
     if (progressWidth > 0) {
-      this.ctx.fillStyle = '#000000';
+      this.ctx.fillStyle = color;
       this.ctx.fillRect(boxX, boxY, progressWidth, boxHeight);
     }
-    
-    // 边框：中性灰色
-    this.ctx.strokeStyle = '#666666';
-    this.ctx.lineWidth = 1.5;
+
+    // 描边
+    this.ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
+    this.ctx.lineWidth = 1;
     this.ctx.strokeRect(boxX, boxY, boxWidth, boxHeight);
-    
-    // 文字：灰色，在白色背景上更清晰可读
-    this.ctx.fillStyle = '#333333';
-    this.ctx.fillText(text, screenX, textY);
-    
+
+    // 文字
+    this.ctx.fillStyle = '#FFFFFF';
+    // 添加文字阴影提高可读性
+    this.ctx.shadowColor = 'rgba(0, 0, 0, 0.8)';
+    this.ctx.shadowBlur = 2;
+    this.ctx.fillText(text, screenX, indicatorY);
+
     this.ctx.restore();
+  }
+
+  // 绘制致盲状态提示
+  private drawFlashIndicator(entityX: number, entityY: number, progress: number = 1.0, index: number = 0): void {
+    this.drawStatusIndicator(entityX, entityY, '⚡ 致盲', progress, 'rgba(255, 255, 255, 0.8)', index);
+  }
+
+  // 绘制隐蔽状态提示
+  private drawConcealmentIndicator(entityX: number, entityY: number, index: number = 0): void {
+    this.drawStatusIndicator(entityX, entityY, '🌿 隐蔽', 1.0, 'rgba(34, 139, 34, 0.8)', index);
   }
 
   // 渲染所有玩家和子弹
@@ -1511,10 +1449,22 @@ export class Renderer {
       this.drawLootBag(bag);
     }
 
+    const now = Date.now();
+    let flashGrenadeDurationMs = 5000;
+    try {
+      const flashItem = getItemType('flash_grenade');
+      const props = (flashItem as any).consumableProps;
+      if (props && typeof props.flashDurationMs === 'number') {
+        flashGrenadeDurationMs = props.flashDurationMs;
+      }
+    } catch {
+      // fallback
+    }
+
     // 绘制所有玩家（使用屏幕坐标）
-    // 新增: 草丛/烟雾视野遮挡 - 只有在草丛/烟雾内的玩家才能看到其他在草丛/烟雾内的玩家
-    const localInBush = isLocalPlayerInBush; // 使用客户端本地计算的值
-    const localInSmoke = localPlayer?.inSmoke ?? false; // 本地玩家是否在烟雾内
+    // 新增: 草丛/烟雾视野遮挡 - 只有在草丛/烟雾内的玩家才能看到其他在 *同一个* 草丛/烟雾内的玩家
+    const localInBushId = localPlayer?.inBushId ?? null;
+    const localInSmokeId = localPlayer?.inSmokeId ?? null;
 
     // 清理已离场玩家的拖影（不在 snapshot 里的玩家）
     const activeIds = new Set(players.map((p) => p.id));
@@ -1535,15 +1485,14 @@ export class Renderer {
       const playerInBush = player.inBush ?? false;
       const playerInSmoke = player.inSmoke ?? false;
 
-      // 可见性检查：
       // 1. 本地玩家总是可见
-      // 2. 不在草丛/烟雾内的玩家总是可见
-      // 3. 在草丛内的玩家，只有本地玩家也在草丛内时才可见
-      // 4. 在烟雾内的玩家，只有本地玩家也在烟雾内时才可见
-      const isVisible = isLocal ||
-        (!playerInBush && !playerInSmoke) ||
-        (playerInBush && localInBush) ||
-        (playerInSmoke && localInSmoke);
+      // 2. 烟雾完全遮挡：如果目标在烟雾内，或者本地玩家在烟雾内，则不可见（除自己外）
+      // 3. 草丛遮挡：如果目标在草丛内，只有本地玩家也在同一个草丛内才可见
+      const isVisible = isLocal || (
+        !playerInSmoke && 
+        !(localPlayer?.inSmoke ?? false) && 
+        (!playerInBush || (player.inBushId !== null && player.inBushId === localInBushId))
+      );
 
       if (isVisible) {
         // 使用“真正被画出来的位置”来判定速度：
@@ -1566,11 +1515,14 @@ export class Renderer {
       for (const player of players) {
         if (player.id !== localPlayerId && player.status === 'ALIVE') {
           const playerInBush = player.inBush ?? false;
-          const playerInSmoke = player.inSmoke ?? false;
-          // 应用视野遮挡：草丛/烟雾内的玩家，只有本地玩家也在草丛/烟雾内时才显示指引
-          const isVisible = (!playerInBush && !playerInSmoke) ||
-            (playerInBush && localInBush) ||
-            (playerInSmoke && localInSmoke);
+  const playerInSmoke = player.inSmoke ?? false;
+  const localInBushId = localPlayer.inBushId ?? null;
+  const localInSmoke = localPlayer.inSmoke ?? false;
+
+  const isVisible = 
+    !playerInSmoke && 
+    !localInSmoke &&
+    (!playerInBush || (player.inBushId !== null && player.inBushId === localInBushId));
           if (isVisible) {
             this.drawOffscreenPlayerIndicator(localPlayer, player);
           }
@@ -1587,20 +1539,28 @@ export class Renderer {
     for (const ai of ais) {
       if (ai.status !== 'ALIVE') continue;
       
-      // AI视野遮挡逻辑：
+      // AI视野遮挡逻辑（与玩家一致）：
       // 1. 如果本地玩家被闪光弹致盲，看不到任何AI
-      // 2. 如果本地玩家在烟雾内，只能看到同样在烟雾内的AI
-      // 3. 如果本地玩家不在烟雾内，看不到烟雾内的AI
+      // 2. 如果AI在草丛/烟雾内，只有本地玩家也在 *同一个* 草丛/烟雾内时才可见
       
       // 检查本地玩家是否被闪光弹致盲
       const isLocalFlashed = localPlayer?.isFlashed ?? false;
       if (isLocalFlashed) {
-        // 本地玩家被闪光弹致盲，看不到任何AI
         continue;
       }
       
-      // 检查AI是否在烟雾内（需要服务端计算并同步，暂时跳过烟雾检查）
-      // TODO: 服务端需要为AI添加inSmoke字段
+      const aiInBush = ai.inBush ?? false;
+      const aiInSmoke = ai.inSmoke ?? false;
+      
+      // AI视野遮挡逻辑：烟雾全遮挡，草丛按ID匹配
+      const isVisible = 
+        !aiInSmoke && 
+        !(localPlayer?.inSmoke ?? false) && 
+        (!aiInBush || (ai.inBushId !== null && ai.inBushId === localInBushId));
+
+      if (!isVisible) {
+        continue;
+      }
       
       // 绘制AI
       this.drawAI(ai, debug, currentServerTick);
@@ -1687,45 +1647,125 @@ export class Renderer {
       }
     }
 
-    // 绘制隐蔽状态提示（当本地玩家在草丛中时）
-    if (isLocalPlayerInBush && localPlayer) {
-      this.drawConcealmentIndicator(localPlayer.x, localPlayer.y);
-    }
 
-    // 绘制本地玩家使用道具读条指示（例如急救包）
-    if (localPlayer) {
-      this.drawUsingItemIndicator(localPlayer);
-    }
-
-    // 绘制致盲状态提示（所有被闪的玩家和AI）
-    const now = Date.now();
-    // 从配置读取闪光弹持续时间
-    let flashGrenadeDurationMs = 5000; // 默认值
-    try {
-      const flashItem = getItemType('flash_grenade');
-      const props = (flashItem as any).consumableProps;
-      if (props && typeof props.flashDurationMs === 'number') {
-        flashGrenadeDurationMs = props.flashDurationMs;
-      }
-    } catch {
-      // 配置读取失败，使用默认值
-    }
-    
     for (const p of players) {
-      if ((p as any).isFlashed) {
-        const flashEndTime = (p as any).flashEndTime ?? 0;
-        const remainingMs = Math.max(0, flashEndTime - now);
-        const progress = remainingMs / flashGrenadeDurationMs;
-        this.drawFlashIndicator(p.x, p.y, progress);
+      if (p.status === 'DEAD' || p.status === 'EXTRACTED') continue;
+
+      const isLocal = p.id === localPlayerId;
+      const visualPlayer = isLocal && localPlayer ? localPlayer : p;
+      
+      // 检查可见性（与玩家渲染逻辑一致）
+        const playerInBush = p.inBush ?? false;
+        const playerInSmoke = p.inSmoke ?? false;
+        
+        // 可见性判定：烟雾全遮挡，草丛按ID匹配
+        const isVisible = (p.id === localPlayerId) || (
+          !playerInSmoke && 
+          !(localPlayer?.inSmoke ?? false) && 
+          (!playerInBush || (p.inBushId !== null && p.inBushId === localInBushId))
+        );
+      if (!isLocal && !isVisible) continue;
+
+      let statusIndex = 0;
+
+      // 修复：状态标识需要严格遵循可见性规则（包括本地玩家自己）
+      // 烟雾中的任何玩家（包括自己）都不应该显示状态标识
+      // 只有在没有烟雾遮挡的情况下才显示状态标识
+      const shouldShowStatus = !playerInSmoke && !(localPlayer?.inSmoke ?? false) && 
+        (!playerInBush || (p.inBushId !== null && p.inBushId === localInBushId));
+      
+      if (shouldShowStatus) {
+        // 1. 隐蔽状态
+        // 本地玩家使用 isLocalPlayerInBush 标志（预测），其他玩家使用 snapshot 同步的 inBush
+        const inBush = isLocal ? isLocalPlayerInBush : p.inBush;
+        if (inBush) {
+          this.drawConcealmentIndicator(visualPlayer.x, visualPlayer.y, statusIndex++);
+        }
+
+        // 2. 致盲状态
+        if ((p as any).isFlashed) {
+          const flashEndTime = (p as any).flashEndTime ?? 0;
+          const remainingMs = Math.max(0, flashEndTime - now);
+          const progress = remainingMs / flashGrenadeDurationMs;
+          this.drawFlashIndicator(visualPlayer.x, visualPlayer.y, progress, statusIndex++);
+        }
+
+        // 3. 正在使用物品 (治疗中)
+        if (
+          p.usingItemTypeId &&
+          p.usingItemRemainingMs !== undefined &&
+          p.usingItemTotalMs !== undefined &&
+          p.usingItemTotalMs > 0
+        ) {
+          const usedMs = p.usingItemTotalMs - p.usingItemRemainingMs;
+          const progress = Math.max(0, Math.min(1, usedMs / p.usingItemTotalMs));
+          
+          // 只有医疗包显示"治疗中"，其他物品显示原本的名字
+          const isHealing = p.usingItemTypeId === 'medkit' || p.usingItemTypeId === 'advanced_medkit';
+          const statusText = isHealing ? '💊 治疗中' : `📦 ${p.usingItemTypeId}`;
+          const color = isHealing ? '#2ECC71' : '#F1C40F';
+
+          this.drawStatusIndicator(visualPlayer.x, visualPlayer.y, statusText, progress, color, statusIndex++);
+        }
       }
     }
+
+    // 绘制 AI 状态指示器
     for (const ai of ais) {
-      if (ai.status === 'ALIVE' && (ai as any).isFlashed) {
+      if (ai.status !== 'ALIVE') continue;
+      
+      // AI 也需要基本的可见性检查（被闪光弹致盲时看不见 AI）
+      if (localPlayer?.isFlashed) continue;
+      
+      let statusIndex = 0;
+      if ((ai as any).isFlashed) {
         const flashEndTime = (ai as any).flashEndTime ?? 0;
         const remainingMs = Math.max(0, flashEndTime - now);
         const progress = remainingMs / flashGrenadeDurationMs;
-        this.drawFlashIndicator(ai.x, ai.y, progress);
+        this.drawFlashIndicator(ai.x, ai.y, progress, statusIndex++);
       }
+    }
+    
+    // 新增: 烟雾覆盖过渡动画
+    const nowMs = performance.now();
+    const inSmoke = localPlayer?.inSmoke ?? false;
+    
+    // 更新目标alpha
+    this.smokeOverlayTargetAlpha = inSmoke ? 1 : 0;
+    
+    // 平滑过渡当前alpha到目标alpha
+    const alphaDiff = this.smokeOverlayTargetAlpha - this.smokeOverlayAlpha;
+    if (Math.abs(alphaDiff) > 0.001) {
+      // 使用线性插值，每帧根据时间增量调整alpha
+      const deltaAlphaPerMs = 1 / this.SMOKE_TRANSITION_MS; // 每毫秒的alpha变化量
+      const maxDelta = deltaAlphaPerMs * 16.67; // 假设60fps，约16.67ms一帧
+      const delta = Math.sign(alphaDiff) * Math.min(Math.abs(alphaDiff), maxDelta);
+      this.smokeOverlayAlpha = Math.max(0, Math.min(1, this.smokeOverlayAlpha + delta));
+    } else {
+      this.smokeOverlayAlpha = this.smokeOverlayTargetAlpha;
+    }
+    
+    // 如果有alpha，绘制烟雾覆盖
+    if (this.smokeOverlayAlpha > 0 && localPlayer) {
+      // 找到玩家所在的烟雾，获取其中心位置
+      let smokeCenterX = localPlayer.x; // 默认使用玩家位置
+      let smokeCenterY = localPlayer.y;
+      
+      if (inSmoke) {
+        for (const smoke of smokes) {
+          const dx = localPlayer.x - smoke.x;
+          const dy = localPlayer.y - smoke.y;
+          const distSq = dx * dx + dy * dy;
+          if (distSq <= smoke.radius * smoke.radius) {
+            // 找到玩家所在的烟雾
+            smokeCenterX = smoke.x;
+            smokeCenterY = smoke.y;
+            break;
+          }
+        }
+      }
+      
+      this.drawFullScreenSmokeOverlay(smokeCenterX, smokeCenterY, this.smokeOverlayAlpha);
     }
   }
 

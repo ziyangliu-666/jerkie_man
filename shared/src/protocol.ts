@@ -247,7 +247,9 @@ export const PLAYER_STATE_SCHEMA = z.object({
   name: z.string().optional(), // 新增: 玩家昵称（用于显示）
   weaponRuntime: WEAPON_RUNTIME_SCHEMA.optional(), // 新增: 武器运行时状态（局内状态）
   inBush: z.boolean().optional().default(false), // 新增: 是否在草丛内（用于视野遮挡）
+  inBushId: z.string().nullable().optional().default(null), // 新增: 所在的草丛ID
   inSmoke: z.boolean().optional().default(false), // 新增: 是否在烟雾内（用于视野遮挡）
+  inSmokeId: z.string().nullable().optional().default(null), // 新增: 所在的烟雾ID
   isFlashed: z.boolean().optional().default(false), // 新增: 是否被闪光弹致盲
   flashEndTime: z.number().optional().default(0), // 新增: 致盲结束时间（毫秒时间戳）
   raidEquipment: PLAYER_RAID_EQUIPMENT_SCHEMA.optional(), // 新增: 局内装备状态
@@ -276,6 +278,10 @@ export const AI_STATE_SCHEMA = z.object({
   // 新增: 闪光弹状态（与玩家字段对齐）
   isFlashed: z.boolean().optional().default(false),
   flashEndTime: z.number().optional().default(0),
+  inBush: z.boolean().optional().default(false),
+  inBushId: z.string().nullable().optional().default(null),
+  inSmoke: z.boolean().optional().default(false),
+  inSmokeId: z.string().nullable().optional().default(null),
 });
 
 export const BULLET_STATE_SCHEMA = z.object({
