@@ -69,6 +69,9 @@ export class UIOverlay {
   // 性能优化: 限制 DPR（与 renderer 保持一致）
   private maxDpr: number = 1.5;
   
+  // 性能优化: 追踪上一帧是否有内容（用于清除残留）
+  private hadContentLastFrame: boolean = false;
+  
   // UI 状态（外部更新，每帧读取绘制）
   private state: UIOverlayState = {
     damage: { alpha: 0 },
@@ -173,11 +176,25 @@ export class UIOverlay {
     const cx = w / 2;
     const cy = h / 2;
 
-    // 清空画布
-    ctx.save();
-    ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
-    ctx.restore();
+    // 性能优化: 检查是否有任何内容需要绘制
+    const hasContent: boolean = 
+      this.state.damage.alpha > 0 ||
+      this.state.hitMarker.alpha > 0 ||
+      this.state.extractProgress.enabled ||
+      (this.state.textHint.alpha > 0 && !!this.state.textHint.text) ||
+      this.state.flash.enabled;
+
+    // 只在有内容或上一帧有内容时才清空画布
+    // （上一帧有内容但这一帧没有 = 需要清除残留）
+    if (hasContent || this.hadContentLastFrame) {
+      ctx.save();
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+      ctx.restore();
+    }
+    
+    // 更新追踪状态
+    this.hadContentLastFrame = hasContent;
 
     // 1. 受伤红边 vignette
     if (this.state.damage.alpha > 0) {

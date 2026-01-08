@@ -279,7 +279,7 @@ export const WEAPONS: Record<string, WeaponDef> = {
     fireIntervalMs: 50,  // 射速很快，类似加特林
     spreadDeg: 15,       // 较大的散布，增加趣味性
     bulletSpeed: 200,    // 子弹很慢
-    damage: 30,
+    damage: 20,
     bulletLifeMs: 10000,  // 子弹ttl很长
   },
 };
