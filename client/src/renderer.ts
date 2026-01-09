@@ -1294,39 +1294,11 @@ export class Renderer {
     this.ctx.fillRect(barX, barY, barW, barH);
     this.ctx.fillStyle = turret.hp > turret.maxHp * 0.5 ? '#0f0' : '#f00';
     this.ctx.fillRect(barX, barY, barW * (turret.hp / turret.maxHp), barH);
-    
-    // 4. 剩余时间进度条（仅对本地玩家的炮台显示）
-    if (localPlayerId && turret.ownerId === localPlayerId) {
-      const durationMs = 30000; // 炮台总持续时间（30秒，与item_catalog一致）
-      const timeProgress = turret.remainingTimeMs / durationMs; // 0-1，0表示即将到期
-      
-      const timeBarW = 30;
-      const timeBarH = 3;
-      const timeBarX = screenX - timeBarW / 2;
-      const timeBarY = barY - 6; // 在HP条上方6px
-      
-      // 背景（深灰色）
-      this.ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
-      this.ctx.fillRect(timeBarX, timeBarY, timeBarW, timeBarH);
-      
-      // 进度条（颜色随时间变化：黄色 -> 橙色 -> 红色）
-      let timeBarColor = '#ffff00'; // 默认黄色
-      if (timeProgress < 0.25) {
-        timeBarColor = '#ff3333'; // 红色（即将到期）
-      } else if (timeProgress < 0.5) {
-        timeBarColor = '#ff9900'; // 橙色
-      }
-      
-      this.ctx.fillStyle = timeBarColor;
-      this.ctx.fillRect(timeBarX, timeBarY, timeBarW * timeProgress, timeBarH);
-      
-      // 边框
-      this.ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)';
-      this.ctx.lineWidth = 1;
-      this.ctx.strokeRect(timeBarX, timeBarY, timeBarW, timeBarH);
-    }
-    
-    // 5. 新增: 状态标签（类似AI的"摸鱼"、"攻击"等）
+
+    // UI Stacking Logic (from bottom to top)
+    let stackY = screenY - 36; // Start above HP Bar
+
+    // 4. Status Label (Draw first as it is the bottom-most UI element above HP)
     if (turret.state) {
       let stateText = '';
       let bgColor = 'rgba(0, 0, 0, 0.8)';
@@ -1361,27 +1333,92 @@ export class Renderer {
         this.ctx.textAlign = 'center';
         this.ctx.textBaseline = 'middle';
 
+        // Use cached text measurement
         const textWidth = this.measureCached('bold 12px monospace', stateText);
         const padding = 6;
         const boxWidth = textWidth + padding * 2;
         const boxHeight = 20;
-        const textY = screenY - 36; // 在HP条上方
+        
+        // Draw centered at stackY
+        const boxX = screenX - boxWidth / 2;
+        const boxY = stackY - boxHeight / 2;
 
-        // 绘制背景框
+        // Background
         this.ctx.fillStyle = bgColor;
-        this.ctx.fillRect(screenX - boxWidth / 2, textY - boxHeight / 2, boxWidth, boxHeight);
+        this.ctx.fillRect(boxX, boxY, boxWidth, boxHeight);
 
-        // 绘制边框
+        // Border
         this.ctx.strokeStyle = borderColor;
         this.ctx.lineWidth = 1.5;
-        this.ctx.strokeRect(screenX - boxWidth / 2, textY - boxHeight / 2, boxWidth, boxHeight);
+        this.ctx.strokeRect(boxX, boxY, boxWidth, boxHeight);
 
-        // 绘制文字
+        // Text
         this.ctx.fillStyle = '#FFFFFF';
-        this.ctx.fillText(stateText, screenX, textY);
+        this.ctx.fillText(stateText, screenX, stackY);
 
         this.ctx.restore();
+
+        // Move stack up
+        stackY -= 24; 
       }
+    }
+    
+    // 5. Remaining Time Bar (Local Player Only) - Now displayed ABOVE the status label
+    // Style matches the status label (Box + Text + Progress)
+    if (localPlayerId && turret.ownerId === localPlayerId) {
+      const durationMs = 30000; 
+      const remaining = Math.max(0, turret.remainingTimeMs);
+      const timeProgress = Math.min(1, Math.max(0, remaining / durationMs));
+      
+      const timeText = `⏳ ${(remaining / 1000).toFixed(1)}s`;
+      
+      this.ctx.save();
+      this.ctx.font = 'bold 12px monospace';
+      this.ctx.textAlign = 'center';
+      this.ctx.textBaseline = 'middle';
+      
+      const textWidth = this.measureCached('bold 12px monospace', timeText);
+      const padding = 6;
+      const boxWidth = textWidth + padding * 2;
+      const boxHeight = 20;
+      
+      // Draw centered at current stackY
+      const boxX = screenX - boxWidth / 2;
+      const boxY = stackY - boxHeight / 2;
+      
+      // Determine color based on time
+      let barColor = '#ffff00'; // Default Yellow
+      if (timeProgress < 0.25) {
+        barColor = '#ff3333'; // Red
+      } else if (timeProgress < 0.5) {
+        barColor = '#ff9900'; // Orange
+      }
+      
+      // Background (Dark)
+      this.ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+      this.ctx.fillRect(boxX, boxY, boxWidth, boxHeight);
+      
+      // Progress Bar Background (Fill part of the box)
+      this.ctx.fillStyle = barColor;
+      this.ctx.globalAlpha = 0.4; // Semi-transparent for background fill
+      this.ctx.fillRect(boxX, boxY, boxWidth * timeProgress, boxHeight);
+      this.ctx.globalAlpha = 1.0;
+      
+      // Border
+      this.ctx.strokeStyle = barColor;
+      this.ctx.lineWidth = 1.5;
+      this.ctx.strokeRect(boxX, boxY, boxWidth, boxHeight);
+      
+      // Text
+      this.ctx.fillStyle = '#FFFFFF';
+      this.ctx.shadowColor = 'rgba(0, 0, 0, 0.8)';
+      this.ctx.shadowBlur = 2;
+      this.ctx.fillText(timeText, screenX, stackY);
+      
+      this.ctx.restore();
+      
+      // Move stack up (in case we add more things later)
+      stackY -= 24;
     }
   }
 
