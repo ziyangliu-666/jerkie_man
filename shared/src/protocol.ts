@@ -314,6 +314,22 @@ export const DECOY_STATE_SCHEMA = z.object({
   inSmokeId: z.string().nullable().optional().default(null),
 });
 
+// Turret 实体状态
+export const TURRET_STATE_SCHEMA = z.object({
+  id: z.string(),
+  x: z.number(),
+  y: z.number(),
+  ownerId: z.string(),
+  hp: z.number(),
+  maxHp: z.number(),
+  aimRad: z.number(),
+  state: z.enum(['IDLE', 'SPOOLING', 'FIRING', 'RELOADING']),
+  targetId: z.string().optional(),
+  remainingTimeMs: z.number(),
+  isArmored: z.boolean(),
+  range: z.number(),
+});
+
 export const BULLET_STATE_SCHEMA = z.object({
   id: z.string(),
   x: z.number(),
@@ -324,8 +340,10 @@ export const BULLET_STATE_SCHEMA = z.object({
   clientShotId: z.number().int().optional(), // 客户端发射ID（用于预测子弹对齐）
   weaponTypeId: z.string().optional(), // 武器类型ID（用于区分手雷、子弹等视觉样式）
   bulletLifeMs: z.number().optional(), // 子弹生命周期（毫秒，用于客户端TTL判断）
+  spawnTimeMs: z.number().optional(), // 新增: 生成时间戳（用于视觉效果计算，如轨迹消隐）
   targetX: z.number().optional(),
   targetY: z.number().optional(),
+  spreadSeed: z.number().optional(), // 新增: 散布种子（用于客户端重现散布，特别是炮台子弹）
 });
 
 export const ITEM_STATE_SCHEMA = z.object({
@@ -387,6 +405,7 @@ export const S2C_SNAPSHOT_SCHEMA = z.object({
   obstacles: z.array(OBSTACLE_STATE_SCHEMA).optional(), // 新增: 障碍物列表（可破坏，需要同步）
   ais: z.array(AI_STATE_SCHEMA).default([]), // 新增: AI实体列表
   decoys: z.array(DECOY_STATE_SCHEMA).optional(), // 新增: 诱饵列表
+  turrets: z.array(TURRET_STATE_SCHEMA).optional(), // 新增: 炮台列表
 });
 
 export const S2C_ERROR_SCHEMA = z.object({
@@ -486,6 +505,15 @@ export const S2C_SMOKE_SCHEMA = z.object({
   durationMs: z.number().int().positive(),
 });
 
+// 新增: 燃烧事件（用于生成持续一段时间的燃烧区域）
+export const S2C_FIRE_SCHEMA = z.object({
+  type: z.literal('S2C_FIRE'),
+  x: z.number(),
+  y: z.number(),
+  radius: z.number().positive(),
+  durationMs: z.number().int().positive(),
+});
+
 export const S2C_MESSAGE_SCHEMA = z.discriminatedUnion('type', [
   S2C_SNAPSHOT_SCHEMA,
   S2C_ERROR_SCHEMA,
@@ -499,6 +527,7 @@ export const S2C_MESSAGE_SCHEMA = z.discriminatedUnion('type', [
   S2C_MELEE_SWING_SCHEMA, // 新增: 近战挥击事件
   S2C_EXPLOSION_SCHEMA, // 新增: 爆炸事件
   S2C_SMOKE_SCHEMA, // 新增: 烟雾事件
+  S2C_FIRE_SCHEMA, // 新增: 燃烧事件
 ]);
 
 // TypeScript 类型推导
@@ -515,6 +544,7 @@ export type BULLET_STATE = z.infer<typeof BULLET_STATE_SCHEMA>;
 export type ITEM_STATE = z.infer<typeof ITEM_STATE_SCHEMA>;
 export type OBSTACLE_STATE = z.infer<typeof OBSTACLE_STATE_SCHEMA>; // Day4-2: 障碍物类型
 export type DECOY_STATE = z.infer<typeof DECOY_STATE_SCHEMA>; // 新增: 诱饵类型
+export type TURRET_STATE = z.infer<typeof TURRET_STATE_SCHEMA>; // 新增: 炮台类型
 export type S2C_SNAPSHOT = z.infer<typeof S2C_SNAPSHOT_SCHEMA>;
 export type S2C_ERROR = z.infer<typeof S2C_ERROR_SCHEMA>;
 export type S2C_WELCOME = z.infer<typeof S2C_WELCOME_SCHEMA>;
@@ -527,6 +557,7 @@ export type S2C_COMBAT_EVENT = z.infer<typeof S2C_COMBAT_EVENT_SCHEMA>; // 新�
 export type S2C_MELEE_SWING = z.infer<typeof S2C_MELEE_SWING_SCHEMA>; // 新增: 近战挥击事件类型
 export type S2C_EXPLOSION = z.infer<typeof S2C_EXPLOSION_SCHEMA>; // 新增: 爆炸事件类型
 export type S2C_SMOKE = z.infer<typeof S2C_SMOKE_SCHEMA>; // 新增: 烟雾事件类型
+export type S2C_FIRE = z.infer<typeof S2C_FIRE_SCHEMA>; // 新增: 燃烧事件类型
 export type S2C_MESSAGE = z.infer<typeof S2C_MESSAGE_SCHEMA>;
 
 // 新增: 物品系统类型导出

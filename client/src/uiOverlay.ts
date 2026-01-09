@@ -52,6 +52,11 @@ export interface UIOverlayState {
     enabled: boolean; // 是否被闪
     progress: number; // 0~1，剩余致盲时间百分比
   };
+
+  // 投掷瞄准状态（新增，用于解决共享 canvas 的清屏逻辑）
+  throwingAim: {
+    enabled: boolean;
+  };
 }
 
 export class UIOverlay {
@@ -80,6 +85,7 @@ export class UIOverlay {
     weaponStatus: { enabled: false, weaponName: '', ammoInMag: 0, magSize: 0, reloading: false, reloadProgress: 0 },
     textHint: { alpha: 0, text: '', color: undefined },
     flash: { enabled: false, progress: 0 },
+    throwingAim: { enabled: false },
   };
 
   constructor(canvas: HTMLCanvasElement) {
@@ -119,6 +125,9 @@ export class UIOverlay {
     }
     if (partial.flash) {
       Object.assign(this.state.flash, partial.flash);
+    }
+    if (partial.throwingAim) {
+      Object.assign(this.state.throwingAim, partial.throwingAim);
     }
   }
 
@@ -182,7 +191,8 @@ export class UIOverlay {
       this.state.hitMarker.alpha > 0 ||
       this.state.extractProgress.enabled ||
       (this.state.textHint.alpha > 0 && !!this.state.textHint.text) ||
-      this.state.flash.enabled;
+      this.state.flash.enabled ||
+      this.state.throwingAim.enabled;
 
     // 只在有内容或上一帧有内容时才清空画布
     // （上一帧有内容但这一帧没有 = 需要清除残留）

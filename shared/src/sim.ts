@@ -5,7 +5,7 @@
 
 import { circleVsAABB, clamp } from './math.js';
 import type { OBSTACLE_STATE } from './protocol.js';
-import { doesObstacleBlockPlayer } from './obstacleConfig.js';
+import { doesObstacleBlockPlayer, getObstacleConfig } from './obstacleConfig.js';
 
 // 玩家移动速度（像素/秒）
 const PLAYER_SPEED = 200;
@@ -59,8 +59,22 @@ export function simulatePlayerMove(
     dy = dy / len;
   }
   
-  // 计算移动距离（应用速度倍数和冲刺倍数）
-  const effectiveSpeed = PLAYER_SPEED * speedMultiplier * sprintMultiplier;
+  // 检查玩家是否在任何影响移动速度的障碍物中（如水域）
+  let terrainSpeedMultiplier = 1.0;
+  for (const obstacle of obstacles) {
+    const obsType = (obstacle as any).type || 'wall';
+    // 检查玩家是否在这个障碍物内
+    if (circleVsAABB(pos.x, pos.y, PLAYER_RADIUS, obstacle)) {
+      const config = getObstacleConfig(obsType);
+      // 使用最小的速度倍数（如果玩家同时在多个障碍物中）
+      if (config.speedMultiplier < terrainSpeedMultiplier) {
+        terrainSpeedMultiplier = config.speedMultiplier;
+      }
+    }
+  }
+  
+  // 计算移动距离（应用装备速度倍数、冲刺倍数和地形速度倍数）
+  const effectiveSpeed = PLAYER_SPEED * speedMultiplier * sprintMultiplier * terrainSpeedMultiplier;
   const moveX = dx * effectiveSpeed * deltaTime;
   const moveY = dy * effectiveSpeed * deltaTime;
   

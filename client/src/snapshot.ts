@@ -1,4 +1,4 @@
-import type { S2C_SNAPSHOT, PLAYER_STATE, BULLET_STATE, ITEM_STATE, WorldItem, LootBag, OBSTACLE_STATE, DECOY_STATE } from '@jerkie-man/shared';
+import type { S2C_SNAPSHOT, PLAYER_STATE, BULLET_STATE, ITEM_STATE, WorldItem, LootBag, OBSTACLE_STATE, DECOY_STATE, TURRET_STATE } from '@jerkie-man/shared';
 import { lerp } from '@jerkie-man/shared';
 
 interface SnapshotEntry {
@@ -37,6 +37,8 @@ export class SnapshotBuffer {
     const offsetNow = snapshot.timestamp - Date.now();
     // 使用指数移动平均（90%旧值 + 10%新值）平滑更新，避免网络抖动影响
     this.serverOffsetMs = this.serverOffsetMs * 0.9 + offsetNow * 0.1;
+
+
   }
 
   // 获取插值后的状态
@@ -49,6 +51,7 @@ export class SnapshotBuffer {
     obstacles?: OBSTACLE_STATE[];
     ais: any[];
     decoys?: DECOY_STATE[];
+    turrets?: TURRET_STATE[];
   } {
     // P0-1: 使用服务器时间域计算renderTime，避免跨机器时钟偏移导致插值失败
     // 将客户端时间转换为服务器时间域：clientNow + offset = serverNow
@@ -58,7 +61,7 @@ export class SnapshotBuffer {
     const renderTimeServer = serverNow - renderDelay;
 
     if (this.buffer.length === 0) {
-      return { players: [], bullets: [], items: [], worldItems: [], lootBags: [], obstacles: [], ais: [], decoys: [] };
+      return { players: [], bullets: [], items: [], worldItems: [], lootBags: [], obstacles: [], ais: [], decoys: [], turrets: [] };
     }
 
     if (this.buffer.length === 1) {
@@ -71,6 +74,7 @@ export class SnapshotBuffer {
         obstacles: this.buffer[0].snapshot.obstacles ?? [],
         ais: this.buffer[0].snapshot.ais ?? [],
         decoys: this.buffer[0].snapshot.decoys ?? [],
+        turrets: this.buffer[0].snapshot.turrets ?? [],
       };
     }
 
@@ -109,6 +113,7 @@ export class SnapshotBuffer {
           obstacles: latest.snapshot.obstacles ?? [],
           ais: latest.snapshot.ais ?? [],
           decoys: latest.snapshot.decoys ?? [],
+          turrets: latest.snapshot.turrets ?? [],
         };
       }
     }
@@ -218,6 +223,7 @@ export class SnapshotBuffer {
       obstacles: t1.snapshot.obstacles ?? [],
       ais: interpolatedAIs,
       decoys: interpolatedDecoys,
+      turrets: t1.snapshot.turrets ?? [],
     };
   }
 

@@ -391,7 +391,8 @@
       to { transform: translateX(100%); opacity: 0; }
     }
     @keyframes containerFadeOut {
-      to { background-color: rgba(0, 0, 0, 0); backdrop-filter: none; pointer-events: none; }
+      from { opacity: 1; pointer-events: auto; }
+      to { opacity: 0; pointer-events: none; }
     }
 
     .anim-exit-up {
@@ -404,7 +405,7 @@
       animation: slideOutRight 1.0s cubic-bezier(0.4, 0, 0.2, 1) forwards;
     }
     .anim-fade-out {
-      animation: containerFadeOut 1.0s linear forwards;
+      animation: containerFadeOut 1.0s cubic-bezier(0.4, 0, 0.2, 1) forwards;
     }
 
     #raidEquipment .raid-equipment-title {
@@ -2920,7 +2921,287 @@
       <div id="debugPanel"></div>
     </div>
   </div>
-  
+
+    <style>
+    /* Start Screen Styles */
+    #startScreen {
+      position: fixed;
+      inset: 0;
+      z-index: 99999;
+      background: #050608;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
+      font-family: 'Courier New', monospace;
+      color: #fff;
+      perspective: 1200px; /* For 3D Tilt */
+      
+      /* Dynamic Variables set by JS */
+      --mouse-x: 50%;
+      --mouse-y: 50%;
+      --tilt-x: 0deg;
+      --tilt-y: 0deg;
+    }
+
+    /* Scene Container for Parallax */
+    .scene-container {
+      position: absolute;
+      inset: -20%; /* Ovesized to allow movement */
+      width: 140%;
+      height: 140%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transform-style: preserve-3d;
+      transform: rotateX(var(--tilt-y)) rotateY(var(--tilt-x)); /* Inverse logic for feel */
+      transition: transform 0.1s linear;
+    }
+
+    /* Common Grid Style */
+    .cyber-grid-layer {
+      position: absolute;
+      inset: 0;
+      background-size: 60px 60px;
+      transform: perspective(600px) rotateX(60deg) scale(2);
+      transform-origin: center 40%;
+      animation: gridScroll 10s linear infinite;
+      pointer-events: none;
+    }
+
+    /* Base Grid: Dim, subtle */
+    .grid-base {
+      background-image: 
+        linear-gradient(rgba(0, 255, 255, 0.08) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(0, 255, 255, 0.08) 1px, transparent 1px);
+      mask-image: radial-gradient(circle at center, black 0%, transparent 80%);
+      -webkit-mask-image: radial-gradient(circle at center, black 0%, transparent 80%);
+    }
+
+    /* Highlight Grid: Bright, revealed by scanner */
+    .grid-highlight {
+      background-image: 
+        linear-gradient(#0ff 1px, transparent 1px),
+        linear-gradient(90deg, #0ff 1px, transparent 1px);
+      filter: drop-shadow(0 0 4px #0ff);
+      /* The Scanner Mask */
+      mask-image: radial-gradient(circle 350px at var(--mouse-x) var(--mouse-y), black 0%, transparent 100%);
+      -webkit-mask-image: radial-gradient(circle 350px at var(--mouse-x) var(--mouse-y), black 0%, transparent 100%);
+      opacity: 0.8;
+      z-index: 1;
+    }
+
+    /* Floating Particles Layer (Scanner Debris) */
+    .debris-layer {
+      position: absolute;
+      inset: 0;
+      background-image: 
+        radial-gradient(circle, #0ff 1px, transparent 1px),
+        radial-gradient(circle, white 1px, transparent 1px);
+      background-size: 120px 120px, 200px 200px;
+      background-position: 0 0, 40px 60px;
+      mask-image: radial-gradient(circle 250px at var(--mouse-x) var(--mouse-y), black 0%, transparent 100%);
+      -webkit-mask-image: radial-gradient(circle 250px at var(--mouse-x) var(--mouse-y), black 0%, transparent 100%);
+      animation: debrisFloat 20s linear infinite;
+      z-index: 2;
+      opacity: 0.6;
+    }
+
+    @keyframes gridScroll {
+      0% { background-position: 0 0; }
+      100% { background-position: 0 60px; }
+    }
+    
+    @keyframes debrisFloat {
+      0% { transform: translateY(0); }
+      100% { transform: translateY(100px); }
+    }
+
+    /* Content Wrapper with 3D Float */
+    .content-wrapper {
+      position: relative;
+      z-index: 10;
+      text-align: center;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 60px;
+      /* Subtle opposite float */
+      transform: translateZ(50px) rotateX(calc(var(--tilt-y) * -0.5)) rotateY(calc(var(--tilt-x) * -0.5));
+      transition: transform 0.1s linear;
+    }
+
+    /* Glitch Title (Refined) */
+    .game-title {
+      font-size: 96px;
+      font-weight: 900;
+      letter-spacing: 12px;
+      color: #fff;
+      text-transform: uppercase;
+      position: relative;
+      text-shadow: 0 0 20px rgba(0, 255, 255, 0.4);
+      animation: titleFloat 4s ease-in-out infinite;
+      margin: 0;
+    }
+    
+    @keyframes titleFloat {
+      0%, 100% { transform: translateY(0); }
+      50% { transform: translateY(-10px); }
+    }
+
+    .game-title::before, .game-title::after {
+      content: attr(data-text);
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: #050608;
+      clip: rect(0,0,0,0);
+    }
+    
+    .game-title:hover::before {
+      left: 2px;
+      text-shadow: -2px 0 #f0f;
+      clip: rect(24px, 550px, 90px, 0);
+      animation: glitch-anim-1 0.4s infinite linear alternate-reverse;
+    }
+    
+    .game-title:hover::after {
+      left: -2px;
+      text-shadow: -2px 0 #0ff;
+      clip: rect(85px, 550px, 140px, 0);
+      animation: glitch-anim-2 0.3s infinite linear alternate-reverse;
+    }
+
+    /* Subtitle */
+    .game-subtitle {
+      font-size: 16px;
+      letter-spacing: 8px;
+      color: rgba(0, 255, 255, 0.6);
+      text-transform: uppercase;
+      margin-top: -20px;
+      border-bottom: 1px solid rgba(0, 255, 255, 0.2);
+      padding-bottom: 20px;
+      width: 100%;
+    }
+
+    /* Button Container */
+    .start-btn-container {
+      position: relative;
+      margin-top: 40px;
+    }
+
+    /* Cyber Button (Refined) */
+    .cyber-button {
+      position: relative;
+      background: transparent;
+      border: 1px solid rgba(0, 255, 255, 0.2);
+      padding: 20px 60px;
+      cursor: pointer;
+      overflow: hidden;
+      transition: all 0.3s cubic-bezier(0.23, 1, 0.32, 1);
+    }
+
+    .cyber-button:hover {
+      background: rgba(0, 255, 255, 0.05);
+      border-color: rgba(0, 255, 255, 0.6);
+      letter-spacing: 2px;
+      box-shadow: 0 0 20px rgba(0, 255, 255, 0.1);
+    }
+    
+    .btn-content {
+      font-family: 'Courier New', monospace;
+      font-size: 20px;
+      font-weight: bold;
+      color: #fff;
+      letter-spacing: 4px;
+      z-index: 2;
+      position: relative;
+      transition: all 0.3s;
+    }
+    
+    /* Reveal Line Effect on Button */
+    .cyber-button::before {
+       content: '';
+       position: absolute;
+       top: 0;
+       left: -100%;
+       width: 100%;
+       height: 100%;
+       background: linear-gradient(90deg, transparent, rgba(0, 255, 255, 0.2), transparent);
+       transition: left 0.5s;
+    }
+    .cyber-button:hover::before {
+       left: 100%;
+    }
+
+    /* Button Corners */
+    .btn-corner {
+      position: absolute;
+      width: 6px;
+      height: 6px;
+      border: 1px solid #0ff;
+      transition: all 0.3s;
+      opacity: 0.5;
+    }
+    
+    .corner-tl { top: 0; left: 0; border-right: none; border-bottom: none; }
+    .corner-tr { top: 0; right: 0; border-left: none; border-bottom: none; }
+    .corner-bl { bottom: 0; left: 0; border-right: none; border-top: none; }
+    .corner-br { bottom: 0; right: 0; border-left: none; border-top: none; }
+    
+    .cyber-button:hover .btn-corner {
+      width: 100%;
+      height: 100%;
+      opacity: 0.1;
+      background: #0ff;
+    }
+
+    /* Keyframes for Glitch */
+    @keyframes glitch-anim-1 {
+      0% { clip: rect(20px, 9999px, 80px, 0); }
+      100% { clip: rect(30px, 9999px, 60px, 0); }
+    }
+    @keyframes glitch-anim-2 {
+      0% { clip: rect(80px, 9999px, 20px, 0); }
+      100% { clip: rect(90px, 9999px, 50px, 0); }
+    }
+    
+    .fade-out {
+      opacity: 0;
+      transform: scale(1.1);
+      filter: blur(10px);
+      transition: all 0.8s ease-out;
+      pointer-events: none;
+    }
+    </style>
+
+  <!-- START SCREEN -->
+  <div id="startScreen">
+    <!-- Parallax Container -->
+    <div class="scene-container">
+      <div class="cyber-grid-layer grid-base"></div>
+      <div class="cyber-grid-layer grid-highlight"></div>
+      <div class="debris-layer"></div>
+    </div>
+    
+    <div class="content-wrapper">
+      <h1 class="game-title" data-text="JERKIE MAN">JERKIE MAN</h1>
+      <p class="game-subtitle">CYBERNETIC_WARFARE // v.0.9</p>
+      
+      <div class="start-btn-container">
+        <button id="startGameBtn" class="cyber-button">
+          <span class="btn-content">INITIALIZE // START</span>
+          <span class="btn-corner corner-tl"></span>
+          <span class="btn-corner corner-tr"></span>
+          <span class="btn-corner corner-bl"></span>
+          <span class="btn-corner corner-br"></span>
+        </button>
+      </div>
+    </div>
+  </div>
+
   <script type="module" src="/src/main.ts"></script>
 </body>
 </html>

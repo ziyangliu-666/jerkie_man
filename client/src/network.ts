@@ -28,6 +28,7 @@ import {
   type S2C_MELEE_SWING, // 新增: 近战挥击事件类型
   type S2C_EXPLOSION, // 新增: 爆炸事件类型
   type S2C_SMOKE, // 新增: 烟雾事件类型
+  type S2C_FIRE, // 新增: 燃烧事件类型
   type MAP_CONFIG, // P0-1 修复: 使用 shared 的 MAP_CONFIG 类型，避免类型漂移
   type OBSTACLE_STATE, // 修复: 静态世界初始化
   type ITEM_STATE, // 修复: 静态世界初始化
@@ -74,6 +75,7 @@ export interface NetworkCallbacks {
   onMeleeSwing?: (event: S2C_MELEE_SWING) => void; // 新增: 近战挥击事件回调
   onExplosion?: (event: S2C_EXPLOSION) => void; // 新增: 爆炸事件回调
   onSmoke?: (event: S2C_SMOKE) => void; // 新增: 烟雾事件回调
+  onFire?: (event: S2C_FIRE) => void; // 新增: 燃烧事件回调
 }
 
 export class Network {
@@ -242,6 +244,10 @@ export class Network {
           } else if (message.type === 'S2C_SMOKE') {
             if (this.callbacks.onSmoke) {
               this.callbacks.onSmoke(message);
+            }
+          } else if (message.type === 'S2C_FIRE') {
+            if (this.callbacks.onFire) {
+              this.callbacks.onFire(message);
             }
           } else if (message.type === 'S2C_ERROR') {
             console.error('Server error:', message.message);

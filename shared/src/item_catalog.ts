@@ -13,6 +13,7 @@ export const ITEM_CATALOG: Record<string, ItemType> = {
     rarity: 'COMMON',
     value: 150,
     stackMax: 5,
+    description: '基础的医疗用品，能快速处理伤口。恢复50点生命值。',
     shortName: '医疗',
     consumableProps: {
       healAmount: 50,  // 恢复50点生命值
@@ -26,6 +27,7 @@ export const ITEM_CATALOG: Record<string, ItemType> = {
     name: '废金属',
     rarity: 'COMMON',
     value: 5,
+    description: '普遍存在的废弃金属碎片，是制作和修理的基础材料。',
     stackMax: 20,
   },
   cloth: {
@@ -34,6 +36,7 @@ export const ITEM_CATALOG: Record<string, ItemType> = {
     name: '布料',
     rarity: 'COMMON',
     value: 3,
+    description: '普通的布料，可用于包扎伤口或制作简单的装备。',
     stackMax: 30,
   },
   
@@ -44,6 +47,7 @@ export const ITEM_CATALOG: Record<string, ItemType> = {
     name: '电子零件',
     rarity: 'RARE',
     value: 25,
+    description: '精密的电子元件，用于制造高科技设备和战术道具。',
     stackMax: 10,
   },
   medical_supplies: {
@@ -52,6 +56,7 @@ export const ITEM_CATALOG: Record<string, ItemType> = {
     name: '医疗材料',
     rarity: 'RARE',
     value: 30,
+    description: '稀有的医疗耗材，用于合成高级药品。',
     stackMax: 5,
   },
   weapon_parts: {
@@ -60,6 +65,7 @@ export const ITEM_CATALOG: Record<string, ItemType> = {
     name: '武器零件',
     rarity: 'RARE',
     value: 40,
+    description: '各种枪械的通用零部件，是改装和制造武器的关键。',
     stackMax: 8,
   },
   
@@ -70,6 +76,7 @@ export const ITEM_CATALOG: Record<string, ItemType> = {
     name: '稀有金属',
     rarity: 'EPIC',
     value: 100,
+    description: '极其罕见的合金金属，强度高且重量轻，用于制造顶级装备。',
     stackMax: 5,
   },
   advanced_circuit: {
@@ -78,6 +85,7 @@ export const ITEM_CATALOG: Record<string, ItemType> = {
     name: '高级电路板',
     rarity: 'EPIC',
     value: 150,
+    description: '复杂的集成电路板，蕴含尖端科技，是核心设备的必需品。',
     stackMax: 3,
   },
   combat_stim: {
@@ -87,6 +95,7 @@ export const ITEM_CATALOG: Record<string, ItemType> = {
     rarity: 'EPIC',
     value: 200,
     stackMax: 3,
+    description: '肾上腺素混合剂，能在短时间内大幅提升移动速度。',
     shortName: '兴奋',
     consumableProps: {
       buffDurationMs: 15000,  // 15秒
@@ -100,6 +109,7 @@ export const ITEM_CATALOG: Record<string, ItemType> = {
     rarity: 'EPIC',
     value: 300,
     stackMax: 2,
+    description: '包含纳米修复机器人的血清，能持续快速再生生命体征。',
     shortName: '再生',
     consumableProps: {
       buffDurationMs: 20000,  // 20秒
@@ -114,6 +124,7 @@ export const ITEM_CATALOG: Record<string, ItemType> = {
     name: '手枪',
     rarity: 'COMMON',
     value: 200,
+    description: '标准制式手枪，轻便可靠，适合防身和近距离交战。',
     stackMax: 1,
   },
   w_smg: {
@@ -122,6 +133,7 @@ export const ITEM_CATALOG: Record<string, ItemType> = {
     name: '冲锋枪',
     rarity: 'RARE',
     value: 600,
+    description: '高射速轻型冲锋枪，近战火力压制的不二之选。',
     stackMax: 1,
   },
   w_burst: {
@@ -130,6 +142,7 @@ export const ITEM_CATALOG: Record<string, ItemType> = {
     name: '三连发步枪',
     rarity: 'RARE',
     value: 800,
+    description: '能够快速进行三连发射击的步枪，兼顾射速与精度。',
     stackMax: 1,
   },
   w_dmr: {
@@ -138,6 +151,7 @@ export const ITEM_CATALOG: Record<string, ItemType> = {
     name: '精确步枪',
     rarity: 'RARE',
     value: 1200,
+    description: '半自动精确射手步枪，适合中远距离精准打击。',
     stackMax: 1,
   },
   w_shotgun: {
@@ -146,6 +160,7 @@ export const ITEM_CATALOG: Record<string, ItemType> = {
     name: '霰弹枪',
     rarity: 'RARE',
     value: 900,
+    description: '泵动式霰弹枪，近距离威力巨大，一击必杀。',
     stackMax: 1,
   },
   w_sniper: {
@@ -154,6 +169,7 @@ export const ITEM_CATALOG: Record<string, ItemType> = {
     name: '狙击步枪',
     rarity: 'RARE',
     value: 1800,
+    description: '高倍镜狙击步枪，极高的单发伤害，适合远距离狙杀。',
     stackMax: 1,
   },
   w_grenade_launcher: {
@@ -162,6 +178,7 @@ export const ITEM_CATALOG: Record<string, ItemType> = {
     name: '榴弹炮',
     rarity: 'EPIC',
     value: 2200,
+    description: '发射高爆榴弹的重型武器，能对范围内敌人造成毁灭性打击。',
     stackMax: 1,
   },
   w_minigun: {
@@ -170,6 +187,7 @@ export const ITEM_CATALOG: Record<string, ItemType> = {
     name: '加特林机枪',
     rarity: 'EPIC',
     value: 3000,
+    description: '多管旋转机枪，拥有恐怖的持续火力和压制力。',
     stackMax: 1,
   },
   w_anti_material: {
@@ -178,6 +196,7 @@ export const ITEM_CATALOG: Record<string, ItemType> = {
     name: '反器材狙击枪',
     rarity: 'EPIC',
     value: 3500,
+    description: '大口径反器材步枪，能够穿透掩体并摧毁重型装甲。',
     stackMax: 1,
   },
   w_double_barrel: {
@@ -186,6 +205,7 @@ export const ITEM_CATALOG: Record<string, ItemType> = {
     name: '双管霰弹枪',
     rarity: 'RARE',
     value: 1500,
+    description: '双管猎枪，瞬间爆发力极强，但装填较慢。',
     stackMax: 1,
   },
   w_laser_rifle: {
@@ -194,6 +214,7 @@ export const ITEM_CATALOG: Record<string, ItemType> = {
     name: '激光步枪',
     rarity: 'EPIC',
     value: 2500,
+    description: '发射高能激光束的未来武器，精准度极高且无后座力。',
     stackMax: 1,
   },
   w_crossbow: {
@@ -202,6 +223,7 @@ export const ITEM_CATALOG: Record<string, ItemType> = {
     name: '弩',
     rarity: 'RARE',
     value: 1400,
+    description: '无声且致命的弩箭，适合隐秘行动，发射可回收的箭矢。',
     stackMax: 1,
   },
   w_auto_shotgun: {
@@ -210,6 +232,7 @@ export const ITEM_CATALOG: Record<string, ItemType> = {
     name: '全自动霰弹枪',
     rarity: 'RARE',
     value: 1800,
+    description: '全自动射击的霰弹枪，能在短时间内倾泻大量弹药。',
     stackMax: 1,
   },
   w_precision_rifle: {
@@ -218,6 +241,7 @@ export const ITEM_CATALOG: Record<string, ItemType> = {
     name: '精确射手步枪',
     rarity: 'EPIC',
     value: 2000,
+    description: '特制的高精度步枪，射速与伤害的完美平衡。',
     stackMax: 1,
   },
   w_micro_smg: {
@@ -226,6 +250,7 @@ export const ITEM_CATALOG: Record<string, ItemType> = {
     name: '微型冲锋枪',
     rarity: 'RARE',
     value: 1000,
+    description: '极其紧凑的冲锋枪，射速惊人但射程较短。',
     stackMax: 1,
   },
   w_chainsaw: {
@@ -234,6 +259,7 @@ export const ITEM_CATALOG: Record<string, ItemType> = {
     name: '链锯',
     rarity: 'RARE',
     value: 1200,
+    description: '通过高速旋转链条切割敌人的近战利器，令人闻风丧胆。',
     stackMax: 1,
   },
   w_bubble_gun: {
@@ -242,6 +268,7 @@ export const ITEM_CATALOG: Record<string, ItemType> = {
     name: '泡泡枪',
     rarity: 'EPIC',
     value: 2500,
+    description: '发射特殊泡泡的趣味武器，具有独特的减速和控制效果。',
     stackMax: 1,
   },
   
@@ -253,6 +280,7 @@ export const ITEM_CATALOG: Record<string, ItemType> = {
     rarity: 'RARE',
     value: 150,
     stackMax: 5, // 可以堆叠5个
+    description: '投掷后爆炸，产生破片对范围内敌人造成伤害。',
     shortName: '手雷',
     consumableProps: {
       explosionRadius: 100,  // 100像素爆炸半径
@@ -266,6 +294,7 @@ export const ITEM_CATALOG: Record<string, ItemType> = {
     rarity: 'RARE',
     value: 200,
     stackMax: 5,
+    description: '通过强光致盲敌人，干扰其视野和听觉。',
     shortName: '闪光',
     consumableProps: {
       flashRadius: 150,  // 150像素致盲范围
@@ -280,10 +309,27 @@ export const ITEM_CATALOG: Record<string, ItemType> = {
     rarity: 'RARE',
     value: 180,
     stackMax: 5,
+    description: '释放浓密的烟雾，阻挡视线，用于掩护行动。',
     shortName: '烟雾',
     consumableProps: {
       smokeRadius: 200,  // 140像素烟雾半径
       smokeDurationMs: 15000,  // 15秒持续时间
+    },
+  },
+  molotov: {
+    id: 'molotov',
+    category: 'consumable',
+    name: '燃烧弹',
+    rarity: 'RARE',
+    value: 200,
+    stackMax: 5,
+    description: '投掷后产生持续燃烧的火焰区域，封锁路径并造成持续伤害。',
+    shortName: '燃烧',
+    consumableProps: {
+      fireRadius: 120,
+      fireDurationMs: 8000,
+      fireDamagePerSecond: 20,
+      explosionRadius: 100, // 视觉上的爆炸半径
     },
   },
   
@@ -295,6 +341,7 @@ export const ITEM_CATALOG: Record<string, ItemType> = {
     rarity: 'RARE',
     value: 100,
     stackMax: 3,
+    description: '部署一个全息投影产生的替身，用于迷惑敌人。',
     shortName: '诱饵',
     consumableProps: {
       // 诱饵不需要很多属性，由服务器逻辑处理生成实体
@@ -302,13 +349,28 @@ export const ITEM_CATALOG: Record<string, ItemType> = {
       explosionRadius: 1, 
     },
   },
+  i_sentry_turret: {
+    id: 'i_sentry_turret',
+    category: 'consumable',
+    name: '哨戒炮台',
+    rarity: 'EPIC',
+    value: 500,
+    stackMax: 1,
+    description: '自动追踪并攻击范围内敌人的便携式炮台。',
+    shortName: '炮台',
+    consumableProps: {
+      // Logic handled by server
+      durationMs: 30000, 
+    },
+  },
   i_disguise: {
     id: 'i_disguise',
     category: 'consumable',
-    name: '伪装工具包',
+    name: '伪装药水',
     rarity: 'RARE',
     value: 200,
     stackMax: 2,
+    description: '特制的伪装剂，能让你暂时看起来像一个普通的AI。',
     shortName: '伪装',
     consumableProps: {
       disguiseDurationMs: 30000, // 30秒伪装
@@ -323,6 +385,7 @@ export const ITEM_CATALOG: Record<string, ItemType> = {
     rarity: 'EPIC',
     value: 250,
     stackMax: 3,
+    description: '军用级急救包，内置高效药物，能瞬间恢复全部生命值。',
     shortName: '高级',
     consumableProps: {
       healAmount: 100,  // 恢复100点生命值（满血）
@@ -337,6 +400,7 @@ export const ITEM_CATALOG: Record<string, ItemType> = {
     name: '小挎包',
     rarity: 'COMMON',
     value: 100,
+    description: '简易的小挎包，提供少量额外的存储空间。',
     stackMax: 1,
   },
   bag_daypack: {
@@ -345,6 +409,7 @@ export const ITEM_CATALOG: Record<string, ItemType> = {
     name: '小背包',
     rarity: 'RARE',
     value: 300,
+    description: '日常使用的小型背包，在这个末世中非常实用。',
     stackMax: 1,
   },
   bag_tactical: {
@@ -353,6 +418,7 @@ export const ITEM_CATALOG: Record<string, ItemType> = {
     name: '战术背包',
     rarity: 'RARE',
     value: 700,
+    description: '专为作战设计的战术背包，拥有合理的空间布局。',
     stackMax: 1,
   },
   bag_expedition: {
@@ -361,6 +427,7 @@ export const ITEM_CATALOG: Record<string, ItemType> = {
     name: '大背包',
     rarity: 'RARE',
     value: 1200,
+    description: '大容量的探险背包，能装下你搜刮到的大部分物资。',
     stackMax: 1,
   },
   bag_military: {
@@ -369,6 +436,7 @@ export const ITEM_CATALOG: Record<string, ItemType> = {
     name: '军用背包',
     rarity: 'EPIC',
     value: 2000,
+    description: '军方制式的高负重背包，拥有最大的存储容量。',
     stackMax: 1,
   },
   
@@ -379,6 +447,7 @@ export const ITEM_CATALOG: Record<string, ItemType> = {
     name: '轻甲',
     rarity: 'RARE',
     value: 150,
+    description: '轻质的防护背心，能提供基础的身体防护。',
     stackMax: 1,
   },
   armor_kevlar: {
@@ -387,6 +456,7 @@ export const ITEM_CATALOG: Record<string, ItemType> = {
     name: '凯夫拉甲',
     rarity: 'RARE',
     value: 400,
+    description: '采用凯夫拉纤维制成，对小口径子弹有较好的防护效果。',
     stackMax: 1,
   },
   armor_plate: {
@@ -395,6 +465,7 @@ export const ITEM_CATALOG: Record<string, ItemType> = {
     name: '插板甲',
     rarity: 'RARE',
     value: 900,
+    description: '带有陶瓷插板的战术背心，能抵挡突击步枪的射击。',
     stackMax: 1,
   },
   armor_heavy: {
@@ -403,6 +474,7 @@ export const ITEM_CATALOG: Record<string, ItemType> = {
     name: '重甲',
     rarity: 'EPIC',
     value: 3000,
+    description: '覆盖全身的重型护甲，提供极高的防御力，但会略微影响行动。',
     stackMax: 1,
   },
   armor_exo: {
@@ -411,6 +483,7 @@ export const ITEM_CATALOG: Record<string, ItemType> = {
     name: '外骨骼装甲',
     rarity: 'EPIC',
     value: 2500,
+    description: '结合动力辅助的未来装甲，防御强悍且不牺牲机动性。',
     stackMax: 1,
   },
 };
@@ -465,5 +538,5 @@ export function isThrowableItem(typeId: string): boolean {
   const itemType = ITEM_CATALOG[typeId];
   if (!itemType?.consumableProps) return false;
   const props = itemType.consumableProps;
-  return !!(props.explosionRadius || props.smokeRadius || props.flashRadius);
+  return !!(props.explosionRadius || props.smokeRadius || props.flashRadius || props.fireRadius);
 }

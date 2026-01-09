@@ -115,6 +115,16 @@ const EXPLOSION_EFFECT_TTL_MS = 500;
 let explosionEffects: ExplosionEffect[] = [];
 let smokeEffects: SmokeEffect[] = [];
 
+// 新增: 燃烧效果
+type FireEffect = {
+  x: number;
+  y: number;
+  radius: number;
+  spawnTimeMs: number;
+  durationMs: number;
+};
+let fireEffects: FireEffect[] = [];
+
 /**
  * 获取本地开火冷却时间（毫秒）
  * 优先使用局内武器运行时状态，回退到 playerProfile
@@ -360,13 +370,74 @@ if (bgmToggleBtn && bgmVolumeSlider && bgmTrackSelect) {
 }
 
 // 监听首次交互以触发 BGM 播放
-const startBGM = () => {
-  audioManager.play();
-  window.removeEventListener('click', startBGM);
-  window.removeEventListener('keydown', startBGM);
-};
-window.addEventListener('click', startBGM);
-window.addEventListener('keydown', startBGM);
+
+// Start Screen Logic
+const startScreen = document.getElementById('startScreen');
+const startGameBtn = document.getElementById('startGameBtn');
+
+if (startScreen && startGameBtn) {
+  // Enhanced "Scanner" & Tilt Logic
+  const updatePerspective = (e: MouseEvent) => {
+    if (startScreen.style.display === 'none') return;
+    
+    // 1. Calculate Mouse Position for Spotlight (CSS determines look)
+    const x = e.clientX;
+    const y = e.clientY;
+    
+    // Update CSS variables for the scanner mask
+    startScreen.style.setProperty('--mouse-x', `${x}px`);
+    startScreen.style.setProperty('--mouse-y', `${y}px`);
+    
+    // 2. Calculate Tilt (from center of screen)
+    // Range: -1 to 1
+    const cx = window.innerWidth / 2;
+    const cy = window.innerHeight / 2;
+    
+    const dx = (x - cx) / cx;
+    const dy = (y - cy) / cy;
+    
+    // Max tilt angles
+    const MAX_TILT = 5; // degrees around center
+    
+    // Invert X/Y for natural tilt (mouse left -> rotate Y negative)
+    const tiltX = dx * MAX_TILT; 
+    const tiltY = dy * MAX_TILT * -1;
+    
+    startScreen.style.setProperty('--tilt-x', `${tiltX}deg`);
+    startScreen.style.setProperty('--tilt-y', `${tiltY}deg`);
+  };
+
+  window.addEventListener('mousemove', updatePerspective);
+
+  // Start Game Button Logic
+  startGameBtn.addEventListener('click', () => {
+    // 1. Play BGM and init audio
+    audioManager.play();
+
+    // 2. Visual Transition
+    startScreen.classList.add('fade-out');
+    // Stop tracking mouse to save perf after exit
+    window.removeEventListener('mousemove', updatePerspective);
+
+    // 3. Remove from DOM after transition
+    setTimeout(() => {
+      startScreen.style.display = 'none';
+      scheduleResize();
+      updatePhaseUI(); 
+    }, 800);
+  });
+} else {
+  // Fallback if start screen elements missing
+  const startBGM = () => {
+    audioManager.play();
+    window.removeEventListener('click', startBGM);
+    window.removeEventListener('keydown', startBGM);
+  };
+  window.addEventListener('click', startBGM);
+  window.addEventListener('keydown', startBGM);
+}
+
+
 
 // Debug 面板折叠功能（F1 切换）
 const hudContainer = document.getElementById('hudContainer');
@@ -682,12 +753,14 @@ function updatePhaseUI(): void {
     
     // 播放 Hideout 退出动画（UI 分裂移除）
     // 只有当 hideoutUI 可见时才播放（避免刷新页面直接进入 RAID 时闪烁）
-    if (hideoutUI && hideoutUI.style.display !== 'none') {
+    if (hideoutUI && hideoutUI.style.display !== 'none' && hideoutUI.style.opacity !== '0') {
       playHideoutExitAnimation();
     } else {
       // 如果本来就不可见（例如直接进Raid调试），确保隐藏
-      if (hideoutUI) hideoutUI.style.display = 'none';
-      playHideoutExitAnimation(); // 依然调用，以确保清理类名和正确重置
+      if (hideoutUI) {
+        hideoutUI.style.display = 'none';
+        hideoutUI.style.opacity = '1'; // 重置
+      }
     }
     
   } else if (currentPhase === 'RESULT') {
@@ -739,6 +812,7 @@ function playHideoutExitAnimation(): void {
   // 2. 动画结束清理
   setTimeout(() => {
     hideoutUI.style.display = 'none';
+    hideoutUI.style.opacity = '1'; // 重置，确保下次进入 Hideout 时可见（因为动画已经结束了）
     
     // 移除动画类，确保下次显示时位置正常
     hideoutUI.classList.remove('anim-fade-out');
@@ -1640,6 +1714,11 @@ function updateWeaponHud(localPlayer: PLAYER_STATE | null): void {
 
 // 新增: 更新Canvas UI的武器状态（已禁用武器信息显示）
 function updateCanvasUI(localPlayer: PLAYER_STATE | null): void {
+  // 1. 投掷瞄准状态同步（用于解决共享 canvas 的清屏逻辑）
+  uiOverlay.updateState({
+    throwingAim: { enabled: isThrowingMode }
+  });
+
   // 武器状态显示已禁用，不再更新
   // if (currentPhase !== 'RAID' || !localPlayer || localPlayer.status !== 'ALIVE') {
   //   // 禁用所有Canvas UI状态
@@ -2358,6 +2437,9 @@ function createItemCard(mergedItem: MergedItem, itemType: any, source: 'prep' | 
   header.appendChild(title);
   header.appendChild(price);
   
+  // 先添加 header（标题和价格在最上面）
+  card.appendChild(header);
+  
   // Quantity Badge
   const countBadge = document.createElement('div');
   countBadge.className = 'item-count-badge';
@@ -2368,11 +2450,38 @@ function createItemCard(mergedItem: MergedItem, itemType: any, source: 'prep' | 
   // Attach badge to card (absolute positioned)
   card.appendChild(countBadge);
   
-  const meta = document.createElement('div');
-  meta.className = 'stash-card-meta';
-  meta.textContent = getItemDescription(itemType);
-
+  // 获取并分割描述
+  const description = getItemDescription(itemType);
+  const descParts = description.split('\n');
+  const descText = descParts[0] || ''; // 第一行是描述文本
+  const statsText = descParts[1] || ''; // 第二行是数值统计
   
+  // 创建描述文本元素（如果有）
+  if (descText) {
+    const descEl = document.createElement('div');
+    descEl.className = 'stash-card-desc';
+    descEl.style.color = '#999';
+    descEl.style.fontSize = '11px';
+    descEl.style.lineHeight = '1.4';
+    descEl.style.marginBottom = '4px';
+    descEl.textContent = descText;
+    card.appendChild(descEl);
+  }
+  
+  // 创建数值统计元素（如果有）
+  if (statsText) {
+    const statsEl = document.createElement('div');
+    statsEl.className = 'stash-card-stats';
+    statsEl.style.color = '#0ff';
+    statsEl.style.fontSize = '11px';
+    statsEl.style.fontWeight = 'bold';
+    statsEl.style.fontFamily = "'Courier New', monospace";
+    statsEl.style.letterSpacing = '0.5px';
+    statsEl.style.textShadow = '0 0 8px rgba(0, 255, 255, 0.3)';
+    statsEl.textContent = statsText;
+    card.appendChild(statsEl);
+  }
+
   const actions = document.createElement('div');
   actions.className = 'stash-card-actions';
   
@@ -2470,8 +2579,6 @@ function createItemCard(mergedItem: MergedItem, itemType: any, source: 'prep' | 
     }
   }
 
-  card.appendChild(header);
-  card.appendChild(meta);
   card.appendChild(actions);
 
   return card;
@@ -2480,81 +2587,112 @@ function createItemCard(mergedItem: MergedItem, itemType: any, source: 'prep' | 
 // 新增: 获取物品简短描述
 function getItemDescription(itemType: any): string {
   const typeId = itemType.id || itemType.typeId;
+  const parts = [];
   
-  // 武器
+  // 添加物品目录中的描述（如果有）
+  if (itemType.description) {
+    parts.push(itemType.description);
+  }
+  
+  // 武器 - 添加具体数值
   try {
     const weaponDef = getWeaponDef(typeId);
-    const desc = [];
-    desc.push(`伤害: ${weaponDef.damage}`);
+    const stats = [];
+    stats.push(`伤害: ${weaponDef.damage}`);
     if (weaponDef.pelletCount && weaponDef.pelletCount > 1) {
-      desc.push(`${weaponDef.pelletCount}弹丸`);
+      stats.push(`弹丸: ${weaponDef.pelletCount}`);
     }
-    desc.push(`弹匣: ${weaponDef.magSize}`);
-    return desc.join(' | ');
+    stats.push(`弹匣: ${weaponDef.magSize}`);
+    // 计算射程（bulletSpeed * bulletLifeMs / 1000）
+    const range = Math.floor(weaponDef.bulletSpeed * weaponDef.bulletLifeMs / 1000);
+    if (range > 0) {
+      stats.push(`射程: ${range}`);
+    }
+    const fireRatePerMin = Math.floor(60000 / weaponDef.fireIntervalMs);
+    stats.push(`射速: ${fireRatePerMin}/分`);
+    parts.push(stats.join(' | '));
+    return parts.join('\n');
   } catch {}
   
-  // 防具
+  // 防具 - 添加具体数值
   try {
     const armorDef = getArmorDef(typeId);
-    const desc = [];
-    desc.push(`减伤: ${Math.floor(armorDef.damageReduction * 100)}%`);
+    const stats = [];
+    stats.push(`减伤: ${Math.floor(armorDef.damageReduction * 100)}%`);
     if (armorDef.buffs?.speedMultiplier) {
       const speedChange = Math.floor((armorDef.buffs.speedMultiplier - 1) * 100);
       if (speedChange > 0) {
-        desc.push(`速度: +${speedChange}%`);
+        stats.push(`速度: +${speedChange}%`);
       } else if (speedChange < 0) {
-        desc.push(`速度: ${speedChange}%`);
+        stats.push(`速度: ${speedChange}%`);
       }
     }
-    return desc.join(' | ');
+    parts.push(stats.join(' | '));
+    return parts.join('\n');
   } catch {}
   
-  // 背包
+  // 背包 - 添加具体数值
   try {
     const bagDef = getBagDef(typeId);
-    return `容量: ${bagDef.bagCap}`;
+    parts.push(`容量: ${bagDef.bagCap} 格`);
+    return parts.join('\n');
   } catch {}
   
-  // 消耗品
+  // 消耗品 - 添加具体数值
   if (itemType.consumableProps) {
     const props = itemType.consumableProps;
-    const desc = [];
+    const stats = [];
+    
     if (props.healAmount) {
-      desc.push(`恢复: ${props.healAmount}HP`);
+      stats.push(`恢复: ${props.healAmount}HP`);
     }
-    if (props.explosionRadius && props.damage) {
-      desc.push(`爆炸: ${props.damage}伤害`);
+    if (props.damage) {
+      stats.push(`伤害: ${props.damage}`);
+    }
+    if (props.explosionRadius) {
+      stats.push(`爆炸半径: ${props.explosionRadius}像素`);
     }
     if (props.flashRadius && props.flashDurationMs) {
-      desc.push(`致盲: ${Math.floor(props.flashDurationMs / 1000)}秒 | 短暂失明`);
+      stats.push(`致盲范围: ${props.flashRadius}像素`);
+      stats.push(`致盲时长: ${Math.floor(props.flashDurationMs / 1000)}秒`);
     }
     if (props.smokeRadius && props.smokeDurationMs) {
-      desc.push(`烟雾: ${Math.floor(props.smokeDurationMs / 1000)}秒 | 超大烟雾，笼罩一切`);
+      stats.push(`烟雾范围: ${props.smokeRadius}像素`);
+      stats.push(`持续时间: ${Math.floor(props.smokeDurationMs / 1000)}秒`);
     }
-    if (props.speedMultiplier) {
-      desc.push(`速度: +${Math.floor((props.speedMultiplier - 1) * 100)}%`);
+    if (props.fireRadius && props.fireDurationMs && props.fireDamagePerSecond) {
+      stats.push(`火焰范围: ${props.fireRadius}像素`);
+      stats.push(`持续时间: ${Math.floor(props.fireDurationMs / 1000)}秒`);
+      stats.push(`伤害: ${props.fireDamagePerSecond}HP/秒`);
     }
-    if (props.hpPerSecond) {
-      desc.push(`持续回复: ${props.hpPerSecond}HP/秒`);
+    if (props.buffDurationMs && props.speedMultiplier) {
+      stats.push(`速度加成: +${Math.floor((props.speedMultiplier - 1) * 100)}%`);
+      stats.push(`持续时间: ${Math.floor(props.buffDurationMs / 1000)}秒`);
+    }
+    if (props.buffDurationMs && props.hpPerSecond) {
+      stats.push(`回复: ${props.hpPerSecond}HP/秒`);
+      stats.push(`持续时间: ${Math.floor(props.buffDurationMs / 1000)}秒`);
     }
     if (props.disguiseDurationMs) {
-      desc.push(`伪装: ${Math.floor(props.disguiseDurationMs / 1000)}秒 | 变成一只 AI`);
+      stats.push(`伪装时长: ${Math.floor(props.disguiseDurationMs / 1000)}秒`);
     }
-    // 诱饵特殊标记（explosionRadius=1表示诱饵）
-    if (itemType.id === 'w_decoy') {
-      desc.push(`投掷诱饵 | 生成全息诱饵，被摧毁后爆炸`);
+    if (props.durationMs && itemType.id === 'i_sentry_turret') {
+      stats.push(`持续时间: ${Math.floor(props.durationMs / 1000)}秒`);
     }
-    if (desc.length > 0) {
-      return desc.join(' | ');
+    
+    if (stats.length > 0) {
+      parts.push(stats.join(' | '));
     }
+    
+    return parts.join('\n');
   }
   
   // 材料或其他 - 显示堆叠上限
   if (itemType.stackMax && itemType.stackMax > 1) {
-    return `堆叠: ${itemType.stackMax}`;
+    parts.push(`最大堆叠: ${itemType.stackMax}`);
   }
   
-  return '';
+  return parts.join('\n');
 }
 
 // 新增: 创建商店物品行
@@ -2569,9 +2707,23 @@ function createShopRow(itemType: any): HTMLElement {
   const priceHtml = `<span style="color: #ffd700; margin-left: 8px;">💰 ${itemType.value}</span>`;
   const description = getItemDescription(itemType);
   
+  // 分割描述和数值统计（通过换行符）
+  const descParts = description.split('\n');
+  const descText = descParts[0] || ''; // 第一行是描述文本
+  const statsText = descParts[1] || ''; // 第二行是数值统计
+  
+  // 构建HTML
+  let descHtml = '';
+  if (descText) {
+    descHtml += `<div class="item-desc" style="margin-top: 4px; color: #999; font-size: 11px; line-height: 1.4;">${descText}</div>`;
+  }
+  if (statsText) {
+    descHtml += `<div class="item-stats" style="margin-top: 6px; color: #0ff; font-size: 12px; font-weight: bold; font-family: 'Courier New', monospace; letter-spacing: 0.5px; text-shadow: 0 0 8px rgba(0, 255, 255, 0.3);">${statsText}</div>`;
+  }
+  
   info.innerHTML = `
     <div class="item-name">${itemType.name}${priceHtml}</div>
-    ${description ? `<div class="item-meta" style="margin-top: 4px; color: #aaa; font-size: 12px;">${description}</div>` : ''}
+    ${descHtml}
   `;
   
   const actions = document.createElement('div');
@@ -3568,6 +3720,16 @@ const network = new Network(getWebSocketUrl(), 'local', {
       durationMs: event.durationMs,
     });
   },
+  // 新增: 接收燃烧效果
+  onFire: (event) => {
+    fireEffects.push({
+      x: event.x,
+      y: event.y,
+      radius: event.radius,
+      spawnTimeMs: performance.now(),
+      durationMs: event.durationMs,
+    });
+  },
 }, isDebug);
 
 // Step3: 右键选中实体（避免与左键开火冲突）
@@ -3629,14 +3791,16 @@ function renderLoop(): void {
   lastRenderNow = nowPerf;
 
   // 获取插值后的状态（必须在子弹更新之前，确保碰撞检测使用正确的玩家位置）
-  const state = network.getSnapshotBuffer().getInterpolatedState(180);
+  // 获取插值后的状态（必须在子弹更新之前，确保碰撞检测使用正确的玩家位置）
+  // 修复: 使用 120ms 渲染延迟以匹配服务端插值延迟 (CLIENT_INTERPOLATION_DELAY_MS = 120)
+  const state = network.getSnapshotBuffer().getInterpolatedState(120);
 
-  // 修复: 只在 RAID 阶段更新子弹轨迹，传入插值后的玩家位置
+  // 修复: 只在 RAID 阶段更新子弹轨迹，传入插值后的玩家位置和AI位置
   if (currentPhase === 'RAID') {
-    bulletTracks.update(dtSec, state.players);
+    bulletTracks.update(dtSec, state.players, state.ais);
   } else if (currentPhase === null) {
     // Phase 未接收时，仍然更新子弹轨迹（以防万一）
-    bulletTracks.update(dtSec, state.players);
+    bulletTracks.update(dtSec, state.players, state.ais);
   }
 
   // UI 覆盖层更新（衰减动画）
@@ -3749,6 +3913,12 @@ function renderLoop(): void {
           (explosion) => nowPerf2 - explosion.spawnTimeMs <= EXPLOSION_EFFECT_TTL_MS
         );
 
+        // 清理过期效果
+        const now = performance.now(); // Define 'now' for use in cleanup and fire effects
+        explosionEffects = explosionEffects.filter((e) => now - e.spawnTimeMs < EXPLOSION_EFFECT_TTL_MS);
+        smokeEffects = smokeEffects.filter((e) => now - e.spawnTimeMs < e.durationMs);
+        fireEffects = fireEffects.filter((e) => now - e.spawnTimeMs < e.durationMs);
+
         // 新增: 计算需要渲染的烟雾（基于服务器下发的持续时间）
         const smokesToRender = smokeEffects
           .map((smoke) => ({
@@ -3822,6 +3992,10 @@ function renderLoop(): void {
           );
         }
         
+        if (state.turrets && state.turrets.length > 0) {
+           console.log('[Main] Rendering turrets:', state.turrets.length);
+        }
+
         renderer.render(
           playersToRender,
           localPlayerId,
@@ -3836,12 +4010,17 @@ function renderLoop(): void {
           bulletTracks.getHitEffects(), // 命中特效
           explosionsToRender,
           smokesToRender, // 新增: 烟雾效果
+          fireEffects.map(f => {
+            const age = (nowPerf2 - f.spawnTimeMs) / f.durationMs;
+            return { ...f, age: Math.max(0, Math.min(1, age)) };
+          }).filter(f => f.age >= 0 && f.age <= 1), // 新增: 燃烧效果
           network.getConnectionState().lastServerTick, // 新增: 当前服务器 tick（用于计算换弹进度）
           nearbyInteractableForRender, // 新增: 附近可交互目标
           renderLocalPlayerForTooltip, // 新增: 本地玩家（用于计算相对位置）
           renderLocalPlayerForTooltip?.inBush ?? false, // 新增: 本地玩家是否在草丛内
           state.ais ?? [], // 新增: AI实体列表
-          state.decoys ?? [] // 新增: 诱饵列表
+          state.decoys ?? [], // 新增: 诱饵列表
+          state.turrets ?? [] // 新增: 炮台列表
         );
       } else {
         // 非 RAID phase: 只清屏（显示暗背景）

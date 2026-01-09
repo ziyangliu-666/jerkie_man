@@ -26,6 +26,7 @@ server/data/profiles.json
 .idea/
 .vscode/
 .kiro/
+.agent/
 CLAUDE.md
 
 # 操作系统文件

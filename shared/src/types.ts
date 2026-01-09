@@ -14,6 +14,7 @@ export type ItemType = {
   value: number;     // sell price for 1 qty
   stackMax: number;  // e.g. 20
   weight?: number;   // optional future use
+  description?: string; // 物品详细描述
   shortName?: string;  // 热键栏显示的简短名称（如 "医疗"、"手雷"）
   // 消耗品属性（可选）
   consumableProps?: {
@@ -32,8 +33,14 @@ export type ItemType = {
     // 闪光弹属性
     flashRadius?: number;  // 致盲范围（像素）
     flashDurationMs?: number;  // 致盲持续时间（毫秒）
+    // 燃烧弹属性
+    fireRadius?: number; // 燃烧半径（像素）
+    fireDurationMs?: number; // 持续时间（毫秒）
+    fireDamagePerSecond?: number; // 每秒伤害
     // 伪装属性
     disguiseDurationMs?: number; // 伪装持续时间（毫秒）
+    // 通用持续时间（如炮台）
+    durationMs?: number;
   };
 };
 

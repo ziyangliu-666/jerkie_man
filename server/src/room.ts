@@ -1,13 +1,14 @@
 
 import { Player } from './player.js';
 import { ProfileManager } from './profile.js';
-import type { PLAYER_STATE, BULLET_STATE, ITEM_STATE, C2S_INPUT, MAP_CONFIG, OBSTACLE_STATE, WorldItem, LootBag, ItemInstance, WeaponRuntime, WeaponDef, MapTemplate, SpawnPoint, AI_STATE, AISpawn, DECOY_STATE } from '@jerkie-man/shared';
+import type { PLAYER_STATE, BULLET_STATE, ITEM_STATE, C2S_INPUT, MAP_CONFIG, OBSTACLE_STATE, WorldItem, LootBag, ItemInstance, WeaponRuntime, WeaponDef, MapTemplate, SpawnPoint, AI_STATE, AISpawn, DECOY_STATE, TURRET_STATE } from '@jerkie-man/shared';
 import { loadMapConfig, loadItemTypes, circleVsAABB, createRng, rectIntersects, segmentIntersectsCircle, getItemType, getAllItemTypes, getItemTypesByRarity, getWeaponDef, getArmorDef, getBagDef, applySpread, msToTicks, getFireSchedule, shouldStartBurst, canFireTick, advanceFireCooldown, PLAYER_HIT_RADIUS, getBulletPenetration, isObstacleDestructible, isUsableItem, doesObstacleBlockPlayer, AI_ROLE_PRESETS, ticksToMs, ItemType } from '@jerkie-man/shared';
 import { log } from './logger.js';
 import { AI, type PatrolConfig, type GuardConfig } from './ai.js';
 import { NavigationGrid, Pathfinder } from './pathfinding.js';
 import { AIBehaviorController } from './aiBehavior.js';
-import { Decoy } from './decoy.js'; // Added import for Decoy
+import { Decoy } from './decoy.js';
+import { Turret } from './turret.js'; // Added import for Decoy
 
 // Step4: 内部子弹类型（包含spawnAt、damage和bulletLifeMs用于TTL检查和伤害计算）
 type Bullet = BULLET_STATE & { 
@@ -44,6 +45,7 @@ export class Room {
   private aiIdCounter = 0;
   private worldItemIdCounter = 0;
   private smokeIdCounter = 0; // 新增: 烟雾ID计数器
+  private fireIdCounter = 0; // 新增: 燃烧ID计数器
   private lootBagIdCounter = 0;
   private events: Array<{ tick: number; timestamp: number; message: string }> = [];
   private readonly MAX_EVENTS = 50;
@@ -54,9 +56,12 @@ export class Room {
   public explosions: Array<{ x: number; y: number; radius: number }> = [];
   private smokes: Array<{ id: string; x: number; y: number; radius: number; durationMs: number; createdAt: number }> = [];
   private newSmokes: Array<{ id: string; x: number; y: number; radius: number; durationMs: number }> = []; // 新生成的烟雾（用于广播）
+  private fires: Array<{ id: string; x: number; y: number; radius: number; durationMs: number; createdAt: number; ownerId?: string; damagePerSecond: number }> = [];
+  private newFires: Array<{ id: string; x: number; y: number; radius: number; durationMs: number }> = []; // 新生成的燃烧区域（用于广播）
 
   // Decoys
   public decoys: Decoy[] = [];
+  public turrets: Map<string, Turret> = new Map();
   private decoyIdCounter = 0;
 
   // AI系统字段
@@ -1456,6 +1461,51 @@ export class Room {
   // 节流日志：每200ms打印一次
   private lastProcessLog = new Map<string, number>();
 
+  // 新增: 部署哨兵机枪
+  spawnTurret(x: number, y: number, ownerId: string, durationMs: number): void {
+    const turretId = `turret_${this.seed}_${this.tick}_${Math.random().toString(36).substr(2, 9)}`;
+    const turret = new Turret(turretId, x, y, ownerId, durationMs);
+    this.turrets.set(turretId, turret);
+    
+    log('TURRET_SPAWNED', {
+      room: this.id,
+      turretId,
+      owner: ownerId,
+      x,
+      y,
+      durationMs,
+      tick: this.tick
+    });
+  }
+
+  // 新增: 更新所有炮塔
+  updateTurrets(dt: number): void {
+    const toRemove: string[] = [];
+    
+    for (const [id, turret] of this.turrets.entries()) {
+      // 如果炮塔死亡（HP <= 0），标记移除
+      if (turret.hp <= 0) {
+        toRemove.push(id);
+        this.createExplosion(turret.x, turret.y, 50, 0, undefined); 
+        continue;
+      }
+
+      const alive = turret.update(dt, this);
+      if (!alive) {
+        toRemove.push(id);
+      }
+    }
+
+    for (const id of toRemove) {
+      this.turrets.delete(id);
+      log('TURRET_REMOVED', {
+        room: this.id,
+        turretId: id,
+        tick: this.tick
+      });
+    }
+  }
+
   // 新增: 发射子弹的公共方法（修复：weaponDef使用强类型而非any）
   private spawnBullet(
     playerId: string,
@@ -1771,6 +1821,28 @@ export class Room {
             }
           }
           
+          // 检测炮塔（优先级低于玩家和AI）
+          let hitTurret: Turret | null = null;
+          if (!hitPlayer && !hitAI) {
+            for (const turret of this.turrets.values()) {
+                const dx = turret.x - player.x;
+                const dy = turret.y - player.y;
+                const dist = Math.sqrt(dx * dx + dy * dy);
+                
+                if (dist <= meleeRange + 20 && dist < minDist) {
+                  const aimDir = Math.atan2(dy, dx);
+                  const aimDiff = Math.abs(aimDir - input.aim);
+                  const normalizedDiff = Math.min(aimDiff, Math.PI * 2 - aimDiff);
+                  const extraAngle = dist > 0.001 ? Math.asin(Math.min(1, 20 / dist)) : 0;
+                  
+                  if (normalizedDiff < meleeArcRad / 2 + extraAngle) {
+                      hitTurret = turret;
+                      minDist = dist;
+                  }
+                }
+            }
+          }
+
           // 检测诱饵（优先级低于玩家和AI）
           let hitDecoy: Decoy | null = null;
           if (!hitPlayer && !hitAI) {
@@ -1797,7 +1869,7 @@ export class Room {
             }
           }
           
-          if (hitPlayer || hitAI || hitDecoy) {
+          if (hitPlayer || hitAI || hitDecoy || hitTurret) {
             // 命中！造成伤害
             const damage = weaponDef.damage;
             
@@ -1843,6 +1915,19 @@ export class Room {
                 aiHpRemaining: hitAI.hp,
                 tick: this.tick,
               });
+            } else if (hitTurret) {
+              // 攻击炮塔
+              hitTurret.takeDamage(damage);
+              this.pushEvent(`${playerId} melee hit turret ${hitTurret.id} (-${damage})`);
+              
+              log('TURRET_MELEE_HIT', {
+                room: this.id,
+                turret: hitTurret.id,
+                attacker: playerId,
+                damage,
+                tick: this.tick
+              });
+
             } else if (hitDecoy) {
               // 攻击诱饵
               hitDecoy.takeDamage(damage);
@@ -2216,6 +2301,26 @@ export class Room {
       // HP为0时会在 updateBullets 结束时清理
     }
 
+    // 对范围内的炮塔造成伤害
+    for (const [turretId, turret] of this.turrets.entries()) {
+      const dx = turret.x - x;
+      const dy = turret.y - y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      if (dist > radius) continue;
+
+      const scaledDamage = Math.floor(damage * (1 - dist / radius));
+      if (scaledDamage <= 0) continue;
+
+      turret.takeDamage(scaledDamage);
+
+      if (ownerId) {
+        if (!this.combatEvents.has(ownerId)) {
+          this.combatEvents.set(ownerId, []);
+        }
+        this.combatEvents.get(ownerId)!.push({ kind: 'HIT' });
+      }
+    }
+
     // 对范围内的AI造成伤害
     for (const [aiId, ai] of this.ais.entries()) {
       if (ai.status !== 'ALIVE') continue;
@@ -2286,6 +2391,9 @@ export class Room {
     smokeDurationMs?: number;
     flashRadius?: number;
     flashDurationMs?: number;
+    fireRadius?: number;
+    fireDurationMs?: number;
+    fireDamagePerSecond?: number;
   } {
     try {
       const itemType = getItemType(weaponTypeId);
@@ -2356,6 +2464,130 @@ export class Room {
       owner: ownerId || 'unknown',
       tick: this.tick,
     });
+  }
+
+  // 新增: 创建燃烧区域
+  private createFireZone(x: number, y: number, radius: number, durationMs: number, damagePerSecond: number, ownerId?: string): void {
+    const now = Date.now();
+    const fireId = `fire_${this.seed}_${this.fireIdCounter++}`;
+    const fire = {
+      id: fireId,
+      x,
+      y,
+      radius,
+      durationMs,
+      createdAt: now,
+      ownerId,
+      damagePerSecond
+    };
+    this.fires.push(fire);
+    this.newFires.push({ id: fireId, x, y, radius, durationMs });
+
+    this.pushEvent(`Molotov ignited at (${Math.round(x)}, ${Math.round(y)})`);
+    log('MOLOTOV_IGNITE', {
+      room: this.id,
+      fireId,
+      x: Math.round(x),
+      y: Math.round(y),
+      radius,
+      durationMs,
+      damagePerSecond,
+      owner: ownerId || 'unknown',
+      tick: this.tick,
+    });
+    
+    // 燃烧弹也有一个小范围的初始爆炸视觉效果
+    this.explosions.push({ x, y, radius: 80 });
+  }
+
+  // 新增: 更新燃烧区域生命周期及伤害
+  updateFires(deltaTime: number): void {
+    const now = Date.now();
+    
+    // 1. 清理过期燃烧区域
+    this.fires = this.fires.filter(fire => {
+      const age = now - fire.createdAt;
+      return age < fire.durationMs;
+    });
+
+    // 2. 对范围内玩家和AI造成伤害
+    if (this.fires.length === 0) return;
+
+    // 为了性能，每 tick 造成的伤害应该是 (damagePerSecond * deltaTime)
+    for (const fire of this.fires) {
+      const damageTick = fire.damagePerSecond * deltaTime;
+      
+      // 对玩家伤害
+      for (const [playerId, player] of this.players.entries()) {
+        if (player.status !== 'ALIVE') continue;
+        const dx = player.x - fire.x;
+        const dy = player.y - fire.y;
+        if (dx * dx + dy * dy <= fire.radius * fire.radius) {
+          player.takeDamage(damageTick);
+          
+          // 如果有所有者，记录战斗事件
+          if (fire.ownerId && fire.ownerId !== player.id) {
+            if (!this.combatEvents.has(fire.ownerId)) {
+                this.combatEvents.set(fire.ownerId, []);
+            }
+            // 每秒只推一次 HIT 事件，避免网络包爆炸
+            if (this.tick % 10 === 0) {
+                this.combatEvents.get(fire.ownerId)!.push({ kind: 'HIT' });
+            }
+          }
+        }
+      }
+
+      // 对炮塔伤害
+      for (const [turretId, turret] of this.turrets.entries()) {
+        const dx = turret.x - fire.x;
+        const dy = turret.y - fire.y;
+        if (dx * dx + dy * dy <= fire.radius * fire.radius) {
+          turret.takeDamage(damageTick);
+          
+          if (fire.ownerId) {
+             if (!this.combatEvents.has(fire.ownerId)) {
+                 this.combatEvents.set(fire.ownerId, []);
+             }
+             if (this.tick % 10 === 0) {
+                 this.combatEvents.get(fire.ownerId)!.push({ kind: 'HIT' });
+             }
+          }
+        }
+      }
+
+      // 对AI伤害
+      for (const [aiId, ai] of this.ais.entries()) {
+        if (ai.status !== 'ALIVE') continue;
+        const dx = ai.x - fire.x;
+        const dy = ai.y - fire.y;
+        if (dx * dx + dy * dy <= fire.radius * fire.radius) {
+            // 燃烧伤害无视防具或按比例减伤？通常燃烧无视防具，但这里遵循 takeDamage 逻辑
+            const attacker = fire.ownerId ? this.players.get(fire.ownerId) : null;
+            ai.takeDamage(damageTick, attacker ? attacker.x : fire.x, attacker ? attacker.y : fire.y);
+            
+            if (ai.hp <= 0) {
+                this.handleAIDeath(aiId);
+            }
+
+            if (fire.ownerId) {
+                if (!this.combatEvents.has(fire.ownerId)) {
+                    this.combatEvents.set(fire.ownerId, []);
+                }
+                if (this.tick % 10 === 0) {
+                    this.combatEvents.get(fire.ownerId)!.push({ kind: 'HIT' });
+                }
+            }
+        }
+      }
+    }
+  }
+
+  // 新增: 获取并清空新燃烧区域事件（广播用）
+  drainFires(): Array<{ id: string; x: number; y: number; radius: number; durationMs: number }> {
+    const fires = [...this.newFires];
+    this.newFires = [];
+    return fires;
   }
 
   // 新增: 眩晕爆炸（眩晕范围内玩家和AI，无伤害）
@@ -2497,6 +2729,13 @@ export class Room {
               owner: bullet.ownerId,
               tick: this.tick
             });
+          } else if (bullet.weaponTypeId === 'molotov') {
+            // 燃烧弹超时爆炸
+            const props = this.getGrenadeProps(bullet.weaponTypeId);
+            const radius = props.fireRadius ?? 120;
+            const durationMs = props.fireDurationMs ?? 8000;
+            const damagePerSecond = props.fireDamagePerSecond ?? 20;
+            this.createFireZone(bullet.x, bullet.y, radius, durationMs, damagePerSecond, bullet.ownerId);
           } else {
             // 其他手雷：正常爆炸
             const props = this.getGrenadeProps(bullet.weaponTypeId);
@@ -2592,6 +2831,15 @@ export class Room {
                 tick: this.tick
               });
               
+              bulletsToRemove.add(bullet.id);
+              continue;
+            } else if (bullet.weaponTypeId === 'molotov') {
+              // 燃烧弹落地生效
+              const props = this.getGrenadeProps(bullet.weaponTypeId);
+              const radius = props.fireRadius ?? 120;
+              const durationMs = props.fireDurationMs ?? 8000;
+              const damagePerSecond = props.fireDamagePerSecond ?? 20;
+              this.createFireZone(bullet.x, bullet.y, radius, durationMs, damagePerSecond, bullet.ownerId);
               bulletsToRemove.add(bullet.id);
               continue;
             }
@@ -2776,6 +3024,39 @@ export class Room {
           continue;
         }
       
+      // 检测Turret碰撞
+      const TURRET_HIT_RADIUS = 20;
+      let hitTurret: Turret | null = null;
+      
+      for (const [turretId, turret] of this.turrets.entries()) {
+         // 修复1: 炮台子弹的 ownerId 是炮台自己的 ID，所以要检查 bullet.ownerId === turret.id
+         // 这样炮台就不会击中自己
+         if (bullet.ownerId === turret.id) continue;
+         
+         // 修复2: 玩家不能击中自己部署的炮台
+         // bullet.ownerId 可能是玩家 ID（玩家发射的子弹）
+         if (bullet.ownerId === turret.ownerId) continue;
+         
+         if (segmentIntersectsCircle(oldX, oldY, bullet.x, bullet.y, turret.x, turret.y, TURRET_HIT_RADIUS)) {
+            hitTurret = turret;
+            break;
+         }
+      }
+      
+      if (hitTurret) {
+         hitTurret.takeDamage(bullet.damage);
+         
+         if (bullet.ownerId) {
+            if (!this.combatEvents.has(bullet.ownerId)) {
+               this.combatEvents.set(bullet.ownerId, []);
+            }
+            this.combatEvents.get(bullet.ownerId)!.push({ kind: 'HIT' });
+         }
+         
+         bulletsToRemove.add(bullet.id);
+         continue;
+      }
+
       // 修复: 使用连续碰撞检测（CCD）替代离散检测
       // 检测 oldPos -> newPos 的线段是否和玩家圆相交，避免穿透子弹
       const PLAYER_HIT_RADIUS = 16;
@@ -2930,9 +3211,10 @@ export class Room {
 
       // AI碰撞检测（类似玩家碰撞检测）
       // 修复：AI子弹不应该伤害其他AI，只伤害玩家
-      // 只有玩家的子弹才会检测AI碰撞
+      // 玩家的子弹和炮台的子弹都可以伤害AI
       const isPlayerBullet = this.players.has(bullet.ownerId);
-      if (isPlayerBullet) {
+      const isTurretBullet = this.turrets.has(bullet.ownerId);
+      if (isPlayerBullet || isTurretBullet) {
         for (const [aiId, ai] of this.ais.entries()) {
           // 跳过死亡的AI
           if (ai.status !== 'ALIVE') {
@@ -3563,6 +3845,7 @@ export class Room {
     lootBags: LootBag[];
     obstacles: OBSTACLE_STATE[];
     ais: AI_STATE[];
+    turrets: TURRET_STATE[]; // 新增: 炮台列表
     decoys: DECOY_STATE[]; // Added decoys to snapshot
   } {
     // 新增: 只包含 ALIVE/DEAD 状态的玩家（EXTRACTED 玩家不再出现在 snapshot 中）
@@ -3619,6 +3902,19 @@ export class Room {
       lootBags: this.getLootBags(), // 新增: 掉落包
       obstacles: this.getObstacles(), // 新增: 障碍物（可破坏，需要同步）
       ais: aiStates, // 新增: AI实体
+      turrets: Array.from(this.turrets.values()).map(t => {
+        const state = t.toState();
+        // 计算炮台是否在草丛内
+        const bushId = this.isPlayerInBush(t.x, t.y);
+        const smokeId = this.isPointInSmoke(t.x, t.y);
+        return {
+          ...state,
+          inBush: !!bushId,
+          inBushId: bushId,
+          inSmoke: !!smokeId,
+          inSmokeId: smokeId,
+        };
+      }),
       decoys: this.decoys
         .filter(d => d.hp > 0) // 只同步存活的诱饵
         .map(d => {
@@ -4532,6 +4828,27 @@ export class Room {
         });
         return { success: true, itemType: 'i_disguise' };
 
+      } else if (item.typeId === 'i_sentry_turret') {
+        const itemType = getItemType(item.typeId);
+        const durationMs = itemType.consumableProps?.durationMs ?? 30000;
+        
+        this.spawnTurret(player.x, player.y, playerId, durationMs);
+        
+        const removed = player.removeItem(item.iid, 1);
+        if (!removed) {
+          return { success: false, message: 'Failed to remove item' };
+        }
+        player.cleanupInventory();
+        
+        this.pushEvent(`Player ${playerId} deployed Sentry Turret`);
+        log('USE_TURRET', {
+          room: this.id,
+          player: playerId,
+          durationMs,
+          tick: this.tick
+        });
+        return { success: true, itemType: 'i_sentry_turret' };
+
       } else if (item.typeId === 'frag_grenade' || item.typeId === 'smoke_grenade' || item.typeId === 'w_decoy') {
         // 手雷/烟雾弹/诱饵 不能通过快捷栏直接使用，需要通过投掷系统
         return { success: false, message: 'Use number key to aim and throw grenade' };
@@ -4589,7 +4906,8 @@ export class Room {
     const isSmoke = itemType === 'smoke_grenade';
     const isFlash = itemType === 'flash_grenade';
     const isFrag = itemType === 'frag_grenade';
-    console.log(`[handleThrow] 投掷物类型判断: isSmoke=${isSmoke}, isFlash=${isFlash}, isFrag=${isFrag}, itemType="${itemType}"`);
+    const isMolotov = itemType === 'molotov';
+    console.log(`[handleThrow] 投掷物类型判断: isSmoke=${isSmoke}, isFlash=${isFlash}, isFrag=${isFrag}, isMolotov=${isMolotov}, itemType="${itemType}"`);
     
     // 烟雾弹：打印落点（使用 console.log 和 log 双重输出）
     if (isSmoke) {
@@ -4613,9 +4931,9 @@ export class Room {
     const vy = dy / flightTime;
     
     // 根据类型设置伤害和爆炸时间
-    const damage = isSmoke ? 0 : (isFlash ? 0 : 500); // 烟雾弹和闪光弹不造成直接伤害
-    const bulletLifeMs = isSmoke ? 1000 : 750; // 烟雾弹1秒后生效，其他手雷0.75秒后爆炸
-    const explodeTickOffset = isSmoke ? 1000 : 750;
+    const damage = isSmoke ? 0 : (isFlash ? 0 : 500); // 烟雾弹和闪光弹不造成直接伤害，燃烧弹由区域伤害处理
+    const bulletLifeMs = (isSmoke || isMolotov) ? 1000 : 750; // 烟雾弹和燃烧弹飞行1秒
+    const explodeTickOffset = (isSmoke || isMolotov) ? 1000 : 750;
     
     // 创建手雷子弹（使用特殊的手雷子弹类型）
     const grenadeBullet: Bullet = {

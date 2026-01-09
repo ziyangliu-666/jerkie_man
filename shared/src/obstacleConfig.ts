@@ -21,6 +21,9 @@ export interface ObstacleConfig {
   destructible: boolean;      // 是否可破坏
   maxHp: number;              // 最大生命值
 
+  // 移动属性
+  speedMultiplier: number;    // 移动速度倍数 (0-1)，1=正常速度，0.5=减速50%
+
   // 视觉属性
   color: string;              // 渲染颜色
   alpha: number;              // 透明度 (0-1)
@@ -41,6 +44,7 @@ export const OBSTACLE_CONFIGS: Record<ObstacleType, ObstacleConfig> = {
     providesConcealment: false,
     destructible: false,
     maxHp: Infinity,
+    speedMultiplier: 1.0,
     color: '#666666',
     alpha: 1.0,
   },
@@ -56,6 +60,7 @@ export const OBSTACLE_CONFIGS: Record<ObstacleType, ObstacleConfig> = {
     providesConcealment: false,
     destructible: true,
     maxHp: 100,
+    speedMultiplier: 1.0,
     color: '#A0522D',
     alpha: 1.0,
   },
@@ -71,6 +76,7 @@ export const OBSTACLE_CONFIGS: Record<ObstacleType, ObstacleConfig> = {
     providesConcealment: true, // 在草丛内对外不可见
     destructible: false,
     maxHp: Infinity,
+    speedMultiplier: 1.0,
     color: '#228B22',
     alpha: 0.6,
   },
@@ -78,14 +84,15 @@ export const OBSTACLE_CONFIGS: Record<ObstacleType, ObstacleConfig> = {
   [OBSTACLE_TYPE.WATER]: {
     type: OBSTACLE_TYPE.WATER,
     name: '水域',
-    description: '池塘或河流，无法穿越但子弹可通过',
-    blocksPlayer: true,
+    description: '水域，可以穿越但移速减慢50%，子弹可通过',
+    blocksPlayer: false,  // 允许玩家穿越
     blocksBullet: false,
     bulletPenetration: 1.0,
     blocksVision: false,
     providesConcealment: false,
     destructible: false,
     maxHp: Infinity,
+    speedMultiplier: 0.5,  // 减速50%
     color: '#4169E1',
     alpha: 0.7,
   },
@@ -136,4 +143,11 @@ export function doesObstacleProvideConcealment(type: ObstacleType): boolean {
  */
 export function isObstacleDestructible(type: ObstacleType): boolean {
   return getObstacleConfig(type).destructible;
+}
+
+/**
+ * 获取障碍物的速度倍数
+ */
+export function getObstacleSpeedMultiplier(type: ObstacleType): number {
+  return getObstacleConfig(type).speedMultiplier;
 }

@@ -16,6 +16,7 @@ import {
   S2C_MELEE_SWING_SCHEMA, // 新增: 近战挥击事件
   S2C_EXPLOSION_SCHEMA, // 新增: 爆炸事件
   S2C_SMOKE_SCHEMA, // 新增: 烟雾事件
+  S2C_FIRE_SCHEMA, // 新增: 燃烧事件
   getWeaponDef, // 新增: 用于重置武器运行时状态
   type C2S_MESSAGE,
 } from '@jerkie-man/shared';
@@ -1640,6 +1641,9 @@ setInterval(() => {
 
   // 更新AI（行为、寻路、战斗）
   room.updateAIs(room.tick);
+  
+  // 新增: 更新炮塔
+  room.updateTurrets(0.05);
 
   // 新增: 更新伪装玩家的AI行为（枪口摆动和状态检测）
   const allPlayersArray = Array.from(room.players.values());
@@ -1659,6 +1663,9 @@ setInterval(() => {
 
   // 新增: 更新烟雾生命周期（清理过期烟雾）
   room.updateSmokes();
+
+  // 新增: 更新燃烧区域（清理过期 + 造成伤害）
+  room.updateFires(0.05);
 
   // 新增: 处理战斗事件（干火/命中/受伤反馈）
   const combatEvents = room.drainCombatEvents();
@@ -1748,6 +1755,26 @@ setInterval(() => {
     }
   }
 
+  // 新增: 广播燃烧事件（用于渲染燃烧区域）
+  const fires = room.drainFires();
+  if (fires.length > 0) {
+    for (const fire of fires) {
+      const message = S2C_FIRE_SCHEMA.parse({
+        type: 'S2C_FIRE',
+        x: fire.x,
+        y: fire.y,
+        radius: fire.radius,
+        durationMs: fire.durationMs,
+      });
+
+      for (const ws of connections.keys()) {
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify(message));
+        }
+      }
+    }
+  }
+
   // 新增: 为没有输入的玩家更新耐力（确保不动时也能恢复耐力）
   for (const [playerId, player] of room.players.entries()) {
     if (player.status === 'ALIVE' && !playersWithInput.has(playerId)) {
@@ -1773,6 +1800,7 @@ setInterval(() => {
     obstacles: snapshot.obstacles, // 新增: 障碍物列表（可破坏，需要同步）
     ais: snapshot.ais, // 新增: AI实体列表
     decoys: snapshot.decoys, // 修复: 诱饵列表（之前遗漏导致客户端收不到诱饵）
+    turrets: snapshot.turrets, // 新增: 炮台列表
   });
 
   // 广播给所有连接

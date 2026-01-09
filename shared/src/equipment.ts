@@ -219,7 +219,7 @@ export const WEAPONS: Record<string, WeaponDef> = {
     fireIntervalMs: 100, // 装填后可以快速射击
     spreadDeg: 0.5,      // 高精度
     bulletSpeed: 800,    // 中等速度
-    damage: 80,          // 高伤害
+    damage: 200,          // 高伤害
     bulletLifeMs: 2000,  // 中等射程
   },
   w_auto_shotgun: {

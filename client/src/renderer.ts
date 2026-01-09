@@ -1,4 +1,4 @@
-import type { PLAYER_STATE, BULLET_STATE, ITEM_STATE, OBSTACLE_STATE, WorldItem, LootBag, DECOY_STATE } from '@jerkie-man/shared';
+import type { PLAYER_STATE, BULLET_STATE, ITEM_STATE, OBSTACLE_STATE, WorldItem, LootBag, DECOY_STATE, TURRET_STATE } from '@jerkie-man/shared';
 import { getItemType, getWeaponDef, msToTicks, PLAYER_SPEED } from '@jerkie-man/shared';
 
 export class Renderer {
@@ -466,8 +466,8 @@ export class Renderer {
       if (disguiseBuff) {
         const progress = Math.min(1, Math.max(0, (disguiseBuff.remainingMs ?? 0) / (disguiseBuff.totalMs ?? 1)));
         // 直接使用屏幕坐标绘制，避免 drawStatusIndicator 内部重新计算位置
-        // 状态标签在 stateLabelY（屏幕坐标），进度条应该在状态标签下方适当间距
-        const progressBarScreenY = stateLabelY + 25; // 状态标签下方25px（适当间距）
+        // 状态标签在 stateLabelY（屏幕坐标），进度条应该在状态标签上方适当间距
+        const progressBarScreenY = stateLabelY - 26; // 增加间距 (-22 -> -26)
         
         this.ctx.save();
         this.ctx.font = 'bold 12px monospace';
@@ -581,7 +581,7 @@ export class Renderer {
       const padding = 6;
       const boxWidth = textWidth + padding * 2;
       const boxHeight = 20;
-      const textY = screenY + size / 2 + 15;
+      const textY = screenY - size / 2 - 26; // 增加间距 (-22 -> -26)
 
       // 绘制背景框
       this.ctx.fillStyle = bgColor;
@@ -603,7 +603,7 @@ export class Renderer {
     }
     
     // 如果没有状态文本，返回默认位置
-    return screenY + size / 2 + 15;
+    return screenY - size / 2 - 26; // 增加间距 (-22 -> -26)
   }
 
   // 新增: 绘制诱饵（外观模仿玩家）
@@ -987,7 +987,7 @@ export class Renderer {
         const padding = 6;
         const boxWidth = textWidth + padding * 2;
         const boxHeight = 20;
-        const textY = screenY + size / 2 + 15; // AI下方15px
+        const textY = screenY - size / 2 - 26; // 增加间距 (-22 -> -26)
 
         // 绘制背景框
         this.ctx.fillStyle = bgColor;
@@ -1216,72 +1216,403 @@ export class Renderer {
 
   // Day2: 绘制子弹
   // Step5: 使用BULLET_STATE类型，后续要画ownerId颜色时不需要改签名
+  // 优化: 为不同枪械定制酷炫的条形子弹 (Bar Projectiles)
+  // 绘制炮塔
+  private drawTurret(turret: TURRET_STATE, localPlayerId: string | null = null): void {
+    const screenX = Math.round(turret.x - this.camX);
+    const screenY = Math.round(turret.y - this.camY); 
+
+    // 0. Range Circle (Faint)
+    this.ctx.save();
+    this.ctx.translate(screenX, screenY);
+    this.ctx.strokeStyle = 'rgba(255, 50, 50, 0.4)'; // More visible red range
+    this.ctx.lineWidth = 2;
+    this.ctx.setLineDash([8, 4]);
+    this.ctx.beginPath();
+    this.ctx.arc(0, 0, turret.range, 0, Math.PI * 2);
+    this.ctx.stroke();
+    this.ctx.restore();
+
+    // 1. Base (Static relative to rotation)
+    this.ctx.save();
+    this.ctx.translate(screenX, screenY);
+    this.ctx.fillStyle = '#333';
+    // Draw 3 legs
+    for(let i=0; i<3; i++) {
+        this.ctx.save();
+        this.ctx.rotate(i * (Math.PI * 2 / 3));
+        this.ctx.fillRect(-2, 5, 4, 8); // Leg extending out
+        this.ctx.restore();
+    }
+    this.ctx.restore();
+
+    // 2. Head (Rotates with aimRad)
+    this.ctx.save();
+    this.ctx.translate(screenX, screenY);
+    this.ctx.rotate(turret.aimRad);
+
+    // Color based on state
+    let color = '#777';
+    // FIRING state might not be directly exposed in snapshot if not mapped, but AI shares similar states
+    // Turret uses "state" field: IDLE, SPOT_TARGET, SPOOLING, FIRING, RELOADING
+    if (turret.state === 'FIRING') color = '#ff5500';
+    else if (turret.state === 'SPOOLING') color = '#ffaa00';
+    else if (turret.state === 'RELOADING') color = '#999';
+
+    // Barrel
+    this.ctx.fillStyle = '#111';
+    this.ctx.fillRect(8, -3, 16, 6);
+
+    // Body
+    this.ctx.fillStyle = color;
+    this.ctx.fillRect(-8, -8, 16, 16);
+    this.ctx.strokeStyle = '#000';
+    this.ctx.lineWidth = 1;
+    this.ctx.strokeRect(-8, -8, 16, 16);
+
+    // Armor Shield Effect
+    if (turret.isArmored) {
+       this.ctx.strokeStyle = 'rgba(100, 200, 255, 0.6)';
+       this.ctx.lineWidth = 2;
+       this.ctx.beginPath();
+       this.ctx.arc(0, 0, 18, -Math.PI/4, Math.PI/4); // Shield arc front
+       this.ctx.stroke();
+       this.ctx.beginPath();
+       this.ctx.arc(0, 0, 18, Math.PI - Math.PI/4, Math.PI + Math.PI/4); // Shield arc back? No only front usually.
+       this.ctx.stroke();
+    }
+
+    this.ctx.restore();
+
+    // 3. HP Bar
+    const barW = 24;
+    const barH = 4;
+    const barX = screenX - barW / 2;
+    const barY = screenY - 24;
+    
+    this.ctx.fillStyle = '#000';
+    this.ctx.fillRect(barX, barY, barW, barH);
+    this.ctx.fillStyle = turret.hp > turret.maxHp * 0.5 ? '#0f0' : '#f00';
+    this.ctx.fillRect(barX, barY, barW * (turret.hp / turret.maxHp), barH);
+    
+    // 4. 剩余时间进度条（仅对本地玩家的炮台显示）
+    if (localPlayerId && turret.ownerId === localPlayerId) {
+      const durationMs = 30000; // 炮台总持续时间（30秒，与item_catalog一致）
+      const timeProgress = turret.remainingTimeMs / durationMs; // 0-1，0表示即将到期
+      
+      const timeBarW = 30;
+      const timeBarH = 3;
+      const timeBarX = screenX - timeBarW / 2;
+      const timeBarY = barY - 6; // 在HP条上方6px
+      
+      // 背景（深灰色）
+      this.ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+      this.ctx.fillRect(timeBarX, timeBarY, timeBarW, timeBarH);
+      
+      // 进度条（颜色随时间变化：黄色 -> 橙色 -> 红色）
+      let timeBarColor = '#ffff00'; // 默认黄色
+      if (timeProgress < 0.25) {
+        timeBarColor = '#ff3333'; // 红色（即将到期）
+      } else if (timeProgress < 0.5) {
+        timeBarColor = '#ff9900'; // 橙色
+      }
+      
+      this.ctx.fillStyle = timeBarColor;
+      this.ctx.fillRect(timeBarX, timeBarY, timeBarW * timeProgress, timeBarH);
+      
+      // 边框
+      this.ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)';
+      this.ctx.lineWidth = 1;
+      this.ctx.strokeRect(timeBarX, timeBarY, timeBarW, timeBarH);
+    }
+    
+    // 5. 新增: 状态标签（类似AI的"摸鱼"、"攻击"等）
+    if (turret.state) {
+      let stateText = '';
+      let bgColor = 'rgba(0, 0, 0, 0.8)';
+      let borderColor = '#fff';
+
+      switch (turret.state) {
+        case 'IDLE':
+          stateText = '💤 待机';
+          bgColor = 'rgba(100, 100, 100, 0.8)';
+          borderColor = '#aaa';
+          break;
+        case 'SPOOLING':
+          stateText = '⚠️ 预热';
+          bgColor = 'rgba(255, 165, 0, 0.85)';
+          borderColor = '#FFD700';
+          break;
+        case 'FIRING':
+          stateText = '🔥 射击';
+          bgColor = 'rgba(220, 20, 60, 0.85)';
+          borderColor = '#FF6347';
+          break;
+        case 'RELOADING':
+          stateText = '🔄 装弹';
+          bgColor = 'rgba(70, 130, 180, 0.85)';
+          borderColor = '#87CEEB';
+          break;
+      }
+
+      if (stateText) {
+        this.ctx.save();
+        this.ctx.font = 'bold 12px monospace';
+        this.ctx.textAlign = 'center';
+        this.ctx.textBaseline = 'middle';
+
+        const textWidth = this.measureCached('bold 12px monospace', stateText);
+        const padding = 6;
+        const boxWidth = textWidth + padding * 2;
+        const boxHeight = 20;
+        const textY = screenY - 36; // 在HP条上方
+
+        // 绘制背景框
+        this.ctx.fillStyle = bgColor;
+        this.ctx.fillRect(screenX - boxWidth / 2, textY - boxHeight / 2, boxWidth, boxHeight);
+
+        // 绘制边框
+        this.ctx.strokeStyle = borderColor;
+        this.ctx.lineWidth = 1.5;
+        this.ctx.strokeRect(screenX - boxWidth / 2, textY - boxHeight / 2, boxWidth, boxHeight);
+
+        // 绘制文字
+        this.ctx.fillStyle = '#FFFFFF';
+        this.ctx.fillText(stateText, screenX, textY);
+
+        this.ctx.restore();
+      }
+    }
+  }
+
   drawBullet(bullet: BULLET_STATE): void {
-    // 修复: 不 round，允许 subpixel 绘制（子弹是小圆点，用 subpixel 更丝滑）
     const screenX = bullet.x - this.camX;
     const screenY = bullet.y - this.camY;
 
-    // 检查是否是手雷/榴弹（包括榴弹炮的子弹和投掷手雷）
-    const isGrenade = bullet.weaponTypeId === 'w_grenade_launcher' || bullet.weaponTypeId === 'frag_grenade' || bullet.weaponTypeId === 'smoke_grenade';
-
+    // 检查是否是手雷/榴弹类投掷物
+    const isGrenade = bullet.weaponTypeId === 'w_grenade_launcher' || 
+                     bullet.weaponTypeId === 'frag_grenade' || 
+                     bullet.weaponTypeId === 'smoke_grenade' || 
+                     bullet.weaponTypeId === 'flash_grenade' ||
+                     bullet.weaponTypeId === 'molotov';
 
     if (isGrenade) {
-      // 手雷：更大、更明显，使用橙红色渐变
-      const grenadeRadius = 8; // 比普通子弹大很多
-
-      // 绘制外圈（深橙色）
-      this.ctx.fillStyle = '#ff4500';
-      this.ctx.beginPath();
-      this.ctx.arc(screenX, screenY, grenadeRadius, 0, Math.PI * 2);
-      this.ctx.fill();
-
-      // 绘制内圈（亮橙色）
-      this.ctx.fillStyle = '#ff8c00';
-      this.ctx.beginPath();
-      this.ctx.arc(screenX, screenY, grenadeRadius * 0.6, 0, Math.PI * 2);
-      this.ctx.fill();
-
-      // 绘制中心高光（黄色）
-      this.ctx.fillStyle = '#ffff00';
-      this.ctx.beginPath();
-      this.ctx.arc(screenX, screenY, grenadeRadius * 0.3, 0, Math.PI * 2);
-      this.ctx.fill();
-
-      // 绘制边框（黑色，增加辨识度）
-      this.ctx.strokeStyle = '#000000';
-      this.ctx.lineWidth = 2;
-      this.ctx.beginPath();
-      this.ctx.arc(screenX, screenY, grenadeRadius, 0, Math.PI * 2);
-      this.ctx.stroke();
-    } else if (bullet.weaponTypeId === 'w_bubble_gun') {
-      // 泡泡枪：绘制泡泡效果
-      const bubbleRadius = 6;
-      
-      // 泡泡本体（半透明青色）
-      this.ctx.fillStyle = 'rgba(135, 206, 250, 0.4)'; // LightSkyBlue translucent
-      this.ctx.beginPath();
-      this.ctx.arc(screenX, screenY, bubbleRadius, 0, Math.PI * 2);
-      this.ctx.fill();
-      
-      // 泡泡边缘（较不透明青色）
-      this.ctx.strokeStyle = 'rgba(135, 206, 250, 0.8)';
-      this.ctx.lineWidth = 1;
-      this.ctx.stroke();
-      
-      // 高光（白色反光，增加立体感）
-      this.ctx.fillStyle = 'rgba(255, 255, 255, 0.8)';
-      this.ctx.beginPath();
-      // 高光位置在左上侧
-      this.ctx.arc(screenX - bubbleRadius * 0.3, screenY - bubbleRadius * 0.3, bubbleRadius * 0.25, 0, Math.PI * 2);
-      this.ctx.fill();
-    } else {
-      // 普通子弹：小黄色圆点
-      this.ctx.fillStyle = '#ffff00'; // 黄色
-      this.ctx.beginPath();
-      this.ctx.arc(screenX, screenY, 3, 0, Math.PI * 2);
-      this.ctx.fill();
+      this.drawGrenadeProjectile(bullet, screenX, screenY);
+      return;
     }
+
+    if (bullet.weaponTypeId === 'w_bubble_gun') {
+      this.drawBubbleProjectile(bullet, screenX, screenY);
+      return;
+    }
+
+    // --- 条形子弹渲染逻辑 ---
+    // 计算条形长度（基于每帧速度）
+    const barDuration = 0.025; // 稍微调回 25ms 基础时长，让标准武器更有质感
+    let tx = bullet.vx * barDuration;
+    let ty = bullet.vy * barDuration;
+
+    // 修复: 长度封顶逻辑 - 防止子弹在刚出生时长度超过已行进距离（避免插到身后）
+    if (bullet.spawnTimeMs) {
+      const ageMs = performance.now() - bullet.spawnTimeMs;
+      const speed = Math.sqrt(bullet.vx * bullet.vx + bullet.vy * bullet.vy);
+      const maxLen = (speed * ageMs) / 1000;
+      const currentLen = Math.sqrt(tx * tx + ty * ty);
+      
+      if (currentLen > maxLen) {
+        const ratio = maxLen / currentLen;
+        tx *= ratio;
+        ty *= ratio;
+      }
+    }
+
+    this.ctx.save();
+
+    // 根据不同武器类型定制样式
+    let color = '#ffff00'; 
+    let lineWidth = 2.5;
+    let barFactor = 1.0;
+
+    const wt = bullet.weaponTypeId;
+    if (wt === 'w_minigun') {
+        // Minigun: Orange/Red stream
+        color = '#ffaa00';
+        lineWidth = 2.0;
+        barFactor = 0.8;
+    } else if (wt === 'w_sniper' || wt === 'w_anti_material') {
+      // 狙击枪：亮白色/青色，浓厚条形
+      color = '#00ffff';
+      lineWidth = 3.5;
+      barFactor = 1.8;
+    } else if (wt === 'w_laser_rifle') {
+      // 激光步枪：大幅缩短视觉长度 (因为其初速极快)，并减细线条
+      this.drawLaserBar(screenX, screenY, tx * 0.4, ty * 0.4, '#00ffcc', 3);
+      this.ctx.restore();
+      return;
+    } else if (wt === 'w_shotgun' || wt === 'w_double_barrel' || wt === 'w_auto_shotgun') {
+      // 霰弹枪：银白色，短促条形
+      color = '#e0e0e0';
+      lineWidth = 2;
+      barFactor = 0.6;
+    } else if (wt === 'w_crossbow') {
+      // 弩：箭矢形状
+      this.drawArrowProjectile(screenX, screenY, bullet.vx, bullet.vy);
+      this.ctx.restore();
+      return;
+    } else {
+      // 默认（手枪、SMG、AR）：亮金色
+      color = '#ffcc00';
+      lineWidth = 2.5;
+      barFactor = 1.0;
+    }
+
+    // 绘制条形
+    this.drawBar(screenX, screenY, tx * barFactor, ty * barFactor, color, lineWidth);
+
+    this.ctx.restore();
   }
+
+  /**
+   * 绘制 实体条形 (Bar)
+   */
+  private drawBar(x: number, y: number, tx: number, ty: number, color: string, width: number): void {
+    // 条的主体
+    this.ctx.strokeStyle = color;
+    this.ctx.lineWidth = width;
+    this.ctx.lineCap = 'butt'; 
+    this.ctx.beginPath();
+    this.ctx.moveTo(x, y);
+    this.ctx.lineTo(x - tx, y - ty);
+    this.ctx.stroke();
+
+    // 在条的头部加一个亮白核心，增加速度感且不 clip 到身后
+    this.ctx.strokeStyle = '#fff';
+    this.ctx.lineWidth = width * 0.5;
+    this.ctx.beginPath();
+    this.ctx.moveTo(x, y);
+    // 核心长度也根据总长度按比例缩小，避免在极短时冲突
+    const coreFactor = Math.min(0.3, 5 / (Math.sqrt(tx * tx + ty * ty) || 1));
+    this.ctx.lineTo(x - tx * coreFactor, y - ty * coreFactor);
+    this.ctx.stroke();
+  }
+
+  /**
+   * 绘制 激光条 (带有发光效果)
+   */
+  private drawLaserBar(x: number, y: number, tx: number, ty: number, color: string, width: number): void {
+    this.ctx.save();
+    
+    // 1. 外层发光 (较粗, 半透明)
+    this.ctx.strokeStyle = color;
+    this.ctx.lineWidth = width * 2;
+    this.ctx.lineCap = 'round';
+    this.ctx.globalAlpha = 0.3;
+    this.ctx.beginPath();
+    this.ctx.moveTo(x, y);
+    this.ctx.lineTo(x - tx, y - ty);
+    this.ctx.stroke();
+
+    // 2. 中层光晕 (中等粗细, 较高不透明度)
+    this.ctx.globalAlpha = 0.8;
+    this.ctx.lineWidth = width;
+    this.ctx.stroke();
+
+    // 3. 内层核心 (白色主束)
+    this.ctx.strokeStyle = '#fff';
+    this.ctx.lineWidth = width * 0.4;
+    this.ctx.globalAlpha = 1.0;
+    this.ctx.stroke();
+
+    this.ctx.restore();
+  }
+
+
+  /**
+   * 绘制手雷/榴弹类弹药
+   */
+  private drawGrenadeProjectile(bullet: BULLET_STATE, screenX: number, screenY: number): void {
+    const grenadeRadius = 8;
+    const now = performance.now();
+    
+    // 基础球体
+    this.ctx.save();
+    
+    // 增加一点闪烁效果（引信感）
+    const flash = Math.abs(Math.sin(now * 0.01)) * 50;
+    const color = bullet.weaponTypeId === 'molotov' ? '#ff4500' : '#444';
+    
+    this.ctx.fillStyle = color;
+    this.ctx.beginPath();
+    this.ctx.arc(screenX, screenY, grenadeRadius, 0, Math.PI * 2);
+    this.ctx.fill();
+
+    // 绘制边框
+    this.ctx.strokeStyle = '#fff';
+    this.ctx.lineWidth = 2;
+    this.ctx.stroke();
+
+    // 添加一些拖尾粒子 (可选)
+    if (bullet.weaponTypeId === 'molotov') {
+        const flicker = Math.random() > 0.5;
+        this.ctx.fillStyle = flicker ? '#ff8800' : '#ffff00';
+        this.ctx.beginPath();
+        this.ctx.arc(screenX - (Math.random() * 10), screenY - (Math.random() * 10), 3, 0, Math.PI * 2);
+        this.ctx.fill();
+    }
+
+    this.ctx.restore();
+  }
+
+  /**
+   * 绘制泡泡
+   */
+  private drawBubbleProjectile(bullet: BULLET_STATE, screenX: number, screenY: number): void {
+    const bubbleRadius = 6;
+    this.ctx.save();
+    this.ctx.fillStyle = 'rgba(135, 206, 250, 0.4)';
+    this.ctx.beginPath();
+    this.ctx.arc(screenX, screenY, bubbleRadius, 0, Math.PI * 2);
+    this.ctx.fill();
+    this.ctx.strokeStyle = 'rgba(135, 206, 250, 0.8)';
+    this.ctx.lineWidth = 1;
+    this.ctx.stroke();
+    this.ctx.fillStyle = 'rgba(255, 255, 255, 0.8)';
+    this.ctx.beginPath();
+    this.ctx.arc(screenX - bubbleRadius * 0.3, screenY - bubbleRadius * 0.3, bubbleRadius * 0.25, 0, Math.PI * 2);
+    this.ctx.fill();
+    this.ctx.restore();
+  }
+
+  /**
+   * 绘制箭矢 (Crossbow)
+   */
+  private drawArrowProjectile(x: number, y: number, vx: number, vy: number): void {
+    const angle = Math.atan2(vy, vx);
+    const length = 15;
+    this.ctx.save();
+    this.ctx.translate(x, y);
+    this.ctx.rotate(angle);
+    
+    // 箭杆
+    this.ctx.strokeStyle = '#8b4513';
+    this.ctx.lineWidth = 2;
+    this.ctx.beginPath();
+    this.ctx.moveTo(0, 0);
+    this.ctx.lineTo(-length, 0);
+    this.ctx.stroke();
+    
+    // 箭羽
+    this.ctx.fillStyle = '#fff';
+    this.ctx.beginPath();
+    this.ctx.moveTo(-length, 0);
+    this.ctx.lineTo(-length - 4, -3);
+    this.ctx.lineTo(-length - 4, 3);
+    this.ctx.closePath();
+    this.ctx.fill();
+    
+    this.ctx.restore();
+  }
+
 
   // 命中特效（简易版：圆形闪光，逐渐消失）
   drawHitEffect(effect: { x: number; y: number; age: number; type: 'obstacle' | 'player' }): void {
@@ -1421,6 +1752,80 @@ export class Renderer {
     
     this.ctx.restore();
   }
+
+  // 新增: 绘制燃烧区域
+  public drawFire(fire: { x: number; y: number; radius: number; age: number; durationMs: number }): void {
+    const screenX = fire.x - this.camX;
+    const screenY = fire.y - this.camY;
+    const now = performance.now();
+
+    // age: 0 -> 1 代表整段生命周期
+    const alpha = fire.age < 0.1 ? fire.age * 10 : (fire.age > 0.9 ? (1 - fire.age) * 10 : 1);
+    
+    this.ctx.save();
+
+    // 绘制多层闪烁的火焰
+    const layers = 3;
+    for (let i = 0; i < layers; i++) {
+        // 每一层都有不同的缩放和颜色，以及基于时间的闪烁
+        const layerScale = 1.0 - (i * 0.2);
+        const flicker = Math.sin(now * 0.01 + i * 2) * 0.05 + 0.95;
+        const radius = fire.radius * layerScale * flicker;
+        
+        const colors = [
+            `rgba(255, 69, 0, ${0.4 * alpha})`,   // 橙红色
+            `rgba(255, 140, 0, ${0.5 * alpha})`,  // 橙色
+            `rgba(255, 215, 0, ${0.6 * alpha})`   // 金色
+        ];
+        
+        this.ctx.fillStyle = colors[i];
+        this.ctx.beginPath();
+        
+        // 使用不规则的多边形而不是完美的圆，让火焰看起来更真实
+        const points = 12;
+        for (let j = 0; j < points; j++) {
+            const angle = (j / points) * Math.PI * 2;
+            const dist = radius * (0.9 + Math.random() * 0.2);
+            const px = screenX + Math.cos(angle) * dist;
+            const py = screenY + Math.sin(angle) * dist;
+            if (j === 0) this.ctx.moveTo(px, py);
+            else this.ctx.lineTo(px, py);
+        }
+        
+        this.ctx.closePath();
+        this.ctx.fill();
+    }
+
+    // 绘制一些上升的火星
+    const sparks = 5;
+    for (let i = 0; i < sparks; i++) {
+        const sparkAge = (now * 0.001 + i * 0.2) % 1.0;
+        const angle = (i / sparks) * Math.PI * 2 + now * 0.0005;
+        const dist = fire.radius * (0.2 + sparkAge * 0.8);
+        const sparkX = screenX + Math.cos(angle) * dist;
+        const sparkY = screenY + Math.sin(angle) * dist - sparkAge * 50; // 向上飘动
+        
+        const sparkAlpha = (1 - sparkAge) * alpha;
+        this.ctx.fillStyle = `rgba(255, 255, 255, ${sparkAlpha})`;
+        this.ctx.beginPath();
+        this.ctx.arc(sparkX, sparkY, 2, 0, Math.PI * 2);
+        this.ctx.fill();
+    }
+
+    // 绘制进度条（移至中心）
+    const progress = Math.max(0, Math.min(1, 1 - fire.age));
+    const barWidth = 40;
+    const barHeight = 4;
+    const barX = screenX - barWidth / 2;
+    const barY = screenY - barHeight / 2; // 中心位置
+
+    this.ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
+    this.ctx.fillRect(barX, barY, barWidth, barHeight);
+    this.ctx.fillStyle = `rgba(255, 69, 0, ${0.8 * alpha})`;
+    this.ctx.fillRect(barX, barY, barWidth * progress, barHeight);
+    
+    this.ctx.restore();
+  }
   
   /**
    * 性能优化: 预生成烟雾噪点位置（一次性），避免每帧随机生成
@@ -1497,9 +1902,8 @@ export class Renderer {
 
     this.ctx.save();
     
-    // 浮动效果
-    const floatOffset = Math.sin(now / 400) * 3;
-    const finalY = screenY + floatOffset;
+    // 绘制物品主体 (菱形旋转)
+    const finalY = screenY;
 
     // 绘制底部光晕
     const glow = this.ctx.createRadialGradient(screenX, finalY, 0, screenX, finalY, size * 1.5);
@@ -2222,13 +2626,15 @@ export class Renderer {
     meleeSwings: Array<{ x: number; y: number; aimRad: number; range: number; arcRad: number; age: number }> = [],
     hitEffects: Array<{ x: number; y: number; age: number; type: 'obstacle' | 'player' }> = [], // 命中特效
     explosionEffects: Array<{ x: number; y: number; radius: number; age: number }> = [],
-    smokes: Array<{ x: number; y: number; radius: number; age: number }> = [],
-    currentServerTick?: number, // 新增: 当前服务器 tick（用于计算换弹进度）
+    smokes: { x: number; y: number; radius: number; age: number; durationMs?: number }[] = [],
+    fires: { x: number; y: number; radius: number; age: number; durationMs: number }[] = [],
+    currentServerTick: number = 0, // 新增: 当前服务器 tick（用于计算换弹进度）
     nearbyInteractable?: { type: 'worldItem' | 'lootBag' | 'extractZone'; name: string; distance: number } | null, // 新增: 附近可交互目标
     localPlayer?: PLAYER_STATE | null, // 新增: 本地玩家（用于计算相对位置）
     isLocalPlayerInBush: boolean = false, // 新增: 本地玩家是否在草丛内
     ais: any[] = [], // 新增: AI实体列表
-    decoys: DECOY_STATE[] = [] // 新增: 诱饵列表
+    decoys: DECOY_STATE[] = [], // 新增: 诱饵列表
+    turrets: TURRET_STATE[] = [] // 新增: 炮台列表
   ): void {
     const t0 = performance.now();
     
@@ -2481,6 +2887,24 @@ export class Renderer {
       this.drawAI(ai, debug, currentServerTick);
     }
 
+    // 新增: 绘制炮台（添加草丛和烟雾隐藏逻辑）
+    for (const turret of turrets) {
+        // 炮台视野遮挡逻辑（与AI相同）
+        const turretInBush = (turret as any).inBush ?? false;
+        const turretInSmoke = (turret as any).inSmoke ?? false;
+        
+        const isVisible = 
+          !turretInSmoke && 
+          !(localPlayer?.inSmoke ?? false) && 
+          (!turretInBush || ((turret as any).inBushId !== null && (turret as any).inBushId === localInBushId));
+
+        if (!isVisible) {
+          continue;
+        }
+        
+        this.drawTurret(turret, localPlayerId);
+    }
+
     // Day2: 绘制所有子弹
     const d0 = performance.now();
     for (const bullet of bullets) {
@@ -2496,6 +2920,11 @@ export class Renderer {
     // 新增: 烟雾特效（持续白色大圆）
     for (const smoke of smokes) {
       this.drawSmoke(smoke);
+    }
+
+    // 新增: 燃烧特效
+    for (const fire of fires) {
+      this.drawFire(fire);
     }
 
     // 绘制命中特效（简易闪光）

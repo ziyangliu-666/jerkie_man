@@ -146,7 +146,7 @@ export class BulletTrackManager {
     targetY: number,
     weaponTypeId: string
   ): void {
-    const nowMs = Date.now();
+    const nowMs = performance.now();
     const tempId = `local_grenade_${this.tempIdCounter++}`;
 
     // 计算飞行速度（速度3倍）
@@ -192,7 +192,7 @@ export class BulletTrackManager {
     weaponTypeId?: string,
     spreadSeed?: number
   ): void {
-    const nowMs = Date.now();
+    const nowMs = performance.now();
     
     
     // 获取武器定义（用于检查是否有pelletCount）
@@ -301,7 +301,7 @@ export class BulletTrackManager {
    * 收到 snapshot 时同步服务端子弹
    */
   onSnapshot(snapshot: S2C_SNAPSHOT, players: PLAYER_STATE[]): void {
-    const nowMs = Date.now();
+    const nowMs = performance.now();
     this.players = players;
     this.ais = snapshot.ais ?? []; // 新增: 更新AI列表
 
@@ -496,8 +496,8 @@ export class BulletTrackManager {
    * @param dtSec 时间增量（秒）
    * @param interpolatedPlayers 插值后的玩家位置（用于碰撞检测，必须与渲染位置一致）
    */
-  update(dtSec: number, interpolatedPlayers?: PLAYER_STATE[]): void {
-    const nowMs = Date.now();
+  update(dtSec: number, interpolatedPlayers?: PLAYER_STATE[], interpolatedAIs?: any[]): void {
+    const nowMs = performance.now();
     const toRemove: Array<{ id: string; reason: 'ttl' | 'boundary' | 'obstacle' | 'player' }> = [];
 
     // 日志：update 开始时检查手雷
@@ -597,7 +597,8 @@ export class BulletTrackManager {
       // 新增: 检查AI碰撞（只有玩家的子弹才检测AI碰撞）
       let hitAI = false;
       if (bullet.ownerId === this.localPlayerId) {
-        for (const ai of this.ais) {
+        const aisForCollision = interpolatedAIs ?? this.ais; // 优先使用插值AI位置
+        for (const ai of aisForCollision) {
           if (ai.status !== 'ALIVE') continue; // 只打活着的AI
 
           // AI碰撞半径约 16px（与玩家相同）
@@ -678,6 +679,7 @@ export class BulletTrackManager {
         vx: bullet.vx,
         vy: bullet.vy,
         weaponTypeId: bullet.weaponTypeId, // 传递武器类型ID给渲染器
+        spawnTimeMs: bullet.spawnTimeMs, // 传递生成时间
       });
     }
 
@@ -701,7 +703,7 @@ export class BulletTrackManager {
    * 获取命中特效列表
    */
   getHitEffects(): Array<{ x: number; y: number; age: number; type: 'obstacle' | 'player' }> {
-    const nowMs = Date.now();
+    const nowMs = performance.now();
     return this.hitEffects.map(e => ({
       x: e.x,
       y: e.y,
