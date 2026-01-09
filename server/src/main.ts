@@ -17,6 +17,7 @@ import {
   S2C_EXPLOSION_SCHEMA, // 新增: 爆炸事件
   S2C_SMOKE_SCHEMA, // 新增: 烟雾事件
   S2C_FIRE_SCHEMA, // 新增: 燃烧事件
+  S2C_KILL_FEED_SCHEMA, // 新增: 击杀播报
   getWeaponDef, // 新增: 用于重置武器运行时状态
   type C2S_MESSAGE,
 } from '@jerkie-man/shared';
@@ -1772,6 +1773,25 @@ setInterval(() => {
           ws.send(JSON.stringify(message));
         }
       }
+    }
+  }
+
+  // 新增: 广播击杀播报
+  const killFeeds = room.drainKillFeeds();
+  if (killFeeds.length > 0) {
+    for (const feed of killFeeds) {
+       const message = S2C_KILL_FEED_SCHEMA.parse({
+         type: 'S2C_KILL_FEED',
+         killer: feed.killer,
+         victim: feed.victim,
+         weapon: feed.weapon,
+       });
+
+       for (const ws of connections.keys()) {
+         if (ws.readyState === WebSocket.OPEN) {
+           ws.send(JSON.stringify(message));
+         }
+       }
     }
   }
 

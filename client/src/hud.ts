@@ -296,6 +296,9 @@ export class HUD {
                 } else if (itemType.rarity === 'EPIC') {
                   rarityLabel = '史诗';
                   rarityColor = '#9d4edd';
+                } else if (itemType.rarity === 'LEGENDARY') {
+                  rarityLabel = '传说';
+                  rarityColor = '#ffaa00';
                 }
                 const itemValue = itemType.value * item.qty;
                 totalValue += itemValue;

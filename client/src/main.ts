@@ -19,6 +19,7 @@ import type {
   ItemInstance,
   MAP_CONFIG,
   PlayerProfile,
+  S2C_KILL_FEED, // 新增: 导入 Kill Feed 类型
 } from '@jerkie-man/shared';
 import {
   loadMapConfig,
@@ -74,12 +75,14 @@ type MeleeSwing = {
   range: number;
   arcRad: number;
   spawnTimeMs: number;
+  side?: number; // 挥砍方向 (1 或 -1)
 };
 
 const DEFAULT_MELEE_RANGE = 35;
 const DEFAULT_MELEE_ARC_DEG = 60;
 const MELEE_SWING_TTL_MS = 160;
 let meleeSwings: MeleeSwing[] = [];
+let localMeleeSide = 1; // 1 或 -1，用于交替挥砍方向
 
 // 闪光弹致盲总时长（从共享物品配置读取，避免写死）
 const FLASH_GRENADE_DURATION_MS: number = (() => {
@@ -340,12 +343,39 @@ audioManager.init();
 // BGM UI 元素
 const bgmToggleBtn = document.getElementById('bgmToggleBtn') as HTMLButtonElement;
 const bgmVolumeSlider = document.getElementById('bgmVolumeSlider') as HTMLInputElement;
+const bgmNextBtn = document.getElementById('bgmNextBtn') as HTMLButtonElement;
 const bgmTrackSelect = document.getElementById('bgmTrackSelect') as HTMLSelectElement;
+const bgmPanelToggle = document.getElementById('bgmPanelToggle') as HTMLButtonElement;
+const bgmControl = document.getElementById('bgmControl') as HTMLElement;
 
-if (bgmToggleBtn && bgmVolumeSlider && bgmTrackSelect) {
+if (bgmToggleBtn && bgmVolumeSlider && bgmNextBtn && bgmTrackSelect && bgmPanelToggle && bgmControl) {
   // 初始化 UI 状态
   bgmVolumeSlider.value = audioManager.getVolume().toString();
   bgmTrackSelect.value = audioManager.getCurrentTrack().toString();
+
+  // 面板展开/收起逻辑
+  const togglePanel = () => {
+    bgmControl.classList.toggle('expanded');
+    // 如果展开了，添加一次性点击监听来关闭（当点击外部时）
+    if (bgmControl.classList.contains('expanded')) {
+      document.addEventListener('click', closePanelOutside);
+    } else {
+      document.removeEventListener('click', closePanelOutside);
+    }
+  };
+
+  const closePanelOutside = (e: MouseEvent) => {
+    if (!bgmControl.contains(e.target as Node)) {
+      bgmControl.classList.remove('expanded');
+      document.removeEventListener('click', closePanelOutside);
+    }
+  };
+
+  bgmPanelToggle.addEventListener('click', (e) => {
+    e.stopPropagation(); // 防止立即触发 external click
+    togglePanel();
+  });
+
   if (audioManager.getMuted()) {
     bgmToggleBtn.classList.add('muted');
     bgmToggleBtn.textContent = '🔇';
@@ -355,7 +385,7 @@ if (bgmToggleBtn && bgmVolumeSlider && bgmTrackSelect) {
   bgmToggleBtn.addEventListener('click', () => {
     const isMuted = audioManager.toggleMute();
     bgmToggleBtn.classList.toggle('muted', isMuted);
-    bgmToggleBtn.textContent = isMuted ? '🔇' : '🎵';
+    bgmToggleBtn.textContent = isMuted ? '🔇' : '🔊';
   });
 
   // 监听音量调节
@@ -364,6 +394,16 @@ if (bgmToggleBtn && bgmVolumeSlider && bgmTrackSelect) {
   });
 
   // 监听音乐切换
+  // 监听下一首切换
+  // 监听下一首切换
+  bgmNextBtn.addEventListener('click', () => {
+    const current = audioManager.getCurrentTrack();
+    const next = current >= 10 ? 1 : current + 1;
+    audioManager.setTrack(next);
+    bgmTrackSelect.value = next.toString(); // 同步下拉框
+  });
+
+  // 监听下拉框可选择
   bgmTrackSelect.addEventListener('change', () => {
     audioManager.setTrack(parseInt(bgmTrackSelect.value));
   });
@@ -467,6 +507,19 @@ window.addEventListener('keydown', (e) => {
   if (e.key === 'F1') {
     e.preventDefault();
     toggleDebugPanel();
+  }
+
+  // 忽略输入框内的按键
+  const target = e.target as HTMLElement;
+  if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') {
+    return;
+  }
+
+  // BGM 快捷键
+  if (e.key.toLowerCase() === 'm') {
+    bgmToggleBtn?.click();
+  } else if (e.key.toLowerCase() === 'n') {
+    bgmNextBtn?.click();
   }
 });
 
@@ -826,101 +879,145 @@ function playHideoutExitAnimation(): void {
 let raidResult: { result: 'EXTRACTED' | 'DIED'; loot: ItemInstance[]; moneyGained: number; moneyLost: number; killedBy?: string; killedByWeaponName?: string } | null = null;
 
 // 新增: 结果页面 DOM 元素
+// 新增: 结果页面 DOM 元素
 let resultUI: HTMLElement | null = null;
 let resultTitle: HTMLElement | null = null;
-let resultStatus: HTMLElement | null = null;
-let resultDetails: HTMLElement | null = null;
+let resultStatusBadge: HTMLElement | null = null;
+let resultStatusText: HTMLElement | null = null;
 let resultContinueBtn: HTMLButtonElement | null = null;
+let resultMoney: HTMLElement | null = null;
+let resultMoneyDetail: HTMLElement | null = null;
+let resultDeathInfo: HTMLElement | null = null;
+let resultKiller: HTMLElement | null = null;
+let resultKillerWeapon: HTMLElement | null = null;
+let resultLootGrid: HTMLElement | null = null;
+let resultNoLoot: HTMLElement | null = null;
 
 // 获取结果页面 DOM 元素的辅助函数
 function getResultElements(): void {
-  if (!resultUI) resultUI = document.getElementById('resultUI');
-  if (!resultTitle) resultTitle = document.getElementById('resultTitle');
-  if (!resultStatus) resultStatus = document.getElementById('resultStatus');
-  if (!resultDetails) resultDetails = document.getElementById('resultDetails');
-  if (!resultContinueBtn) resultContinueBtn = document.getElementById('resultContinueBtn') as HTMLButtonElement;
+  if (resultUI) return; // cache check
+  resultUI = document.getElementById('resultUI');
+  resultTitle = document.getElementById('resultTitle');
+  resultStatusBadge = document.getElementById('resultStatusBadge');
+  resultStatusText = document.getElementById('resultStatusText');
+  resultContinueBtn = document.getElementById('resultContinueBtn') as HTMLButtonElement;
+  resultMoney = document.getElementById('resultMoney');
+  resultMoneyDetail = document.getElementById('resultMoneyDetail');
+  resultDeathInfo = document.getElementById('resultDeathInfo');
+  resultKiller = document.getElementById('resultKiller');
+  resultKillerWeapon = document.getElementById('resultKillerWeapon');
+  resultLootGrid = document.getElementById('resultLootGrid');
+  resultNoLoot = document.getElementById('resultNoLoot');
 }
 
-// 新增: 更新结果页面 UI
+// 新增: 更新结果页面 UI (Refined)
 function updateResultUI(): void {
   getResultElements();
   
-  if (!resultUI || !resultTitle || !resultStatus || !resultDetails || !resultContinueBtn) {
+  if (!resultUI) {
     console.warn('[Result UI] DOM elements not found');
     return;
   }
   
   if (!raidResult) {
-    // 没有结果数据，隐藏结果页面
     resultUI.style.display = 'none';
     return;
   }
   
-  // 显示结果页面
+  // Show Result UI
   resultUI.style.display = 'flex';
+  const container = resultUI.querySelector('.result-container');
   
-  // 更新标题和状态
-  if (raidResult.result === 'EXTRACTED') {
-    resultTitle.textContent = '成功撤离';
-    resultTitle.className = 'success-title';
-    resultStatus.textContent = '✓ 成功撤离';
-    resultStatus.className = 'success';
+  // Reset classes
+  if (container) {
+    container.classList.remove('result-success', 'result-fail');
+  }
+  
+  // 1. Basic Status & Styling
+  const isSuccess = raidResult.result === 'EXTRACTED';
+  if (container) {
+    container.classList.add(isSuccess ? 'result-success' : 'result-fail');
+  }
+
+  if (resultTitle) resultTitle.textContent = isSuccess ? 'OPERATION SUCCESS' : 'OPERATION FAILED';
+  if (resultStatusBadge) resultStatusBadge.textContent = isSuccess ? 'EXTRACTED' : 'K.I.A';
+  if (resultStatusText) resultStatusText.textContent = isSuccess ? 'Evacuation Complete' : 'Killed in Action';
+  
+  // 2. Money & Value Calculation
+  let lootValue = 0;
+  for (const item of raidResult.loot) {
+    try {
+      const type = getItemType(item.typeId);
+      lootValue += (type.value || 0) * item.qty;
+    } catch {}
+  }
+  
+  const totalValue = (raidResult.moneyGained || 0) + lootValue - (raidResult.moneyLost || 0);
+  
+  if (resultMoney) resultMoney.textContent = totalValue.toLocaleString();
+  if (resultMoneyDetail) {
+    const cashTxt = raidResult.moneyGained > 0 ? `+${raidResult.moneyGained}` : `-${raidResult.moneyLost}`;
+    resultMoneyDetail.textContent = `Loot: $${lootValue.toLocaleString()} | Cash: ${cashTxt}`;
+  }
+
+  // 3. Killer Info (Only if failed)
+  if (resultDeathInfo) {
+    if (!isSuccess && (raidResult.killedBy || raidResult.killedByWeaponName)) {
+      resultDeathInfo.style.display = 'flex';
+      if (resultKiller) resultKiller.textContent = raidResult.killedBy || 'Unknown';
+      if (resultKillerWeapon) resultKillerWeapon.textContent = raidResult.killedByWeaponName || '-';
+    } else {
+      resultDeathInfo.style.display = 'none';
+    }
+  }
+
+  // 4. Loot Grid Render
+  if (resultLootGrid) {
+    resultLootGrid.innerHTML = '';
+    const hasLoot = raidResult.loot.length > 0;
     
-    // 显示获得的物品和金钱
-    let detailsHtml = '';
-    if (raidResult.loot.length > 0) {
-      detailsHtml += '<div><strong>获得物品:</strong></div>';
+    if (resultNoLoot) resultNoLoot.style.display = hasLoot ? 'none' : 'block';
+    if (resultLootGrid) resultLootGrid.style.display = hasLoot ? 'grid' : 'none'; // Grid vs None
+
+    if (hasLoot) {
       for (const item of raidResult.loot) {
         try {
-          const itemType = getItemType(item.typeId);
-          detailsHtml += `<div>  • ${escapeHtml(itemType.name)} x${escapeHtml(item.qty)}</div>`;
-        } catch {
-          detailsHtml += `<div>  • ${escapeHtml(item.typeId)} x${escapeHtml(item.qty)}</div>`;
+          const type = getItemType(item.typeId);
+          const el = document.createElement('div');
+          el.className = 'result-item';
+          // Determine simple icon
+          let icon = '📦';
+          if (item.typeId.startsWith('w_')) icon = '🔫';
+          else if (item.typeId.startsWith('a_')) icon = '🛡️'; // armor
+          else if (item.typeId.includes('med')) icon = '💊';
+          else if (item.typeId.includes('bag')) icon = '🎒';
+          else if (type.name.includes('Key')) icon = '🔑';
+          
+          el.innerHTML = `
+            <div class="result-item-icon">${icon}</div>
+            <div class="result-item-name" title="${type.name}">${type.name}</div>
+            <div class="result-item-qty">x${item.qty}</div>
+            <div class="result-item-val">$${(type.value * item.qty).toLocaleString()}</div>
+          `;
+          resultLootGrid.appendChild(el);
+        } catch (e) {
+          console.warn('Error rendering result loot item:', item, e);
         }
       }
     }
-    if (raidResult.moneyGained > 0) {
-      detailsHtml += `<div style="margin-top: 10px;"><strong>获得金钱:</strong> $${escapeHtml(raidResult.moneyGained)}</div>`;
-    }
-    resultDetails.innerHTML = detailsHtml || '<div>无额外奖励</div>';
-  } else {
-    resultTitle.textContent = '战局失败';
-    resultTitle.className = 'failed-title';
-    resultStatus.textContent = '✗ 死亡';
-    resultStatus.className = 'failed';
-    // 显示死亡原因、损失的金钱
-    let detailsHtml = '';
-    // 显示死亡原因（击杀者 + 武器）
-    if (raidResult.killedBy || raidResult.killedByWeaponName) {
-      detailsHtml += `<div class="death-reason"><strong>死亡原因:</strong></div>`;
-      if (raidResult.killedBy) {
-        detailsHtml += `<div class="death-attacker">击杀者: <span class="highlight">${escapeHtml(raidResult.killedBy)}</span></div>`;
-      }
-      if (raidResult.killedByWeaponName) {
-        detailsHtml += `<div class="death-weapon">武器: <span class="highlight">${escapeHtml(raidResult.killedByWeaponName)}</span></div>`;
-      }
-      detailsHtml += '<div style="margin-top: 16px;"></div>';
-    }
-    
-    if (raidResult.moneyLost > 0) {
-      detailsHtml += `<div><strong>损失金钱:</strong> $${escapeHtml(raidResult.moneyLost)}</div>`;
-    }
-    detailsHtml += '<div style="margin-top: 10px; color: #666;">你携带的所有物品已丢失</div>';
-    resultDetails.innerHTML = detailsHtml || '<div>无损失</div>';
   }
   
-  // 绑定继续按钮
-  resultContinueBtn.onclick = () => {
-    // 隐藏结果页面
-    resultUI!.style.display = 'none';
-    // 更新 phase 为 HIDEOUT，返回整备界面
-    const oldPhase = currentPhase;
-    currentPhase = 'HIDEOUT';
-    console.log(`[Result Continue] Phase changed: ${oldPhase} -> ${currentPhase}`);
-    updatePhaseUI();
-    // 请求更新 Profile（确保数据是最新的）
-    // 注意：这里不需要手动请求，因为 phase 更新后，如果服务端发送新的 Profile，会自动更新
-  };
+  // 5. Continue Button
+  if (resultContinueBtn) {
+    resultContinueBtn.onclick = () => {
+      // Hide & Reset
+      if (resultUI) resultUI.style.display = 'none';
+      const oldPhase = currentPhase;
+      currentPhase = 'HIDEOUT';
+      console.log(`[Result Continue] Phase changed: ${oldPhase} -> ${currentPhase}`);
+      updatePhaseUI();
+    };
+  }
 }
 
 // HTML 转义函数（用于结果页面）
@@ -1642,6 +1739,9 @@ function updateRaidEquipmentUI(localPlayer: PLAYER_STATE | null): void {
               } else if (itemType.rarity === 'EPIC') {
                 rarityLabel = '史诗';
                 rarityColor = '#9d4edd';
+              } else if (itemType.rarity === 'LEGENDARY') {
+                rarityLabel = '传说';
+                rarityColor = '#ffaa00';
               }
             } catch {}
             const isEquipped =
@@ -1972,6 +2072,7 @@ function updateShopList(): void {
         COMMON: [],
         RARE: [],
         EPIC: [],
+        LEGENDARY: [],
       };
       
       for (const item of items) {
@@ -1982,7 +2083,7 @@ function updateShopList(): void {
       }
       
       // 为每个稀有度创建区域
-      const rarityOrder = ['COMMON', 'RARE', 'EPIC'];
+      const rarityOrder = ['COMMON', 'RARE', 'EPIC', 'LEGENDARY'];
       for (const rarity of rarityOrder) {
         const rarityItems = rarityGroups[rarity];
         if (rarityItems.length === 0) continue;
@@ -1994,7 +2095,7 @@ function updateShopList(): void {
         // 稀有度标题
         const rarityHeader = document.createElement('div');
         rarityHeader.className = `shop-rarity-header ${rarity.toLowerCase()}`;
-        rarityHeader.textContent = rarity === 'COMMON' ? '普通' : rarity === 'RARE' ? '稀有' : '史诗';
+        rarityHeader.textContent = rarity === 'COMMON' ? '普通' : rarity === 'RARE' ? '稀有' : rarity === 'EPIC' ? '史诗' : '传说';
         raritySection.appendChild(rarityHeader);
         
         // 物品列表
@@ -2095,6 +2196,7 @@ function updateStashList(): void {
     COMMON: [],
     RARE: [],
     EPIC: [],
+    LEGENDARY: [],
   };
   
   for (const item of items) {
@@ -2110,7 +2212,7 @@ function updateStashList(): void {
     }
   }
   
-  const rarityOrder = ['COMMON', 'RARE', 'EPIC'];
+  const rarityOrder = ['COMMON', 'RARE', 'EPIC', 'LEGENDARY'];
   
   // 按照稀有度顺序管理 DOM 结构
   // 注意：这里我们假设稀有度分区的顺序不会变，只需管理内容
@@ -2140,7 +2242,7 @@ function updateStashList(): void {
             
             const rarityHeader = document.createElement('div');
             rarityHeader.className = `shop-rarity-header ${rarity.toLowerCase()}`;
-            rarityHeader.textContent = rarity === 'COMMON' ? '普通' : rarity === 'RARE' ? '稀有' : '史诗';
+            rarityHeader.textContent = rarity === 'COMMON' ? '普通' : rarity === 'RARE' ? '稀有' : rarity === 'EPIC' ? '史诗' : '传说';
             raritySection.appendChild(rarityHeader);
             
             const listDiv = document.createElement('div');
@@ -2834,15 +2936,16 @@ function initHideoutUI(): void {
   if (hideoutTabs) {
     hideoutTabs.addEventListener('click', (e) => {
       const target = e.target as HTMLElement;
-      if (target.classList.contains('tab-btn')) {
-        const tabName = target.getAttribute('data-tab');
+      const btn = target.closest('.tab-btn') as HTMLElement;
+      if (btn) {
+        const tabName = btn.getAttribute('data-tab');
         if (!tabName) return;
         
         // 更新 Tab 按钮状态
-        hideoutTabs?.querySelectorAll('.tab-btn').forEach(btn => {
-          btn.classList.remove('active');
+        hideoutTabs?.querySelectorAll('.tab-btn').forEach(b => {
+          b.classList.remove('active');
         });
-        target.classList.add('active');
+        btn.classList.add('active');
         
         // 更新面板显示
         if (hideoutEquipment) hideoutEquipment.classList.remove('active');
@@ -3690,7 +3793,11 @@ const network = new Network(getWebSocketUrl(), 'local', {
       range: event.range,
       arcRad: event.arcRad,
       spawnTimeMs: performance.now(),
+      side: event.side || 1, // 使用服务端同步的方向
     });
+  },
+  onKillFeed: (feed) => {
+    renderKillFeed(feed);
   },
   onExplosion: (event) => {
     explosionEffects.push({
@@ -3896,6 +4003,7 @@ function renderLoop(): void {
             aimRad: swing.aimRad,
             range: swing.range,
             arcRad: swing.arcRad,
+            side: swing.side,
             age: (nowPerf2 - swing.spawnTimeMs) / MELEE_SWING_TTL_MS,
           }))
           .filter((swing) => swing.age >= 0 && swing.age <= 1);
@@ -4348,7 +4456,15 @@ function renderLoop(): void {
                 range: visualRange,
                 arcRad: visualArcRad,
                 spawnTimeMs: nowPerf2,
+                side: localMeleeSide,
               });
+              
+              // 触发小型屏幕抖动增加击打感
+              renderer.triggerShake(0.12, 120);
+              
+              // 切换下次挥砍方向
+              localMeleeSide = -localMeleeSide;
+              
               lastLocalMeleeMs = nowPerf2;
               meleeAttackToSend = true;
             }
@@ -4819,4 +4935,63 @@ rafId = requestAnimationFrame(renderLoop);
 
 console.log('Client initialized');
 console.log('Type __admin.help() in console for admin commands');
+
+// 新增: 渲染击杀播报
+function renderKillFeed(feed: S2C_KILL_FEED): void {
+  const container = document.getElementById('killFeedContainer');
+  if (!container) return;
+
+  const feedEl = document.createElement('div');
+  feedEl.className = 'kill-feed-item';
+  
+  // Killer
+  const killerSpan = document.createElement('span');
+  killerSpan.className = 'kill-killer';
+  killerSpan.textContent = feed.killer;
+  feedEl.appendChild(killerSpan);
+
+  // Icon (or text "killed")
+  const iconSpan = document.createElement('span');
+  iconSpan.className = 'kill-icon';
+  iconSpan.textContent = 'KILLED'; 
+  feedEl.appendChild(iconSpan);
+
+  // Victim
+  const victimSpan = document.createElement('span');
+  victimSpan.className = 'kill-victim';
+  victimSpan.textContent = feed.victim;
+  feedEl.appendChild(victimSpan);
+
+  // Weapon
+  if (feed.weapon) {
+    const weaponSpan = document.createElement('span');
+    weaponSpan.className = 'kill-weapon';
+    weaponSpan.textContent = `[${feed.weapon}]`;
+    feedEl.appendChild(weaponSpan);
+  }
+
+  // Append new feed item
+  container.appendChild(feedEl);
+
+  // Trigger animation
+  requestAnimationFrame(() => {
+    feedEl.classList.add('show');
+  });
+
+  // Remove after 5 seconds
+  setTimeout(() => {
+    feedEl.classList.remove('show');
+    feedEl.classList.add('hide'); 
+    setTimeout(() => {
+      if (feedEl.parentNode === container) {
+        container.removeChild(feedEl);
+      }
+    }, 300); 
+  }, 5000);
+
+  // Limit max items
+  while (container.children.length > 5) {
+    container.removeChild(container.firstChild as Node);
+  }
+}
 

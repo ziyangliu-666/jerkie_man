@@ -3,7 +3,7 @@
  * 用于替换 lootCount，实现完整的背包/仓库/经济系统
  */
 
-export type Rarity = "COMMON" | "RARE" | "EPIC";
+export type Rarity = "COMMON" | "RARE" | "EPIC" | "LEGENDARY";
 export type ItemCategory = "weapon" | "armor" | "bag" | "consumable" | "material";
 
 export type ItemType = {

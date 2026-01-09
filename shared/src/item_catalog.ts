@@ -116,6 +116,26 @@ export const ITEM_CATALOG: Record<string, ItemType> = {
       hpPerSecond: 15,  // 每秒回复15点HP
     },
   },
+
+  // LEGENDARY materials (新增极罕见材料)
+  legendary_core: {
+    id: 'legendary_core',
+    category: 'material',
+    name: '传说核心',
+    rarity: 'LEGENDARY',
+    value: 1000,
+    description: '一个蕴含着巨大能量的神秘核心，是制造顶级传说武器的核心部件。',
+    stackMax: 1,
+  },
+  pure_gold: {
+    id: 'pure_gold',
+    category: 'material',
+    name: '纯金',
+    rarity: 'LEGENDARY',
+    value: 800,
+    description: '极其纯净的黄金，具有完美的导电性和魔法感应性，用于制造传说级防具。',
+    stackMax: 5,
+  },
   
   // 武器
   w_pistol: {
@@ -185,18 +205,18 @@ export const ITEM_CATALOG: Record<string, ItemType> = {
     id: 'w_minigun',
     category: 'weapon',
     name: '加特林机枪',
-    rarity: 'EPIC',
-    value: 3000,
-    description: '多管旋转机枪，拥有恐怖的持续火力和压制力。',
+    rarity: 'LEGENDARY',
+    value: 5000,
+    description: '多管旋转机枪，拥有恐怖的持续火力和压制力。传说级别的屠杀机器。',
     stackMax: 1,
   },
   w_anti_material: {
     id: 'w_anti_material',
     category: 'weapon',
     name: '反器材狙击枪',
-    rarity: 'EPIC',
-    value: 3500,
-    description: '大口径反器材步枪，能够穿透掩体并摧毁重型装甲。',
+    rarity: 'LEGENDARY',
+    value: 6000,
+    description: '大口径反器材步枪，能够穿透掩体并摧毁重型装甲。传说级别的致命远射。',
     stackMax: 1,
   },
   w_double_barrel: {
@@ -266,9 +286,9 @@ export const ITEM_CATALOG: Record<string, ItemType> = {
     id: 'w_bubble_gun',
     category: 'weapon',
     name: '泡泡枪',
-    rarity: 'EPIC',
-    value: 2500,
-    description: '发射特殊泡泡的趣味武器，具有独特的减速和控制效果。',
+    rarity: 'LEGENDARY',
+    value: 4500,
+    description: '发射特殊泡泡的传说级武器，具有极强的控制和混乱效果。',
     stackMax: 1,
   },
   
@@ -328,7 +348,7 @@ export const ITEM_CATALOG: Record<string, ItemType> = {
     consumableProps: {
       fireRadius: 120,
       fireDurationMs: 8000,
-      fireDamagePerSecond: 20,
+      fireDamagePerSecond: 100,
       explosionRadius: 100, // 视觉上的爆炸半径
     },
   },
@@ -434,9 +454,9 @@ export const ITEM_CATALOG: Record<string, ItemType> = {
     id: 'bag_military',
     category: 'bag',
     name: '军用背包',
-    rarity: 'EPIC',
-    value: 2000,
-    description: '军方制式的高负重背包，拥有最大的存储容量。',
+    rarity: 'LEGENDARY',
+    value: 4000,
+    description: '军方核心科技的高负重背包，拥有绝对领先的存储容量。',
     stackMax: 1,
   },
   
@@ -472,9 +492,9 @@ export const ITEM_CATALOG: Record<string, ItemType> = {
     id: 'armor_heavy',
     category: 'armor',
     name: '重甲',
-    rarity: 'EPIC',
-    value: 3000,
-    description: '覆盖全身的重型护甲，提供极高的防御力，但会略微影响行动。',
+    rarity: 'LEGENDARY',
+    value: 5500,
+    description: '传说级别的复合重型护甲，提供坚不可摧的防御，是战场上的移动堡垒。',
     stackMax: 1,
   },
   armor_exo: {

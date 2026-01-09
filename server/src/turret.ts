@@ -13,6 +13,8 @@ export class Turret {
   public ownerId: string;
   public hp: number = 150;
   public maxHp: number = 150;
+  public killedBy?: string; // 新增: 击杀者
+  public killedByWeaponName?: string; // 新增: 击杀武器
   
   public state: 'IDLE' | 'SPOOLING' | 'FIRING' | 'RELOADING' = 'IDLE';
   public aimRad: number = 0;

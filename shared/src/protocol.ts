@@ -487,6 +487,7 @@ export const S2C_MELEE_SWING_SCHEMA = z.object({
   aimRad: z.number(),
   range: z.number(),
   arcRad: z.number(),
+  side: z.number().int().optional(), // 新增: 挥砍方向 (1 或 -1)
 });
 
 export const S2C_EXPLOSION_SCHEMA = z.object({
@@ -514,6 +515,14 @@ export const S2C_FIRE_SCHEMA = z.object({
   durationMs: z.number().int().positive(),
 });
 
+// 新增: 击杀播报消息
+export const S2C_KILL_FEED_SCHEMA = z.object({
+  type: z.literal('S2C_KILL_FEED'),
+  killer: z.string(),
+  victim: z.string(),
+  weapon: z.string(),
+});
+
 export const S2C_MESSAGE_SCHEMA = z.discriminatedUnion('type', [
   S2C_SNAPSHOT_SCHEMA,
   S2C_ERROR_SCHEMA,
@@ -528,6 +537,7 @@ export const S2C_MESSAGE_SCHEMA = z.discriminatedUnion('type', [
   S2C_EXPLOSION_SCHEMA, // 新增: 爆炸事件
   S2C_SMOKE_SCHEMA, // 新增: 烟雾事件
   S2C_FIRE_SCHEMA, // 新增: 燃烧事件
+  S2C_KILL_FEED_SCHEMA, // 新增: 击杀播报
 ]);
 
 // TypeScript 类型推导
@@ -558,6 +568,7 @@ export type S2C_MELEE_SWING = z.infer<typeof S2C_MELEE_SWING_SCHEMA>; // 新增:
 export type S2C_EXPLOSION = z.infer<typeof S2C_EXPLOSION_SCHEMA>; // 新增: 爆炸事件类型
 export type S2C_SMOKE = z.infer<typeof S2C_SMOKE_SCHEMA>; // 新增: 烟雾事件类型
 export type S2C_FIRE = z.infer<typeof S2C_FIRE_SCHEMA>; // 新增: 燃烧事件类型
+export type S2C_KILL_FEED = z.infer<typeof S2C_KILL_FEED_SCHEMA>; // 新增: 击杀播报类型
 export type S2C_MESSAGE = z.infer<typeof S2C_MESSAGE_SCHEMA>;
 
 // 新增: 物品系统类型导出

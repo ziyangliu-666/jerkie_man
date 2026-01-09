@@ -48,11 +48,13 @@ export class Room {
   private fireIdCounter = 0; // 新增: 燃烧ID计数器
   private lootBagIdCounter = 0;
   private events: Array<{ tick: number; timestamp: number; message: string }> = [];
+  private killFeeds: Array<{ killer: string; victim: string; weapon: string; tick: number }> = [];
   private readonly MAX_EVENTS = 50;
+
   private readonly PICKUP_RADIUS = 40;
   public raidResults: Map<string, { result: 'EXTRACTED' | 'DIED'; accountId: string; loot?: ItemInstance[]; moneyGained?: number; moneyLost?: number; killedBy?: string; killedByWeaponName?: string }> = new Map();
   public combatEvents: Map<string, Array<{ kind: 'DRY_FIRE' | 'HIT' | 'DAMAGE_TAKEN'; direction?: number }>> = new Map();
-  public meleeSwings: Array<{ playerId: string; x: number; y: number; aimRad: number; range: number; arcRad: number }> = [];
+  public meleeSwings: Array<{ playerId: string; x: number; y: number; aimRad: number; range: number; arcRad: number; side?: number }> = [];
   public explosions: Array<{ x: number; y: number; radius: number }> = [];
   private smokes: Array<{ id: string; x: number; y: number; radius: number; durationMs: number; createdAt: number }> = [];
   private newSmokes: Array<{ id: string; x: number; y: number; radius: number; durationMs: number }> = []; // 新生成的烟雾（用于广播）
@@ -573,6 +575,19 @@ export class Room {
     if (this.events.length > this.MAX_EVENTS) {
       this.events.shift();
     }
+  }
+
+  public pushKillFeed(killer: string, victim: string, weapon: string): void {
+    this.killFeeds.push({ killer, victim, weapon, tick: this.tick });
+    if (this.killFeeds.length > 50) {
+      this.killFeeds.shift();
+    }
+  }
+
+  public drainKillFeeds(): Array<{ killer: string; victim: string; weapon: string }> {
+    const feeds = this.killFeeds.map(f => ({ killer: f.killer, victim: f.victim, weapon: f.weapon }));
+    this.killFeeds = [];
+    return feeds;
   }
 
   // 新增: 局内武器切换（重置弹匣/换弹状态）
@@ -1497,12 +1512,22 @@ export class Room {
     }
 
     for (const id of toRemove) {
+      const turret = this.turrets.get(id);
+      if (turret) {
+        log('TURRET_REMOVED', {
+          room: this.id,
+          turretId: id,
+          killedBy: turret.killedBy || '过期',
+          killedByWeaponName: turret.killedByWeaponName || '自然消失',
+          tick: this.tick
+        });
+
+        // 击杀播报
+        if (turret.killedBy && turret.killedByWeaponName) {
+           this.pushKillFeed(turret.killedBy, '自动哨兵', turret.killedByWeaponName);
+        }
+      }
       this.turrets.delete(id);
-      log('TURRET_REMOVED', {
-        room: this.id,
-        turretId: id,
-        tick: this.tick
-      });
     }
   }
 
@@ -1775,7 +1800,11 @@ export class Room {
             aimRad: input.aim,
             range: visualRange,
             arcRad: visualArcRad,
+            side: player.lastMeleeSide,
           });
+          
+          // 切换方向
+          player.lastMeleeSide = -player.lastMeleeSide;
           
           // 先检测玩家
           for (const [targetId, target] of this.players.entries()) {
@@ -2224,42 +2253,13 @@ export class Room {
       const isDead = player.hp <= 0;
 
       if (isDead) {
+        const info = this.getAttackerInfo(ownerId);
+        player.killedBy = info.name;
+        player.killedByWeaponName = info.weaponName === '拳头' ? '破片手雷' : info.weaponName; // 如果是手雷爆炸，且没拿到具体武器名，默认手雷
+        if (info.weaponName === '环境伤害' || info.weaponName === '未知') {
+             player.killedByWeaponName = '破片手雷';
+        }
         this.handlePlayerDeath(player.id);
-      }
-
-      // 发送战斗事件（如果有投掷者）
-      if (ownerId) {
-        if (!this.combatEvents.has(ownerId)) {
-          this.combatEvents.set(ownerId, []);
-        }
-        this.combatEvents.get(ownerId)!.push({ kind: 'HIT' });
-      }
-
-      if (!this.combatEvents.has(playerId)) {
-        this.combatEvents.set(playerId, []);
-      }
-      const direction = Math.atan2(y - player.y, x - player.x);
-      this.combatEvents.get(playerId)!.push({ kind: 'DAMAGE_TAKEN', direction });
-
-      log('GRENADE_EXPLOSION_HIT', {
-        room: this.id,
-        owner: ownerId || 'unknown',
-        target: playerId,
-        tick: this.tick,
-        baseDamage: damage,
-        scaledDamage,
-        armorReduction: player.armorReduction,
-        finalDamage,
-        hp: `${oldHp}->${player.hp}`,
-        distance: Math.round(dist),
-      });
-
-      if (isDead && ownerId) {
-        const attacker = this.players.get(ownerId);
-        if (attacker) {
-          player.killedBy = attacker.name || ownerId;
-          player.killedByWeaponName = '破片手雷';
-        }
       }
     }
 
@@ -2312,6 +2312,16 @@ export class Room {
       if (scaledDamage <= 0) continue;
 
       turret.takeDamage(scaledDamage);
+      const isDead = turret.hp <= 0;
+
+      if (isDead) {
+        const info = this.getAttackerInfo(ownerId);
+        turret.killedBy = info.name;
+        turret.killedByWeaponName = info.weaponName === '拳头' ? '破片手雷' : info.weaponName;
+        if (info.weaponName === '环境伤害' || info.weaponName === '未知') {
+             turret.killedByWeaponName = '破片手雷';
+        }
+      }
 
       if (ownerId) {
         if (!this.combatEvents.has(ownerId)) {
@@ -2345,6 +2355,12 @@ export class Room {
       const isDead = ai.hp <= 0;
 
       if (isDead) {
+        const info = this.getAttackerInfo(ownerId);
+        ai.killedBy = info.name;
+        ai.killedByWeaponName = info.weaponName === '拳头' ? '破片手雷' : info.weaponName;
+        if (info.weaponName === '环境伤害' || info.weaponName === '未知') {
+             ai.killedByWeaponName = '破片手雷';
+        }
         this.handleAIDeath(aiId);
       }
 
@@ -2525,6 +2541,14 @@ export class Room {
         if (dx * dx + dy * dy <= fire.radius * fire.radius) {
           player.takeDamage(damageTick);
           
+          // 如果玩家死亡，处理死亡逻辑
+          if (player.hp <= 0) {
+            const info = this.getAttackerInfo(fire.ownerId);
+            player.killedBy = info.name;
+            player.killedByWeaponName = '燃烧弹';
+            this.handlePlayerDeath(playerId);
+          }
+          
           // 如果有所有者，记录战斗事件
           if (fire.ownerId && fire.ownerId !== player.id) {
             if (!this.combatEvents.has(fire.ownerId)) {
@@ -2544,6 +2568,11 @@ export class Room {
         const dy = turret.y - fire.y;
         if (dx * dx + dy * dy <= fire.radius * fire.radius) {
           turret.takeDamage(damageTick);
+          if (turret.hp <= 0) {
+            const info = this.getAttackerInfo(fire.ownerId);
+            turret.killedBy = info.name;
+            turret.killedByWeaponName = '燃烧弹';
+          }
           
           if (fire.ownerId) {
              if (!this.combatEvents.has(fire.ownerId)) {
@@ -2567,7 +2596,10 @@ export class Room {
             ai.takeDamage(damageTick, attacker ? attacker.x : fire.x, attacker ? attacker.y : fire.y);
             
             if (ai.hp <= 0) {
-                this.handleAIDeath(aiId);
+              const info = this.getAttackerInfo(fire.ownerId);
+              ai.killedBy = info.name;
+              ai.killedByWeaponName = '燃烧弹';
+              this.handleAIDeath(aiId);
             }
 
             if (fire.ownerId) {
@@ -3045,6 +3077,12 @@ export class Room {
       
       if (hitTurret) {
          hitTurret.takeDamage(bullet.damage);
+         const isDead = hitTurret.hp <= 0;
+         if (isDead) {
+            const info = this.getAttackerInfo(bullet.ownerId);
+            hitTurret.killedBy = info.name;
+            hitTurret.killedByWeaponName = info.weaponName;
+         }
          
          if (bullet.ownerId) {
             if (!this.combatEvents.has(bullet.ownerId)) {
@@ -3117,7 +3155,6 @@ export class Room {
 
         if (rewindHit) {
           // 命中！
-          const oldHp = player.hp;
           const wasAlive = player.status === 'ALIVE';
           
           // 新增: 计算伤害（应用防具减伤，使用player.armorReduction）
@@ -3127,13 +3164,35 @@ export class Room {
           player.takeDamage(finalDamage);
           const isDead = player.hp <= 0;
           
-          // 新增: 玩家死亡时生成掉落包
-          if (isDead) {
+          if (wasAlive && isDead) {
+            const info = this.getAttackerInfo(bullet.ownerId);
+            player.killedBy = info.name;
+            player.killedByWeaponName = info.weaponName;
+
+            log('PLAYER_DEAD_WITH_KILL_INFO', {
+              room: this.id,
+              player: playerId,
+              playerName: player.name,
+              tick: this.tick,
+              killer: bullet.ownerId,
+              killerName: player.killedBy,
+              weapon: player.killedByWeaponName,
+            });
+
+            log('PLAYER_DEAD', {
+              room: this.id,
+              player: playerId,
+              tick: this.tick,
+              killer: bullet.ownerId,
+            });
+            // 游戏化增强: 推送击杀事件
+            this.pushEvent(`${playerId} killed by ${bullet.ownerId}`);
+
+            // 关键：设置好击杀信息后再处理死亡逻辑，确保结果消息包含正确 killer
             this.handlePlayerDeath(player.id);
           }
-          
+
           // 新增: 发送战斗事件（命中反馈给攻击者，受伤反馈给被攻击者）
-          // 计算方向（从被攻击者到攻击者的方向，用于受伤方向指示）
           const attacker = this.players.get(bullet.ownerId);
           if (attacker) {
             const dx = attacker.x - player.x;
@@ -3155,53 +3214,6 @@ export class Room {
           
           // 游戏化增强: 推送命中事件
           this.pushEvent(`${bullet.ownerId} hit ${playerId} (-${finalDamage})`);
-          
-          // 如果玩家死了，保存击杀信息并推送击杀事件和日志
-          if (wasAlive && isDead) {
-            const attacker = this.players.get(bullet.ownerId);
-            if (attacker) {
-              // 保存击杀信息
-              player.killedBy = attacker.name || bullet.ownerId;
-              // 获取武器名称
-              if (attacker.weaponRuntime) {
-                try {
-                  const weaponDef = getWeaponDef(attacker.weaponRuntime.weaponTypeId);
-                  player.killedByWeaponName = weaponDef.name;
-                } catch {
-                  // 无法获取武器定义，使用默认值
-                  player.killedByWeaponName = '未知武器';
-                }
-              } else {
-                player.killedByWeaponName = '拳头';
-              }
-              
-              log('PLAYER_DEAD_WITH_KILL_INFO', {
-                room: this.id,
-                player: playerId,
-                playerName: player.name,
-                tick: this.tick,
-                killer: bullet.ownerId,
-                killerName: player.killedBy,
-                weapon: player.killedByWeaponName,
-              });
-            } else {
-              log('PLAYER_DEAD_NO_ATTACKER', {
-                room: this.id,
-                player: playerId,
-                tick: this.tick,
-                bulletOwner: bullet.ownerId,
-              });
-            }
-            
-            log('PLAYER_DEAD', {
-              room: this.id,
-              player: playerId,
-              tick: this.tick,
-              killer: bullet.ownerId,
-            });
-            // 游戏化增强: 推送击杀事件
-            this.pushEvent(`${playerId} killed by ${bullet.ownerId}`);
-          }
           
           this.applyExplosion(bullet, hitPosition.x, hitPosition.y);
           bulletsToRemove.add(bullet.id); // Step4: 用Set.add
@@ -3255,6 +3267,9 @@ export class Room {
             ai.takeDamage(finalDamage, bullet.spawnX, bullet.spawnY);
 
             if (ai.hp <= 0) {
+              const info = this.getAttackerInfo(bullet.ownerId);
+              ai.killedBy = info.name;
+              ai.killedByWeaponName = info.weaponName;
               this.handleAIDeath(aiId);
             }
 
@@ -3802,6 +3817,20 @@ export class Room {
     if (!ai || !ai.weaponRuntime) return;
 
     ai.status = 'DEAD';
+    const killedBy = ai.killedBy || '未知';
+    const killedByWeaponName = ai.killedByWeaponName || '未知';
+
+    // 击杀播报
+    if (ai.killedBy && ai.killedByWeaponName) {
+      let aiName = 'AI';
+      switch (ai.role) {
+        case 'scout': aiName = '侦查兵AI'; break;
+        case 'sniper': aiName = '狙击手AI'; break;
+        case 'heavy_gunner': aiName = '重装兵AI'; break;
+        case 'basic': aiName = '野怪AI'; break;
+      }
+      this.pushKillFeed(ai.killedBy, aiName, ai.killedByWeaponName);
+    }
 
     // 记录槽位死亡时间（用于重刷冷却）
     if (ai.spawnId !== undefined && ai.spawnIndex !== undefined) {
@@ -3831,7 +3860,14 @@ export class Room {
       items: [weaponItem],
     });
 
-    log('AI_DEATH', { room: this.id, aiId, position: `${ai.x},${ai.y}`, tick: this.tick });
+    log('AI_DEATH', { 
+      room: this.id, 
+      aiId, 
+      position: `${ai.x},${ai.y}`, 
+      killedBy,
+      killedByWeaponName,
+      tick: this.tick 
+    });
   }
 
   // 获取当前状态快照
@@ -4270,7 +4306,62 @@ export class Room {
       killedByWeaponName,
     });
     
+    // 击杀播报
+    if (killedBy && killedByWeaponName) {
+      this.pushKillFeed(killedBy, player.name || '玩家', killedByWeaponName);
+    }
+
     return { success: true, accountId, moneyLost, killedBy, killedByWeaponName };
+  }
+
+  // 新增: 获取攻击者信息（用于击杀记录）
+  private getAttackerInfo(ownerId: string | undefined): { name: string, weaponName: string } {
+    if (!ownerId) return { name: '环境伤害', weaponName: '未知' };
+
+    // 1. 检查是否为玩家
+    const player = this.players.get(ownerId);
+    if (player) {
+      let weaponName = '拳头';
+      if (player.weaponRuntime) {
+        try {
+          const weaponDef = getWeaponDef(player.weaponRuntime.weaponTypeId);
+          weaponName = weaponDef.name;
+        } catch {}
+      }
+      return { name: player.name || ownerId, weaponName };
+    }
+
+    // 2. 检查是否为 AI
+    const ai = this.ais.get(ownerId);
+    if (ai) {
+      let weaponName = 'AI武器';
+      if (ai.weaponRuntime) {
+        try {
+          const weaponDef = getWeaponDef(ai.weaponRuntime.weaponTypeId);
+          weaponName = weaponDef.name;
+        } catch {}
+      }
+      // AI角色预设名称
+      let roleName = 'AI';
+      switch (ai.role) {
+        case 'scout': roleName = '侦查兵AI'; break;
+        case 'sniper': roleName = '狙击手AI'; break;
+        case 'heavy_gunner': roleName = '重装兵AI'; break;
+        case 'basic': roleName = '野怪AI'; break;
+      }
+      
+      return { name: roleName, weaponName };
+    }
+
+    // 3. 检查是否为炮台
+    const turret = this.turrets.get(ownerId);
+    if (turret) {
+      const owner = turret.ownerId ? this.players.get(turret.ownerId) : null;
+      const name = owner ? `${owner.name} 的机枪炮塔` : '机枪炮塔';
+      return { name, weaponName: '自动火炮' };
+    }
+
+    return { name: ownerId, weaponName: '未知' };
   }
 
   // 新增: 处理玩家撤离（inventory -> stash）

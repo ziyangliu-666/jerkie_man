@@ -55,6 +55,7 @@ export class Player {
   public usingItemIid: string | null = null;
   public usingItemEndTick: number = 0;
   public usingItemTotalDurationTicks: number = 0;
+  public lastMeleeSide: number = 1; // 新增: 记录最后一次近战挥击方向
 
   // 新增: 伪装AI行为状态（类似真实AI的字段）
   public disguisedAimRad: number = 0; // 伪装玩家的枪口角度

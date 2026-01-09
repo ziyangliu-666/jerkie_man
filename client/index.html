@@ -24,6 +24,9 @@
       --lineA: 0.035;
       /* 网格间距 */
       --gridSize: 80px;
+      /* UI 交互变量 */
+      --ui-mouse-x: 50%;
+      --ui-mouse-y: 50%;
       /* 暗角强度 */
       --vignetteA: 0.7;
       /* 颗粒强度 */
@@ -1341,32 +1344,127 @@
 
     /* 顶部固定栏 */
     #hideoutTopBar {
-      background: rgba(20, 22, 28, 0.8);
-      -webkit-backdrop-filter: blur(8px);
-      backdrop-filter: blur(8px);
-      border-bottom: 1px solid rgba(120, 180, 200, 0.1);
-      padding: 10px 20px;
+      background: rgba(10, 11, 14, 0.85);
+      -webkit-backdrop-filter: blur(16px);
+      backdrop-filter: blur(16px);
+      border-bottom: 1px solid rgba(0, 255, 255, 0.15);
+      padding: 0 40px;
+      height: 64px;
       display: flex;
       justify-content: space-between;
       align-items: center;
-      box-shadow: 0 2px 12px rgba(0, 0, 0, 0.3);
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+      position: relative;
+      z-index: 100;
+    }
+
+    /* 顶部装饰线 */
+    #hideoutTopBar::after {
+      content: '';
+      position: absolute;
+      bottom: -1px;
+      left: 0;
+      width: 100%;
+      height: 1px;
+      background: linear-gradient(90deg, 
+        transparent 0%, 
+        rgba(0, 255, 255, 0.5) 20%, 
+        rgba(0, 255, 255, 0.5) 80%, 
+        transparent 100%
+      );
+      opacity: 0.3;
     }
 
     .topBar-left {
       display: flex;
-      gap: 10px;
+      gap: 24px;
       align-items: center;
-      color: #fff;
-      font-size: 14px;
+      color: rgba(255, 255, 255, 0.9);
+      font-size: 13px;
+      letter-spacing: 1px;
+      font-weight: 500;
+      text-transform: uppercase;
+    }
+
+    .topBar-left span {
+      display: flex;
+      align-items: center;
+    }
+
+    #hideoutName {
+      color: #0ff;
+      font-weight: bold;
+      text-shadow: 0 0 10px rgba(0, 255, 255, 0.3);
+      font-size: 15px;
+    }
+
+    .top-stat-item {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+
+    .top-stat-label {
+      font-size: 9px;
+      color: rgba(255, 255, 255, 0.4);
+      margin-bottom: -2px;
     }
 
     .topBar-right {
       display: flex;
       align-items: center;
+      gap: 20px;
+    }
+
+    .top-center-decor {
+      position: absolute;
+      left: 50%;
+      top: 50%;
+      transform: translate(-50%, -50%);
+      display: flex;
+      align-items: center;
+      gap: 30px;
+      pointer-events: none;
+    }
+
+    .decor-scanner {
+      width: 120px;
+      height: 20px;
+      background: rgba(0, 255, 255, 0.03);
+      border: 1px solid rgba(0, 255, 255, 0.1);
+      position: relative;
+      overflow: hidden;
+    }
+
+    .decor-scanner::before {
+      content: '';
+      position: absolute;
+      left: 0;
+      top: 0;
+      height: 100%;
+      width: 2px;
+      background: #0ff;
+      box-shadow: 0 0 8px #0ff;
+      animation: scanMove 3s ease-in-out infinite;
+    }
+
+    @keyframes scanMove {
+      0%, 100% { left: 5%; }
+      50% { left: 95%; }
+    }
+
+    .decor-bits {
+      font-size: 8px;
+      color: rgba(0, 255, 255, 0.2);
+      font-family: monospace;
+      white-space: nowrap;
     }
 
     .separator {
-      color: #666;
+      width: 1px;
+      height: 20px;
+      background: rgba(255, 255, 255, 0.1);
+      margin: 0 4px;
     }
 
     /* 进入战局按钮样式 */
@@ -1435,38 +1533,87 @@
 
     /* 左侧 Tab */
     #hideoutTabs {
-      width: 120px;
-      background: rgba(18, 20, 26, 0.7);
-      -webkit-backdrop-filter: blur(6px);
-      backdrop-filter: blur(6px);
-      border-right: 1px solid rgba(120, 180, 200, 0.08);
+      width: 220px;
+      background: rgba(8, 9, 12, 0.4);
+      border-right: 1px solid rgba(0, 255, 255, 0.08);
       display: flex;
       flex-direction: column;
-      padding: 10px 0;
+      padding: 20px 0;
+      z-index: 5;
+      gap: 8px;
     }
 
     .tab-btn {
-      padding: 12px 20px;
+      padding: 16px 30px;
       background: transparent;
       border: none;
-      color: #aaa;
+      color: rgba(255, 255, 255, 0.4);
       text-align: left;
       cursor: pointer;
       font-family: 'Courier New', monospace;
       font-size: 14px;
-      transition: all 0.2s;
+      font-weight: bold;
+      text-transform: uppercase;
+      letter-spacing: 2px;
+      transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+      position: relative;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .tab-btn::before {
+      content: '';
+      position: absolute;
+      left: 0;
+      top: 50%;
+      transform: translateY(-50%);
+      width: 0;
+      height: 100%;
+      background: linear-gradient(90deg, rgba(0, 255, 255, 0.1), transparent);
+      transition: width 0.3s ease;
+      z-index: -1;
+    }
+
+    .tab-btn::after {
+      content: '';
+      position: absolute;
+      left: 0;
+      top: 0;
+      width: 2px;
+      height: 0;
+      background: #0ff;
+      transition: height 0.3s ease;
+      box-shadow: 0 0 10px rgba(0, 255, 255, 0.5);
     }
 
     .tab-btn:hover {
-      background: #333;
-      color: #fff;
+      color: rgba(255, 255, 255, 0.8);
+      padding-left: 35px;
     }
 
     .tab-btn.active {
-      background: rgba(30, 35, 45, 0.8);
       color: #0ff;
-      border-left: 3px solid #0ff;
-      box-shadow: inset 0 0 20px rgba(0, 255, 255, 0.05);
+      padding-left: 40px;
+      text-shadow: 0 0 15px rgba(0, 255, 255, 0.4);
+    }
+
+    .tab-btn.active::before {
+      width: 100%;
+    }
+
+    .tab-btn.active::after {
+      height: 100%;
+    }
+
+    .tab-icon {
+      font-size: 18px;
+      opacity: 0.6;
+    }
+
+    .tab-btn.active .tab-icon {
+      opacity: 1;
+      filter: drop-shadow(0 0 5px #0ff);
     }
 
     /* 右侧内容区 */
@@ -1600,6 +1747,27 @@
       background: linear-gradient(90deg, rgba(157, 78, 221, 0.1), transparent);
     }
 
+    .shop-rarity-header.legendary {
+      border-left-color: #ffaa00;
+      color: #ffaa00;
+      background: linear-gradient(90deg, rgba(255, 170, 0, 0.1), transparent);
+      text-shadow: 0 0 10px rgba(255, 170, 0, 0.3);
+    }
+
+    /* Rarity Glows for Cards */
+    .stash-card.rarity-common { border-color: rgba(0, 255, 0, 0.15); }
+    .stash-card.rarity-rare { border-color: rgba(0, 136, 255, 0.2); }
+    .stash-card.rarity-epic { border-color: rgba(157, 78, 221, 0.3); }
+    .stash-card.rarity-legendary { 
+        border-color: rgba(255, 170, 0, 0.5);
+        box-shadow: 0 0 15px rgba(255, 170, 0, 0.15), inset 0 0 10px rgba(255, 170, 0, 0.05);
+    }
+
+    .stash-card.rarity-legendary .stash-card-title {
+        color: #ffaa00;
+        text-shadow: 0 0 8px rgba(255, 170, 0, 0.4);
+    }
+
     .shop-rarity-items {
       display: grid;
       grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
@@ -1667,11 +1835,28 @@
     }
 
     .shop-tab-btn.active {
-      background: rgba(30, 35, 45, 0.9);
-      color: #0ff;
-      border-color: rgba(0, 255, 255, 0.4);
-      border-bottom: 2px solid #0ff;
+      background: rgba(0, 255, 255, 0.08) !important;
+      color: #0ff !important;
+      border-color: rgba(0, 255, 255, 0.5) !important;
+      box-shadow: 0 0 15px rgba(0, 255, 255, 0.15) !important;
+      border-bottom: 2px solid #0ff !important;
       margin-bottom: -2px;
+    }
+
+    /* 滚动条美化 */
+    #hideoutUI ::-webkit-scrollbar {
+      width: 5px;
+      height: 5px;
+    }
+    #hideoutUI ::-webkit-scrollbar-track {
+      background: rgba(0, 0, 0, 0.1);
+    }
+    #hideoutUI ::-webkit-scrollbar-thumb {
+      background: rgba(120, 180, 200, 0.2);
+      border-radius: 10px;
+    }
+    #hideoutUI ::-webkit-scrollbar-thumb:hover {
+      background: rgba(0, 255, 255, 0.4);
     }
 
     .item-info {
@@ -2080,17 +2265,33 @@
       content: '';
       position: absolute;
       inset: 0;
-      background: linear-gradient(135deg, rgba(255, 255, 255, 0.05) 0%, transparent 100%);
+      background: linear-gradient(135deg, rgba(255, 255, 255, 0.1) 0%, transparent 100%);
       opacity: 0;
       transition: opacity 0.3s;
       pointer-events: none;
     }
 
     .stash-card:hover {
-      transform: translateY(-2px);
-      border-color: rgba(0, 255, 255, 0.35);
-      box-shadow: 0 6px 16px rgba(0, 0, 0, 0.25), 0 0 1px rgba(0, 255, 255, 0.2);
+      transform: translateY(-4px) scale(1.01);
+      border-color: rgba(0, 255, 255, 0.5);
+      background: rgba(35, 42, 55, 0.85);
+      box-shadow: 
+        0 8px 24px rgba(0, 0, 0, 0.4), 
+        0 0 20px rgba(0, 255, 255, 0.1),
+        inset 0 0 12px rgba(255, 255, 255, 0.05);
       z-index: 10;
+    }
+
+    /* 内部线条点缀 */
+    .stash-card::after {
+      content: '';
+      position: absolute;
+      bottom: 0;
+      right: 0;
+      width: 40px;
+      height: 40px;
+      background: linear-gradient(135deg, transparent 50%, rgba(0, 255, 255, 0.1) 50%);
+      pointer-events: none;
     }
 
     .stash-card:hover::before {
@@ -2155,6 +2356,338 @@
       text-align: center;
     }
     
+
+    /* ===== Result Screen New Styles ===== */
+    #resultUI {
+      background: rgba(5, 6, 8, 0.92);
+      backdrop-filter: blur(8px);
+    }
+
+    .result-container {
+      width: 900px;
+      max-width: 95vw;
+      height: 80vh;
+      display: flex;
+      flex-direction: column;
+      position: relative;
+      background: radial-gradient(circle at top right, rgba(30,35,45,0.4) 0%, transparent 60%),
+                  linear-gradient(180deg, rgba(15,17,22,0.95) 0%, rgba(10,12,16,1) 100%);
+      border: 1px solid rgba(120, 180, 200, 0.15);
+      box-shadow: 0 0 60px rgba(0,0,0,0.8), inset 0 0 100px rgba(0,0,0,0.5);
+      padding: 40px;
+      overflow: hidden;
+      animation: modalSlideIn 0.5s cubic-bezier(0.23, 1, 0.32, 1);
+    }
+    
+    @keyframes modalSlideIn {
+      from { opacity: 0; transform: scale(0.95) translateY(20px); }
+      to { opacity: 1; transform: scale(1) translateY(0); }
+    }
+
+    /* Animated Glow Background */
+    .result-bg-glow {
+      position: absolute;
+      top: -50%;
+      left: -50%;
+      width: 200%;
+      height: 200%;
+      background: radial-gradient(circle at 50% 50%, var(--result-glow-color, rgba(0, 255, 255, 0.05)) 0%, transparent 50%);
+      pointer-events: none;
+      z-index: 0;
+      opacity: 0.6;
+      animation: rotateGlow 20s linear infinite;
+    }
+    
+    @keyframes rotateGlow {
+      from { transform: rotate(0deg); }
+      to { transform: rotate(360deg); }
+    }
+
+    /* Header */
+    .result-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 40px;
+      position: relative;
+      z-index: 2;
+    }
+
+    .result-title-wrapper {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    #resultTitle {
+      font-family: 'Courier New', monospace; /* Keep consistent font */
+      font-size: 48px;
+      font-weight: 900;
+      text-transform: uppercase;
+      letter-spacing: 4px;
+      margin: 0;
+      color: #fff;
+      text-shadow: 0 0 20px rgba(255,255,255,0.2);
+    }
+
+    .result-decoration-line {
+      width: 100%;
+      height: 2px;
+      background: linear-gradient(90deg, var(--result-color, #0ff), transparent);
+      box-shadow: 0 0 10px var(--result-color, #0ff);
+    }
+
+    .status-badge {
+      font-size: 16px;
+      font-weight: bold;
+      padding: 8px 20px;
+      border: 1px solid var(--result-color, #0ff);
+      color: var(--result-color, #0ff);
+      background: rgba(0,0,0,0.4);
+      box-shadow: 0 0 15px var(--result-color-dim, rgba(0,255,255,0.1));
+      letter-spacing: 2px;
+      text-transform: uppercase;
+    }
+
+    /* Body Layout */
+    .result-body {
+      display: flex;
+      gap: 30px;
+      flex: 1;
+      min-height: 0; /* Important for scroll */
+      position: relative;
+      z-index: 2;
+    }
+
+    .result-column {
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+    }
+
+    .info-col {
+      width: 300px;
+      flex-shrink: 0;
+    }
+
+    .loot-col {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      background: rgba(20, 24, 30, 0.4);
+      border: 1px solid rgba(255,255,255,0.05);
+      border-radius: 4px;
+      padding: 20px;
+    }
+
+    /* Metric Cards */
+    .result-card {
+      background: rgba(255,255,255,0.03);
+      border-left: 2px solid rgba(255,255,255,0.1);
+      padding: 20px;
+      display: flex;
+      flex-direction: column;
+    }
+    
+    .money-card {
+      border-left-color: #ffd700;
+      background: linear-gradient(90deg, rgba(255, 215, 0, 0.05), transparent);
+    }
+
+    .death-card {
+      border-left-color: #f44;
+      background: linear-gradient(90deg, rgba(255, 68, 68, 0.05), transparent);
+    }
+
+    .card-label {
+      font-size: 12px;
+      color: #888;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      margin-bottom: 8px;
+    }
+    
+    .card-label.warning { color: #f44; }
+
+    .money-value-group {
+      display: flex;
+      align-items: flex-start;
+      gap: 4px;
+      color: #ffd700;
+      text-shadow: 0 0 15px rgba(255, 215, 0, 0.3);
+    }
+    
+    .currency-symbol { font-size: 24px; margin-top: 6px; }
+    .metric-value { font-size: 48px; font-weight: bold; line-height: 1; }
+
+    .money-detail {
+      margin-top: 8px;
+      font-size: 12px;
+      color: #aaa;
+    }
+
+    .killer-info {
+      display: flex;
+      justify-content: space-between;
+      margin-top: 6px;
+      font-size: 14px;
+      border-bottom: 1px dashed rgba(255,255,255,0.1);
+      padding-bottom: 4px;
+    }
+    
+    .killer-info .label { color: #aaa; }
+    .killer-info .value { color: #fff; font-weight: bold; }
+
+    .stat-row {
+      display: flex;
+      justify-content: space-between;
+      padding: 8px 0;
+      border-bottom: 1px solid rgba(255,255,255,0.05);
+    }
+    
+    .stat-label { color: #888; font-size: 13px; }
+    .stat-value { color: #fff; font-weight: bold; }
+
+    /* Loot Grid */
+    .section-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 15px;
+      border-bottom: 1px solid rgba(255,255,255,0.1);
+      padding-bottom: 10px;
+    }
+    
+    .section-header h3 {
+      font-size: 14px;
+      color: #0ff;
+      margin: 0;
+      letter-spacing: 2px;
+    }
+    
+    .deco-dots { color: #0ff; opacity: 0.5; }
+
+    .loot-scroll-area {
+      flex: 1;
+      overflow-y: auto;
+      padding-right: 8px;
+    }
+
+    .loot-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(80px, 1fr));
+      gap: 12px;
+    }
+    
+    .no-loot-hint {
+      text-align: center;
+      color: #555;
+      padding: 40px;
+      font-style: italic;
+      border: 1px dashed #333;
+    }
+
+    /* Result Item Card (Compact) */
+    .result-item {
+      background: rgba(10,12,16,0.6);
+      border: 1px solid rgba(255,255,255,0.1);
+      aspect-ratio: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      position: relative;
+      transition: all 0.2s;
+    }
+    
+    .result-item:hover {
+      border-color: rgba(0,255,255,0.5);
+      background: rgba(0,255,255,0.05);
+      transform: translateY(-2px);
+    }
+
+    .result-item-icon {
+      font-size: 24px;
+      margin-bottom: 4px;
+      color: #ddd;
+    }
+    
+    .result-item-name {
+      font-size: 10px;
+      color: #aaa;
+      text-align: center;
+      padding: 0 4px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      width: 100%;
+    }
+    
+    .result-item-qty {
+      position: absolute;
+      top: 4px;
+      right: 4px;
+      font-size: 10px;
+      color: #fff;
+      background: rgba(0,0,0,0.6);
+      padding: 1px 4px;
+      border-radius: 2px;
+    }
+    
+    .result-item-val {
+      position: absolute;
+      bottom: 4px;
+      left: 0;
+      width: 100%;
+      text-align: center;
+      font-size: 9px;
+      color: #ffd700;
+      opacity: 0.7;
+    }
+
+    /* Footer / Button */
+    .result-footer {
+      margin-top: 30px;
+      display: flex;
+      justify-content: flex-end;
+      z-index: 2;
+    }
+
+    .cyber-btn-lg {
+      position: relative;
+      background: var(--result-color, #0ff);
+      color: #000;
+      border: none;
+      padding: 16px 48px;
+      font-family: inherit;
+      font-size: 18px;
+      font-weight: 900;
+      text-transform: uppercase;
+      cursor: pointer;
+      clip-path: polygon(10px 0, 100% 0, 100% calc(100% - 10px), calc(100% - 10px) 100%, 0 100%, 0 10px);
+      transition: all 0.2s;
+    }
+    
+    .cyber-btn-lg:hover {
+      transform: translateX(5px);
+      box-shadow: -5px 5px 0 rgba(255,255,255,0.2);
+      filter: brightness(1.1);
+    }
+
+    /* Context Colors */
+    .result-success {
+      --result-color: #4CAF50;
+      --result-color-dim: rgba(76, 175, 80, 0.2);
+      --result-glow-color: rgba(76, 175, 80, 0.15);
+    }
+    
+    .result-fail {
+      --result-color: #F44336;
+      --result-color-dim: rgba(244, 67, 54, 0.2);
+      --result-glow-color: rgba(244, 67, 54, 0.15);
+    }
+
+    /* Quantity Badge (Legacy Override) */
     .item-count-badge.hidden {
       display: none;
     }
@@ -2510,27 +3043,116 @@
       top: 10px;
       right: 320px; /* 避开 HUD 容器 */
       z-index: 2000;
-      background: rgba(15, 18, 25, 0.75);
+      background: rgba(15, 18, 25, 0.95); /* 更不透明背景，防止干扰 */
       -webkit-backdrop-filter: blur(10px);
       backdrop-filter: blur(10px);
-      border: 1px solid rgba(120, 180, 200, 0.15);
+      border: 1px solid rgba(120, 180, 200, 0.3);
       border-radius: 20px;
-      padding: 5px 15px;
+      padding: 5px;
       display: flex;
       align-items: center;
       gap: 10px;
       pointer-events: auto;
-      transition: all 0.3s ease;
-      box-shadow: 0 2px 12px rgba(0, 0, 0, 0.3);
+      transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+      box-shadow: 0 2px 12px rgba(0, 0, 0, 0.5);
+      max-width: 48px; /* 默认收起宽度 */
+      overflow: hidden;
+      white-space: nowrap;
     }
 
-    #bgmControl:hover {
-      border-color: rgba(0, 255, 255, 0.3);
-      box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
-      background: rgba(20, 24, 32, 0.85);
+    #bgmControl.expanded {
+      max-width: 500px; /* 展开宽度 */
+      padding: 5px 15px 5px 5px;
+      background: rgba(20, 24, 32, 0.95);
+      border-color: rgba(0, 255, 255, 0.5);
+      box-shadow: 0 4px 20px rgba(0, 255, 255, 0.2);
+    }
+
+    #bgmPanelToggle {
+      background: none;
+      border: none;
+      color: #0ff;
+      font-size: 20px;
+      cursor: pointer;
+      width: 30px;
+      height: 30px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 50%;
+      flex-shrink: 0;
+      transition: all 0.2s;
+    }
+
+    #bgmPanelToggle:hover {
+      background: rgba(0, 255, 255, 0.1);
+      text-shadow: 0 0 10px #0ff;
+    }
+
+    #bgmPanelContent {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      opacity: 0;
+      transition: opacity 0.2s;
+      pointer-events: none; /* 收起时禁止点击 */
+    }
+
+    #bgmControl.expanded #bgmPanelContent {
+      opacity: 1;
+      pointer-events: auto;
     }
 
     #bgmToggleBtn {
+      background: none;
+      border: none;
+      color: #eee;
+      font-size: 16px;
+      cursor: pointer;
+      padding: 0;
+      width: 24px;
+      height: 24px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    #bgmToggleBtn:hover {
+      color: #fff;
+      transform: scale(1.1);
+    }
+
+    #bgmToggleBtn.muted {
+      color: #666;
+    }
+
+    #bgmVolumeSlider {
+      width: 80px;
+      height: 4px;
+      appearance: none;
+      -webkit-appearance: none;
+      background: #444;
+      border-radius: 2px;
+      outline: none;
+      cursor: pointer;
+    }
+
+    #bgmVolumeSlider::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      width: 12px;
+      height: 12px;
+      background: #0ff;
+      border-radius: 50%;
+      cursor: pointer;
+      border: 2px solid #222;
+      box-shadow: 0 0 5px rgba(0, 255, 255, 0.5);
+    }
+
+    #hudContainer.collapsed ~ #bgmControl {
+      right: 40px;
+    }
+
+    #bgmNextBtn {
       background: none;
       border: none;
       color: #0ff;
@@ -2545,40 +3167,12 @@
       transition: transform 0.2s ease;
     }
 
-    #bgmToggleBtn:hover {
+    #bgmNextBtn:hover {
       transform: scale(1.1);
+      text-shadow: 0 0 8px rgba(0, 255, 255, 0.6);
     }
 
-    #bgmToggleBtn.muted {
-      color: #666;
-    }
-
-    #bgmVolumeSlider {
-      width: 80px;
-      height: 4px;
-      -webkit-appearance: none;
-      appearance: none;
-      background: #333;
-      border-radius: 2px;
-      outline: none;
-      cursor: pointer;
-    }
-
-    #bgmVolumeSlider::-webkit-slider-thumb {
-      -webkit-appearance: none;
-      appearance: none;
-      width: 12px;
-      height: 12px;
-      background: #0ff;
-      border-radius: 50%;
-      cursor: pointer;
-      box-shadow: 0 0 5px rgba(0, 255, 255, 0.5);
-    }
-
-    #hudContainer.collapsed ~ #bgmControl {
-      right: 40px;
-    }
-
+    /* 恢复下拉选择框样式，但更紧凑 */
     #bgmTrackSelect {
       background: rgba(15, 18, 25, 0.8);
       border: 1px solid rgba(120, 180, 200, 0.2);
@@ -2589,6 +3183,7 @@
       cursor: pointer;
       outline: none;
       font-family: 'Courier New', monospace;
+      width: 80px; /* 限制宽度 */
     }
 
     #bgmTrackSelect:hover {
@@ -2611,26 +3206,96 @@
         grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
       }
     }
+
+    /* 击杀播报容器 */
+    #killFeedContainer {
+      position: absolute;
+      top: 10px;
+      right: 14px;
+      width: 300px;
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+      pointer-events: none;
+      align-items: flex-end; /* 右对齐 */
+      z-index: 10; 
+    }
+
+    .kill-feed-item {
+      background: linear-gradient(90deg, transparent, rgba(20, 24, 32, 0.8));
+      border-right: 2px solid rgba(255, 68, 68, 0.6); /* 红色点缀及边框 */
+      padding: 5px 10px;
+      color: #fff;
+      font-size: 13px;
+      font-family: 'Courier New', monospace;
+      text-transform: uppercase;
+      opacity: 0;
+      transform: translateX(20px);
+      transition: opacity 0.3s ease, transform 0.3s ease;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.3);
+    }
+
+    .kill-feed-item.show {
+      opacity: 1;
+      transform: translateX(0);
+    }
+    
+    .kill-feed-item.hide {
+      opacity: 0;
+      transform: translateY(-10px); /* 向上淡出 */
+    }
+
+    .kill-killer {
+      color: #0ff; /* 击杀者青色 */
+      font-weight: bold;
+    }
+
+    .kill-victim {
+      color: #f44; /* 被杀者红色 */
+      font-weight: bold;
+    }
+
+    .kill-weapon {
+      color: #aaa;
+      font-size: 11px;
+      font-style: italic;
+    }
+    
+    .kill-icon {
+        color: #fff;
+        font-size: 10px;
+        opacity: 0.7;
+    }
   </style>
 </head>
 <body>
   <div id="app">
     <!-- BGM 控制器 -->
     <div id="bgmControl">
-      <button id="bgmToggleBtn" title="切换音乐 (M)">🎵</button>
-      <select id="bgmTrackSelect" title="手动挑选 BGM">
-        <option value="1">BGM 1</option>
-        <option value="2">BGM 2</option>
-        <option value="3">BGM 3</option>
-        <option value="4">BGM 4</option>
-        <option value="5">BGM 5</option>
-        <option value="6">BGM 6</option>
-        <option value="7">BGM 7</option>
-        <option value="8">BGM 8</option>
-        <option value="9">BGM 9</option>
-        <option value="10">BGM 10</option>
-      </select>
-      <input type="range" id="bgmVolumeSlider" min="0" max="1" step="0.01" value="0.05" title="调整音量">
+      <!-- 收起时可见的 Toggle 按钮 -->
+      <button id="bgmPanelToggle" title="音乐控制">🎵</button>
+      
+      <!-- 展开时可见的内容 -->
+      <div id="bgmPanelContent">
+        <button id="bgmToggleBtn" title="切换音乐 (M)">🔊</button>
+        <button id="bgmNextBtn" title="下一首 (N)">⏭</button>
+        <select id="bgmTrackSelect" title="选择曲目">
+          <option value="1">BGM 1</option>
+          <option value="2">BGM 2</option>
+          <option value="3">BGM 3</option>
+          <option value="4">BGM 4</option>
+          <option value="5">BGM 5</option>
+          <option value="6">BGM 6</option>
+          <option value="7">BGM 7</option>
+          <option value="8">BGM 8</option>
+          <option value="9">BGM 9</option>
+          <option value="10">BGM 10</option>
+        </select>
+        <input type="range" id="bgmVolumeSlider" min="0" max="1" step="0.01" value="0.05" title="调整音量">
+      </div>
     </div>
     <!-- Canvas 容器（左侧） -->
     <div id="canvasContainer">
@@ -2647,6 +3312,9 @@
       
       <!-- 屏幕中心提示 -->
       <div id="hudCenter"></div>
+
+      <!-- 右上角击杀播报 -->
+      <div id="killFeedContainer"></div>
 
       <!-- RAID Phase: 局内装备 HUD -->
       <div id="raidEquipment">
@@ -2765,14 +3433,77 @@
       </div>
 
       <!-- RESULT Phase: 战局结果页面 -->
+      <!-- RESULT Phase: 战局结果页面 -->
       <div id="resultUI" style="display: none;">
-        <div class="modal-content" style="min-width: 400px;">
-          <h2 id="resultTitle">战局结果</h2>
-          <div id="resultContent" style="text-align: left; margin-top: 20px;">
-            <div id="resultStatus" style="font-size: 18px; margin-bottom: 20px;"></div>
-            <div id="resultDetails" style="color: #aaa; font-size: 14px;"></div>
+        <div class="result-container">
+          <!-- 动态背景光效 -->
+          <div class="result-bg-glow"></div>
+          
+          <div class="result-header">
+            <div class="result-title-wrapper">
+              <h1 id="resultTitle">OPERATION COMPLETE</h1>
+              <div class="result-decoration-line"></div>
+            </div>
+            <div id="resultStatusBadge" class="status-badge">EXTRACTED</div>
           </div>
-          <button id="resultContinueBtn" class="primary-btn" style="margin-top: 20px; width: 100%;">返回整备</button>
+          
+          <div class="result-body">
+            <!-- 左侧：战绩与收益 -->
+            <div class="result-column info-col">
+              <!-- 收益卡片 -->
+              <div class="result-card money-card">
+                <div class="card-label">TOTAL VALUE</div>
+                <div class="money-value-group">
+                  <div class="currency-symbol">$</div>
+                  <div id="resultMoney" class="metric-value">0</div>
+                </div>
+                <div id="resultMoneyDetail" class="money-detail">Loot: 0 | Cash: 0</div>
+              </div>
+
+              <!-- 死亡信息 (仅失败时显示) -->
+              <div id="resultDeathInfo" class="result-card death-card" style="display:none;">
+                <div class="card-label warning">KILLED IN ACTION</div>
+                <div class="killer-info">
+                  <span class="label">Killer:</span>
+                  <span id="resultKiller" class="value">Unknown</span>
+                </div>
+                <div class="killer-info">
+                  <span class="label">Weapon:</span>
+                  <span id="resultKillerWeapon" class="value">-</span>
+                </div>
+              </div>
+
+              <!-- 统计信息 (预留) -->
+              <div class="result-card stats-card">
+                <div class="stat-row">
+                  <span class="stat-label">Status</span>
+                  <span id="resultStatusText" class="stat-value">Survived</span>
+                </div>
+                <!-- 可以在这里添加更多统计，如击杀数、时间等 -->
+              </div>
+            </div>
+
+            <!-- 右侧：战利品展示 -->
+            <div class="result-column loot-col">
+              <div class="section-header">
+                <h3>ACQUIRED LOOT</h3>
+                <span class="deco-dots">:::</span>
+              </div>
+              <div id="resultLootScroll" class="loot-scroll-area">
+                <div id="resultLootGrid" class="loot-grid">
+                  <!-- Loot Items Injected Here -->
+                </div>
+                <div id="resultNoLoot" class="no-loot-hint" style="display:none;">NO ITEMS RECOVERED</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="result-footer">
+            <button id="resultContinueBtn" class="cyber-btn-lg">
+              <span class="btn-text">RETURN TO BASE</span>
+              <span class="btn-glitch"></span>
+            </button>
+          </div>
         </div>
       </div>
 
@@ -2802,14 +3533,187 @@
 
       <!-- HIDEOUT Phase: 整备/仓库/商店 UI -->
       <div id="hideoutUI" style="display: none;">
+        <!-- 背景装饰层 -->
+        <div class="hideout-bg-decor">
+          <div class="hideout-mouse-glow"></div>
+          <div class="hideout-lines"></div>
+          <div class="hideout-scan-line"></div>
+        </div>
+        
+        <style>
+          /* HIDEOUT 专属高级样式 */
+          #hideoutUI {
+            position: absolute;
+            inset: 0;
+            z-index: 1000;
+            background: #08090b;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            --mouse-offset-x: 0px;
+            --mouse-offset-y: 0px;
+          }
+
+          .hideout-bg-decor {
+            position: absolute;
+            inset: -50px; /* Oversize for parallax */
+            z-index: -1;
+            pointer-events: none;
+            transform: translate(var(--mouse-offset-x), var(--mouse-offset-y));
+            transition: transform 0.1s ease-out;
+          }
+
+          .hideout-mouse-glow {
+            position: absolute;
+            width: 800px;
+            height: 800px;
+            background: radial-gradient(circle at center, rgba(0, 255, 255, 0.15) 0%, rgba(0, 255, 255, 0.05) 30%, transparent 70%);
+            left: var(--ui-mouse-x);
+            top: var(--ui-mouse-y);
+            transform: translate(-50%, -50%);
+            pointer-events: none;
+            z-index: -1;
+            mix-blend-mode: screen;
+            transition: left 0.1s ease-out, top 0.1s ease-out;
+          }
+
+          /* 更明显的中心光斑 */
+
+
+          .hideout-scan-line {
+            position: absolute;
+            left: 0;
+            width: 100%;
+            height: 2px;
+            background: linear-gradient(90deg, transparent, rgba(0, 255, 255, 0.2), transparent);
+            top: -10px;
+            animation: scanning 8s linear infinite;
+            box-shadow: 0 0 15px rgba(0, 255, 255, 0.1);
+          }
+
+          @keyframes scanning {
+            from { top: -10px; }
+            to { top: 100%; }
+          }
+
+          .hideout-lines {
+            position: absolute;
+            inset: 0;
+            background-image: 
+              linear-gradient(rgba(120, 180, 200, 0.05) 1px, transparent 1px),
+              linear-gradient(90deg, rgba(120, 180, 200, 0.05) 1px, transparent 1px);
+            background-size: 100px 100px;
+            pointer-events: none;
+          }
+
+          .hideout-lines::after {
+            content: '';
+            position: absolute;
+            inset: 0;
+            background: 
+              radial-gradient(circle 400px at var(--ui-mouse-x) var(--ui-mouse-y), rgba(0, 255, 255, 0.08), transparent 100%);
+            pointer-events: none;
+          }
+
+          #hideoutContent {
+            background: transparent !important;
+            padding: 0;
+            gap: 0;
+          }
+
+          #hideoutMain {
+            flex: 1;
+            padding: 20px !important;
+            overflow-y: auto;
+            position: relative;
+          }
+
+          .hideout-panel {
+            background: rgba(10, 12, 16, 0.5) !important;
+            -webkit-backdrop-filter: blur(20px) saturate(180%);
+            backdrop-filter: blur(20px) saturate(180%);
+            border: 1px solid rgba(0, 255, 255, 0.1) !important;
+            box-shadow: 
+              0 20px 50px rgba(0, 0, 0, 0.4),
+              inset 0 0 20px rgba(0, 255, 255, 0.02);
+            border-radius: 4px;
+            padding: 25px !important;
+            position: relative;
+            width: 100%;
+            max-width: none;
+            margin: 0;
+          }
+          
+          /* Panel Accents */
+          .hideout-panel::before {
+            content: '';
+            position: absolute;
+            top: -1px;
+            left: 20px;
+            width: 40px;
+            height: 2px;
+            background: #0ff;
+            box-shadow: 0 0 10px #0ff;
+          }
+
+          .hideout-panel::after {
+            content: 'DATA_STREAM_v2.0';
+            position: absolute;
+            bottom: 10px;
+            right: 20px;
+            font-size: 8px;
+            color: rgba(0, 255, 255, 0.2);
+            font-family: monospace;
+          }
+
+          /* Improved Tab Animations */
+          #hideoutTabs .tab-btn {
+            border: none;
+            transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+          }
+        </style>
+
+        <script>
+          // 监听鼠标移动更新 CSS 变量
+          document.addEventListener('mousemove', (e) => {
+            const ui = document.getElementById('hideoutUI');
+            if (ui && ui.style.display !== 'none') {
+              // 更新准星坐标
+              ui.style.setProperty('--ui-mouse-x', e.clientX + 'px');
+              ui.style.setProperty('--ui-mouse-y', e.clientY + 'px');
+              
+              // 计算视差偏移 (更细腻的背景随动)
+              const offsetX = (e.clientX - window.innerWidth / 2) * 0.02;
+              const offsetY = (e.clientY - window.innerHeight / 2) * 0.02;
+              ui.style.setProperty('--mouse-offset-x', offsetX + 'px');
+              ui.style.setProperty('--mouse-offset-y', offsetY + 'px');
+            }
+          });
+        </script>
+
         <!-- 顶部固定栏 -->
         <div id="hideoutTopBar">
+          <!-- 装饰中心 -->
+          <div class="top-center-decor">
+            <div class="decor-scanner"></div>
+            <div class="decor-bits">STREAMING_DATA: OK // SYSTEM_CORE: ONLINE</div>
+          </div>
+
           <div class="topBar-left">
-            <span id="hideoutName">-</span>
-            <span class="separator">|</span>
-            <span>金钱: <span id="hideoutMoney">0</span></span>
-            <span class="separator">|</span>
-            <span id="hideoutStatus">连接中...</span>
+            <div class="top-stat-item">
+              <span class="top-stat-label">OPERATOR</span>
+              <span id="hideoutName">-</span>
+            </div>
+            <div class="separator"></div>
+            <div class="top-stat-item">
+              <span class="top-stat-label">CREDITS</span>
+              <span>$ <span id="hideoutMoney">0</span></span>
+            </div>
+            <div class="separator"></div>
+            <div class="top-stat-item">
+              <span class="top-stat-label">STATUS</span>
+              <span id="hideoutStatus">CONNECTING...</span>
+            </div>
           </div>
           <div class="topBar-right">
             <button id="enterRaidBtn" class="enter-raid-btn" disabled>进入战局</button>
@@ -2820,8 +3724,14 @@
         <div id="hideoutContent">
           <!-- 左侧 Tab -->
           <div id="hideoutTabs">
-            <button class="tab-btn active" data-tab="equipment">装备与仓库</button>
-            <button class="tab-btn" data-tab="shop">商店</button>
+            <button class="tab-btn active" data-tab="equipment">
+              <span class="tab-icon">📦</span>
+              <span>装备与仓库</span>
+            </button>
+            <button class="tab-btn" data-tab="shop">
+              <span class="tab-icon">💳</span>
+              <span>商店</span>
+            </button>
           </div>
 
           <!-- 右侧内容区 -->
@@ -2897,15 +3807,7 @@
           </div>
         </div>
 
-      <!-- RESULT Phase: 战局结果界面 -->
-      <div id="resultUI" style="display: none;">
-        <div class="result-modal">
-          <h1 id="resultTitle"></h1>
-          <div id="resultStatus"></div>
-          <div id="resultDetails"></div>
-          <button id="resultContinueBtn">继续</button>
-        </div>
-      </div>
+
 
       </div>
 

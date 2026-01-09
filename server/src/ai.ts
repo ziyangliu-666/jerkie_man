@@ -29,6 +29,8 @@ export class AI {
   public weaponRuntime: WeaponRuntime;
   public armorReduction: number = 0;
   public positionHistory: PositionHistory;
+  public killedBy?: string; // 新增: 击杀者
+  public killedByWeaponName?: string; // 新增: 击杀武器
 
   public behaviorType: AIBehaviorType;
   public behaviorState: AIBehaviorState;

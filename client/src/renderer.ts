@@ -1881,28 +1881,67 @@ export class Renderer {
   }
 
 
-  // 近战挥击特效（扇形弧线）
-  drawMeleeSwing(effect: { x: number; y: number; aimRad: number; range: number; arcRad: number; age: number }): void {
-    const screenX = effect.x - this.camX;
-    const screenY = effect.y - this.camY;
-    const alpha = Math.max(0, 1 - effect.age);
-    const start = effect.aimRad - effect.arcRad / 2;
-    const end = effect.aimRad + effect.arcRad / 2;
+  // 近战挥击特效（更加自然且高性能的扇形弧线）
+  drawMeleeSwing(effect: { x: number; y: number; aimRad: number; range: number; arcRad: number; age: number; side?: number }): void {
+    const screenX = Math.round(effect.x - this.camX);
+    const screenY = Math.round(effect.y - this.camY);
+    
+    // 使用 age (0-1) 来控制动画阶段
+    const age = effect.age;
+    if (age < 0 || age > 1) return;
 
     this.ctx.save();
-    this.ctx.fillStyle = `rgba(255, 255, 255, ${alpha * 0.15})`;
-    this.ctx.beginPath();
-    this.ctx.moveTo(screenX, screenY);
-    this.ctx.arc(screenX, screenY, effect.range, start, end);
-    this.ctx.closePath();
-    this.ctx.fill();
+    
+    // 全局透明度控制
+    const alpha = Math.max(0, 1 - age);
+    
+    // 计算挥砍的角度范围
+    const halfArc = effect.arcRad / 2;
+    const totalArc = effect.arcRad;
+    const side = effect.side || 1; // 1 或 -1
+    
+    // 动态扫过逻辑
+    const t_forward = Math.min(1, age * 2.0); 
+    const t_backward = Math.max(0, (age - 0.2) * 1.25);
+    
+    let drawStart, drawEnd;
+    if (side > 0) {
+      // 顺时针（从左向右）
+      drawStart = effect.aimRad - halfArc + totalArc * t_backward;
+      drawEnd = effect.aimRad - halfArc + totalArc * t_forward;
+    } else {
+      // 逆时针（从右向左）
+      drawStart = effect.aimRad + halfArc - totalArc * t_forward;
+      drawEnd = effect.aimRad + halfArc - totalArc * t_backward;
+    }
 
-    this.ctx.strokeStyle = `rgba(255, 255, 255, ${alpha * 0.6})`;
-    this.ctx.lineWidth = 3;
-    this.ctx.lineCap = 'round';
-    this.ctx.beginPath();
-    this.ctx.arc(screenX, screenY, effect.range, start, end);
-    this.ctx.stroke();
+    if (drawEnd > drawStart) {
+      // 1. 绘制底层辉光 (Glow)
+      this.ctx.globalAlpha = alpha * 0.2;
+      this.ctx.strokeStyle = '#fff';
+      this.ctx.lineWidth = 12;
+      this.ctx.lineCap = 'round';
+      this.ctx.beginPath();
+      this.ctx.arc(screenX, screenY, effect.range, drawStart, drawEnd);
+      this.ctx.stroke();
+
+      // 2. 绘制运动轨迹填充 (Blade Trail)
+      this.ctx.globalAlpha = alpha * 0.1;
+      this.ctx.fillStyle = '#fff';
+      this.ctx.beginPath();
+      this.ctx.moveTo(screenX, screenY);
+      this.ctx.arc(screenX, screenY, effect.range, drawStart, drawEnd);
+      this.ctx.closePath();
+      this.ctx.fill();
+
+      // 3. 绘制核心锋刃 (Hard Blade)
+      this.ctx.globalAlpha = alpha * 0.7;
+      this.ctx.lineWidth = 2.5;
+      this.ctx.beginPath();
+      this.ctx.arc(screenX, screenY, effect.range, drawStart, drawEnd);
+      this.ctx.stroke();
+    }
+
     this.ctx.restore();
   }
 
@@ -1935,6 +1974,7 @@ export class Renderer {
       const itemType = getItemType(worldItem.typeId);
       if (itemType.rarity === 'RARE') color = '#0088ff';
       else if (itemType.rarity === 'EPIC') color = '#9d4edd';
+      else if (itemType.rarity === 'LEGENDARY') color = '#ffaa00';
     } catch {}
 
     this.ctx.save();
@@ -2053,7 +2093,11 @@ export class Renderer {
       try {
         const itemType = getItemType(itemInfo.worldItem.typeId);
         const itemValue = itemType.value * itemInfo.worldItem.qty;
-        lines.push({ text: `${itemType.name} x${itemInfo.worldItem.qty} ($${itemValue})`, color: '#ffffff' });
+        let color = '#ffffff';
+        if (itemType.rarity === 'RARE') color = '#0088ff';
+        else if (itemType.rarity === 'EPIC') color = '#9d4edd';
+        else if (itemType.rarity === 'LEGENDARY') color = '#ffaa00';
+        lines.push({ text: `${itemType.name} x${itemInfo.worldItem.qty} ($${itemValue})`, color });
       } catch {
         lines.push({ text: `${itemInfo.worldItem.typeId} x${itemInfo.worldItem.qty}`, color: '#ffffff' });
       }
@@ -2068,7 +2112,11 @@ export class Renderer {
         for (const item of itemsToShow) {
           try {
             const itemType = getItemType(item.typeId);
-            lines.push({ text: `${itemType.name} x${item.qty}`, color: '#ffffff' });
+            let color = '#ffffff';
+            if (itemType.rarity === 'RARE') color = '#0088ff';
+            else if (itemType.rarity === 'EPIC') color = '#9d4edd';
+            else if (itemType.rarity === 'LEGENDARY') color = '#ffaa00';
+            lines.push({ text: `${itemType.name} x${item.qty}`, color });
           } catch {
             lines.push({ text: `${item.typeId} x${item.qty}`, color: '#ffffff' });
           }

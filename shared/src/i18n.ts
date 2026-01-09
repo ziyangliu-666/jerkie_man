@@ -8,6 +8,7 @@ export const RARITY_ZH: Record<Rarity, string> = {
   COMMON: '普通',
   RARE: '稀有',
   EPIC: '史诗',
+  LEGENDARY: '传说',
 };
 
 /**
