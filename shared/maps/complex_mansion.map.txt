@@ -1,0 +1,77 @@
+# 复杂豪宅 - 展示不规则房间布局
+# 大房子里有很多大小不同的小房间，共享墙壁
+
+@meta id=complex_mansion name="复杂豪宅" desc="多层次不规则房间布局的大型建筑"
+@map width=2800 height=2800 seed=2025
+@extract x=2550 y=2550 w=200 h=200
+
+# ============================================================
+# 主建筑 - 中央大厅 + 不规则房间
+# ============================================================
+
+# 中央核心区域 - 大厅 + 侧翼
+@roomgroup layout=horizontal anchor=center margin=100 id=main_hall
+  west_wing:  w=400 h=600 doors=esw  floor=wood
+  grand_hall: w=600 h=600 doors=nsew floor=tile
+  east_wing:  w=400 h=600 doors=esw  floor=wood
+
+# 北翼 - 卧室区（不规则网格）
+@roomgroup layout=grid anchor=n margin=80 cols=3 id=bedroom_wing
+  master:    w=400 h=350 doors=sew floor=wood
+  bedroom2:  w=300 h=350 doors=sw  floor=wood
+  bedroom3:  w=300 h=350 doors=sw  floor=wood
+  bathroom1: w=200 h=250 doors=ne  floor=tile
+  closet:    w=200 h=250 doors=n   floor=pave
+  bathroom2: w=200 h=250 doors=nw  floor=tile
+  study:     w=300 h=250 doors=ne  floor=wood
+  library:   w=400 h=250 doors=nw  floor=wood
+
+# 南翼 - 服务区（走廊布局）
+@roomgroup layout=corridor anchor=s margin=80 cellW=250 cellH=280 corridorWidth=150 corridorSide=north id=service_wing
+  kitchen:  w=350 doors=ns floor=tile
+  pantry:   w=200 doors=s  floor=concrete
+  dining:   w=400 doors=ns floor=wood
+  storage:  w=250 doors=s  floor=concrete
+  laundry:  w=200 doors=s  floor=tile
+
+# 西北角 - 车库 + 工具房
+@roomgroup layout=vertical anchor=nw margin=60 cellW=350 cellH=250 id=garage_area
+  garage:    h=400 doors=se floor=concrete
+  workshop:  h=250 doors=ne floor=concrete
+  toolroom:  h=200 doors=e  floor=pave
+
+# 东南角 - 娱乐区
+@roomgroup layout=grid anchor=se margin=100 cols=2 cellW=300 cellH=300 id=entertainment
+  gameroom:  w=400 h=400 doors=nw  floor=wood
+  bar:       w=300 h=400 doors=nw  floor=tile
+  theater:   w=400 h=300 doors=ne  floor=pave
+  gym:       w=300 h=300 doors=nw  floor=concrete
+
+# ============================================================
+# 独立小建筑 - 客房（添加外部门）
+# ============================================================
+@roomgroup layout=horizontal anchor=w margin=50 cellW=250 cellH=250 id=guest_house
+  guest1: doors=es floor=wood
+  guest2: doors=we floor=wood
+  guest3: doors=w  floor=wood
+
+# ============================================================
+# 出生点 - 分散在地图四周（远离建筑）
+# ============================================================
+@spawn x=200 y=200
+@spawn x=2600 y=200
+@spawn x=200 y=2600
+@spawn x=2600 y=2600
+
+# ============================================================
+# 室外景观 - 简化，只放远离建筑的掩体
+# ============================================================
+@obstacle x=200 y=1400 w=80 h=80 type=bush
+@obstacle x=2600 y=1400 w=80 h=80 type=bush
+
+# ============================================================
+# AI 守卫 - 分布在建筑周围（远离建筑）
+# ============================================================
+@ai x=1400 y=500 type=guard role=heavy_gunner radius=400
+@ai x=500 y=1400 type=patrol role=scout
+@ai x=2300 y=1400 type=patrol role=scout

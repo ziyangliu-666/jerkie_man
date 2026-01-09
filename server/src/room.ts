@@ -127,7 +127,7 @@ export class Room {
       this.generateObstacles();
     }
 
-    this.generateWorldItems(30);
+    this.generateWorldItems();
 
     // 初始化AI系统
     this.navGrid = new NavigationGrid(
@@ -362,7 +362,7 @@ export class Room {
     config: {
       zoneId?: string;
       itemIds?: string[];
-      rarityWeights?: { COMMON?: number; RARE?: number; EPIC?: number };
+      rarityWeights?: { COMMON?: number; RARE?: number; EPIC?: number; LEGENDARY?: number };
       maxItems?: number;
       ruleId?: string;
     }
@@ -479,7 +479,8 @@ export class Room {
   }
 
   // 新增: 生成世界物品（使用新的物品系统，支持多条地图配置）
-  private generateWorldItems(count: number): void {
+  // 根据每个规则的 maxItems 来生成初始物品
+  private generateWorldItems(): void {
     const itemsRng = createRng(this.seed + 2000000);
 
     const configs = this.mapTemplate?.itemRespawns ?? [];
@@ -487,28 +488,92 @@ export class Room {
     const initialConfigs = configs.filter((c) => c.mode === 'initial' || c.mode === 'both');
 
     // 如果地图没写规则，回退到一个默认规则，等价于旧行为
-    const effectiveConfigs =
-      initialConfigs.length > 0
-        ? initialConfigs
-        : [
-            {
-              ruleId: 'default_initial',
-              zoneId: undefined,
-              itemIds: undefined,
-              rarityWeights: undefined,
-              maxItems: undefined,
-            },
-          ];
+    if (initialConfigs.length === 0) {
+      // 使用默认规则生成30个物品
+      const defaultConfig = {
+        ruleId: 'default_initial',
+        zoneId: undefined,
+        itemIds: undefined,
+        rarityWeights: undefined,
+        maxItems: undefined,
+      };
+      for (let i = 0; i < 30; i++) {
+        this.spawnOneWorldItemWithConfig(itemsRng, defaultConfig);
+      }
+      log('WORLD_ITEMS_GENERATED', {
+        count: this.worldItems.size,
+        tick: this.tick,
+        method: 'default',
+      });
+      return;
+    }
 
-    for (let i = 0; i < count; i++) {
-      const cfg =
-        effectiveConfigs[Math.floor(itemsRng() * effectiveConfigs.length)];
-      this.spawnOneWorldItemWithConfig(itemsRng, cfg);
+    // 重要：先处理有 zoneId 的规则，再处理全局规则
+    // 这样 zone 内的特殊物品不会被全局规则的 maxItems 计数影响
+    const zoneConfigs = initialConfigs.filter((c) => c.zoneId);
+    const globalConfigs = initialConfigs.filter((c) => !c.zoneId);
+    const sortedConfigs = [...zoneConfigs, ...globalConfigs];
+
+    // 对每个配置，尝试生成到其 maxItems 的数量
+    // 每个规则独立计数，不受其他规则影响
+    let totalGenerated = 0;
+    
+    // 用于跟踪每个规则自己生成的物品数量
+    const ruleGeneratedCounts = new Map<string, number>();
+    
+    for (const cfg of sortedConfigs) {
+      const ruleId = cfg.id ?? `rule_${sortedConfigs.indexOf(cfg)}`;
+      const targetCount = cfg.maxItems ?? 0;
+      if (targetCount <= 0) {
+        // 如果没有 maxItems，跳过或使用默认值
+        continue;
+      }
+
+      // 每个规则独立计数：只统计该规则自己生成的物品
+      const currentGenerated = ruleGeneratedCounts.get(ruleId) ?? 0;
+
+      // 计算需要生成的数量
+      const toGenerate = Math.max(0, targetCount - currentGenerated);
+      
+      // 生成物品，但限制每次尝试次数，避免无限循环
+      let generated = 0;
+      const maxAttempts = toGenerate * 10; // 每个物品最多尝试10次
+      let attempts = 0;
+      
+      while (generated < toGenerate && attempts < maxAttempts) {
+        attempts++;
+        const beforeCount = this.worldItems.size;
+        this.spawnOneWorldItemWithConfig(itemsRng, {
+          zoneId: cfg.zoneId,
+          itemIds: cfg.itemIds,
+          rarityWeights: cfg.rarityWeights,
+          maxItems: undefined, // 不在这里检查 maxItems，让循环控制数量
+          ruleId,
+        });
+        // 如果成功生成，worldItems.size 会增加
+        if (this.worldItems.size > beforeCount) {
+          generated++;
+          totalGenerated++;
+        }
+      }
+      
+      ruleGeneratedCounts.set(ruleId, currentGenerated + generated);
+
+      if (generated < toGenerate) {
+        log('WORLD_ITEMS_PARTIAL', {
+          ruleId,
+          target: toGenerate,
+          generated: generated,
+          tick: this.tick,
+        });
+      }
     }
 
     log('WORLD_ITEMS_GENERATED', {
       count: this.worldItems.size,
+      totalGenerated: totalGenerated,
       tick: this.tick,
+      method: 'by_maxItems',
     });
   }
   
@@ -4168,6 +4233,11 @@ export class Room {
     return [...this.obstacles];
   }
   
+  // 新增: 获取房间列表（用于地板渲染）
+  getRooms() {
+    return this.mapTemplate?.rooms ?? [];
+  }
+  
   // P2-1: 旧 items 系统已停用，返回空数组（保持协议兼容）
   getItems(): ITEM_STATE[] {
     return []; // 返回空数组，不再使用旧 items
@@ -4239,14 +4309,21 @@ export class Room {
         lootItems = this.generateEquipmentLoot();
         break;
       case 'vehicle':
-        lootItems = this.generateVehicleLoot(); // 车辆：随机
+        lootItems = this.generateVehicleLoot();
         break;
       case 'supply_stack':
-        lootItems = this.generateSupplyStackLoot(); // 物资堆：混合
+        lootItems = this.generateSupplyStackLoot();
+        break;
+      case 'chest_closed':
+        // 宝箱：使用宝箱自带的稀有度权重，或默认高品质
+        lootItems = this.generateChestLoot(chest);
+        break;
+      case 'crate':
+        // 普通木箱：30% 概率掉落，品质偏低
+        lootItems = this.generateCrateLoot();
         break;
       default:
-        // 普通箱子和宝箱：掉落传奇物品
-        lootItems = this.generateRandomLegendaryLoot();
+        // 其他未知类型：不掉落
         break;
     }
     
@@ -4266,9 +4343,98 @@ export class Room {
     }
   }
 
+  // 普通木箱掉落：30% 概率掉落 1 个物品，品质 COMMON:60 RARE:30 EPIC:10
+  private generateCrateLoot(): Array<{ typeId: string; qty: number }> {
+    // 30% 概率掉落
+    if (Math.random() > 0.3) {
+      return [];
+    }
+    
+    // 稀有度权重
+    const roll = Math.random() * 100;
+    let rarity: 'COMMON' | 'RARE' | 'EPIC';
+    if (roll < 60) {
+      rarity = 'COMMON';
+    } else if (roll < 90) {
+      rarity = 'RARE';
+    } else {
+      rarity = 'EPIC';
+    }
+    
+    // 从物品目录中按稀有度随机选一个
+    const allItems = getAllItemTypes();
+    const candidates = allItems.filter(item => item.rarity === rarity);
+    
+    if (candidates.length === 0) {
+      return [];
+    }
+    
+    const item = candidates[Math.floor(Math.random() * candidates.length)];
+    return [{ typeId: item.id, qty: 1 }];
+  }
+
+  // 宝箱掉落：使用宝箱自带的 chestRarityWeights，或默认 EPIC:80 LEGENDARY:20
+  private generateChestLoot(chest: any): Array<{ typeId: string; qty: number }> {
+    const capacity = chest.chestCapacity ?? 2;
+    const weights = chest.chestRarityWeights ?? { EPIC: 80, LEGENDARY: 20 };
+    
+    // 计算总权重
+    const totalWeight = (weights.COMMON ?? 0) + (weights.RARE ?? 0) + (weights.EPIC ?? 0) + (weights.LEGENDARY ?? 0);
+    if (totalWeight <= 0) {
+      return this.generateRandomLegendaryLoot();
+    }
+    
+    const result: Array<{ typeId: string; qty: number }> = [];
+    const allItems = getAllItemTypes();
+    
+    for (let i = 0; i < capacity; i++) {
+      // 按权重随机选稀有度
+      const roll = Math.random() * totalWeight;
+      let rarity: 'COMMON' | 'RARE' | 'EPIC' | 'LEGENDARY';
+      let cumulative = 0;
+      
+      cumulative += weights.COMMON ?? 0;
+      if (roll < cumulative) {
+        rarity = 'COMMON';
+      } else {
+        cumulative += weights.RARE ?? 0;
+        if (roll < cumulative) {
+          rarity = 'RARE';
+        } else {
+          cumulative += weights.EPIC ?? 0;
+          if (roll < cumulative) {
+            rarity = 'EPIC';
+          } else {
+            rarity = 'LEGENDARY';
+          }
+        }
+      }
+      
+      // 从该稀有度中随机选物品
+      const candidates = allItems.filter(item => item.rarity === rarity);
+      if (candidates.length > 0) {
+        const item = candidates[Math.floor(Math.random() * candidates.length)];
+        result.push({ typeId: item.id, qty: 1 });
+      }
+    }
+    
+    return result;
+  }
+
   // 生成武器箱掉落
   private generateWeaponLoot(): Array<{ typeId: string; qty: number }> {
-    const weapons = ['w_pistol', 'w_smg', 'w_ar', 'w_shotgun', 'w_sniper', 'w_dmr'];
+    // 从物品目录动态获取所有武器
+    const allItems = getAllItemTypes();
+    const weapons = allItems
+      .filter(item => item.category === 'weapon')
+      .map(item => item.id);
+    
+    if (weapons.length === 0) {
+      // 如果物品目录中没有武器，使用默认列表
+      const defaultWeapons = ['w_pistol', 'w_smg', 'w_burst', 'w_shotgun', 'w_sniper', 'w_dmr'];
+      return defaultWeapons.map(w => ({ typeId: w, qty: 1 })).slice(0, 1 + Math.floor(Math.random() * 2));
+    }
+    
     const count = 1 + Math.floor(Math.random() * 2); // 1-2把武器
     const result = [];
     for (let i = 0; i < count; i++) {
@@ -4280,7 +4446,22 @@ export class Room {
 
   // 生成投掷物箱掉落
   private generateThrowableLoot(): Array<{ typeId: string; qty: number }> {
-    const throwables = ['frag_grenade', 'smoke_grenade', 'molotov', 'flash_grenade'];
+    // 从物品目录动态获取所有投掷物（有爆炸/烟雾/闪光/火焰半径的消耗品）
+    const allItems = getAllItemTypes();
+    const throwables = allItems
+      .filter(item => {
+        if (item.category !== 'consumable') return false;
+        const props = item.consumableProps;
+        return !!(props?.explosionRadius || props?.smokeRadius || props?.flashRadius || props?.fireRadius);
+      })
+      .map(item => item.id);
+    
+    if (throwables.length === 0) {
+      // 如果物品目录中没有投掷物，使用默认列表
+      const defaultThrowables = ['frag_grenade', 'smoke_grenade', 'molotov', 'flash_grenade'];
+      return defaultThrowables.map(t => ({ typeId: t, qty: 1 })).slice(0, 2 + Math.floor(Math.random() * 3));
+    }
+    
     const count = 2 + Math.floor(Math.random() * 3); // 2-4个
     const result = [];
     for (let i = 0; i < count; i++) {
@@ -4292,7 +4473,22 @@ export class Room {
 
   // 生成医疗箱掉落
   private generateMedicalLoot(): Array<{ typeId: string; qty: number }> {
-    const medical = ['medkit', 'advanced_medkit', 'regeneration_serum', 'combat_stim'];
+    // 从物品目录动态获取所有医疗物品（有healAmount或hpPerSecond的消耗品）
+    const allItems = getAllItemTypes();
+    const medical = allItems
+      .filter(item => {
+        if (item.category !== 'consumable') return false;
+        const props = item.consumableProps;
+        return !!(props?.healAmount || props?.hpPerSecond);
+      })
+      .map(item => item.id);
+    
+    if (medical.length === 0) {
+      // 如果物品目录中没有医疗物品，使用默认列表
+      const defaultMedical = ['medkit', 'advanced_medkit', 'regeneration_serum', 'combat_stim'];
+      return defaultMedical.map(m => ({ typeId: m, qty: 1 })).slice(0, 2 + Math.floor(Math.random() * 2));
+    }
+    
     const count = 2 + Math.floor(Math.random() * 2); // 2-3个
     const result = [];
     for (let i = 0; i < count; i++) {
@@ -4304,7 +4500,18 @@ export class Room {
 
   // 生成装备箱掉落
   private generateEquipmentLoot(): Array<{ typeId: string; qty: number }> {
-    const equipment = ['armor_kevlar', 'armor_tactical', 'armor_heavy', 'bag_sling', 'bag_military'];
+    // 从物品目录动态获取所有装备（防具和背包）
+    const allItems = getAllItemTypes();
+    const equipment = allItems
+      .filter(item => item.category === 'armor' || item.category === 'bag')
+      .map(item => item.id);
+    
+    if (equipment.length === 0) {
+      // 如果物品目录中没有装备，使用默认列表
+      const defaultEquipment = ['armor_kevlar', 'armor_plate', 'armor_heavy', 'bag_sling', 'bag_military'];
+      return defaultEquipment.map(e => ({ typeId: e, qty: 1 })).slice(0, 1 + Math.floor(Math.random() * 2));
+    }
+    
     const count = 1 + Math.floor(Math.random() * 2); // 1-2件
     const result = [];
     for (let i = 0; i < count; i++) {

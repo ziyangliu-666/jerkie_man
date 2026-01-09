@@ -359,6 +359,7 @@ ws.on('message', (data: Buffer) => {
               obstacles: room.getObstacles(),
               items: room.getItems(), // 保留兼容
               worldItems: room.getWorldItems(), // 新增: 世界物品列表
+              rooms: room.getRooms(), // 新增: 房间列表（用于地板渲染）
             })
           )
         );

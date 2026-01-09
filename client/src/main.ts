@@ -534,6 +534,8 @@ let cachedObstacles: OBSTACLE_STATE[] = [];
 let cachedItems: ITEM_STATE[] = [];
 // 新增: 缓存世界物品（从 WORLD_INIT 接收）
 let cachedWorldItems: WorldItem[] = [];
+// 新增: 缓存房间列表（从 WORLD_INIT 接收，用于地板渲染）
+let cachedRooms: any[] = [];
 // P1-1 新增: 玩家 Profile（从 S2C_PROFILE 接收）
 let playerProfile: (PlayerProfile & { accountId: string }) | null = null;
 // 新增: 本地 accountId（从 WELCOME 消息确认）
@@ -3711,6 +3713,7 @@ const network = new Network(getWebSocketUrl(), 'local', {
     cachedObstacles = world.obstacles;
     cachedItems = world.items ?? []; // 修复: 处理可选字段
     cachedWorldItems = world.worldItems ?? []; // 新增: 缓存世界物品
+    cachedRooms = world.rooms ?? []; // 新增: 缓存房间列表
     serverMapConfig = world.mapConfig;
     serverSeed = world.seed;
     
@@ -3721,10 +3724,14 @@ const network = new Network(getWebSocketUrl(), 'local', {
     bulletTracks.setMapSize(world.mapConfig.width, world.mapConfig.height);
     bulletTracks.setObstacles(world.obstacles);
     
+    // 新增: 设置渲染器的房间列表（用于地板渲染）
+    renderer.setRooms(cachedRooms);
+    
     const itemsCount = world.items?.length ?? 0;
     const worldItemsCount = world.worldItems?.length ?? 0;
-    console.log(`Received world init: seed=${world.seed}, obstacles=${world.obstacles.length}, items=${itemsCount}, worldItems=${worldItemsCount}`);
-    hud.addEvent(`世界已初始化：${world.obstacles.length} 个障碍物，${itemsCount} 个物品，${worldItemsCount} 个世界物品`);
+    const roomsCount = world.rooms?.length ?? 0;
+    console.log(`Received world init: seed=${world.seed}, obstacles=${world.obstacles.length}, items=${itemsCount}, worldItems=${worldItemsCount}, rooms=${roomsCount}`);
+    hud.addEvent(`世界已初始化：${world.obstacles.length} 个障碍物，${itemsCount} 个物品，${worldItemsCount} 个世界物品，${roomsCount} 个房间`);
   },
   // P1-1 新增: 接收 Profile 消息并更新 HUD
   onProfile: (profile) => {

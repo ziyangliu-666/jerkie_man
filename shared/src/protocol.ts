@@ -2,6 +2,9 @@ import { z } from 'zod';
 import { MAP_CONFIG_SCHEMA } from './content.js';
 import type { PlayerBuff } from './types.js';
 
+// 导入 Room schema 和 OBSTACLE_STATE_SCHEMA
+import { ROOM_SCHEMA, OBSTACLE_STATE_SCHEMA, OBSTACLE_TYPE, type ObstacleType } from './mapTemplate.js';
+
 // C2S (Client to Server) 消息
 export const C2S_HELLO_SCHEMA = z.object({
   type: z.literal('C2S_HELLO'),
@@ -370,50 +373,6 @@ export const LOOT_BAG_SCHEMA = z.object({
   items: z.array(ITEM_INSTANCE_SCHEMA),
 });
 
-// Day4-2: 障碍物类型定义
-export const OBSTACLE_TYPE = {
-  WALL: 'wall',           // 石墙：不可穿过，子弹不可穿过，不可破坏
-  CRATE: 'crate',         // 木箱：不可穿过，子弹不可穿过，可破坏（掉落随机传奇物品）
-  WEAPON_CRATE: 'weapon_crate',       // 武器箱：掉落武器
-  THROWABLE_CRATE: 'throwable_crate', // 投掷物箱：掉落手雷/烟雾弹等
-  MEDICAL_CRATE: 'medical_crate',     // 医疗箱：掉落医疗用品
-  EQUIPMENT_CRATE: 'equipment_crate', // 装备箱：掉落护甲/背包
-  
-  // 户外资源点类（可破坏，掉落物品）
-  VEHICLE: 'vehicle',               // 废弃车辆：随机物品
-  SUPPLY_STACK: 'supply_stack',     // 物资堆：混合物资
-  
-  // 户外景观建筑类（掩体/装饰）
-  FENCE_WOOD: 'fence_wood',         // 木栅栏：低矮掩体
-  FENCE_METAL: 'fence_metal',       // 金属栅栏：中等掩体
-  SHRUB: 'shrub',                   // 灌木丛：低矮遮挡
-  ROCK_LARGE: 'rock_large',         // 大岩石：坚固掩体
-  
-  BUSH: 'bush',           // 草丛：可穿过，子弹可穿过，提供视野遮挡
-  WATER: 'water',         // 水域：不可穿过，子弹可穿过
-  DOOR_CLOSED: 'door_closed', // 门（关）：不可穿过，阻挡视野，可破坏
-  DOOR_OPEN: 'door_open',     // 门（开）：可穿过，不阻挡视野
-  GLASS: 'glass',             // 玻璃：不可穿过，子弹可穿过，不阻挡视野，可破坏
-  CHEST_CLOSED: 'chest_closed', // 宝箱（关）：不可穿过，可破坏（掉落），可交互（打开）
-  CHEST_OPEN: 'chest_open',     // 宝箱（开）：不可穿过（或可穿过？），已搜刮
-  BROKEN: 'broken',           // 损坏的残骸：可穿过，不阻挡视野
-} as const;
-
-export type ObstacleType = typeof OBSTACLE_TYPE[keyof typeof OBSTACLE_TYPE];
-
-// 障碍物状态（矩形 AABB + 类型 + 属性）
-export const OBSTACLE_STATE_SCHEMA = z.object({
-  id: z.string().optional(),   // 唯一标识（用于可破坏物体）
-  x: z.number().nonnegative(), // 矩形左上角 x
-  y: z.number().nonnegative(), // 矩形左上角 y
-  w: z.number().positive(),    // 宽度
-  h: z.number().positive(),    // 高度
-  type: z.string().default(OBSTACLE_TYPE.WALL), // 障碍物类型
-  hp: z.number().optional(),   // 生命值（可破坏物体）
-  maxHp: z.number().optional(), // 最大生命值
-  data: z.record(z.any()).optional(), // 额外数据（扩展用）
-});
-
 export const S2C_SNAPSHOT_SCHEMA = z.object({
   type: z.literal('S2C_SNAPSHOT'),
   tick: z.number().int().nonnegative(),
@@ -452,6 +411,7 @@ export const S2C_WORLD_INIT_SCHEMA = z.object({
   obstacles: z.array(OBSTACLE_STATE_SCHEMA),
   items: z.array(ITEM_STATE_SCHEMA).optional(), // 保留兼容
   worldItems: z.array(WORLD_ITEM_SCHEMA).optional(), // 新增: 世界物品列表
+  rooms: z.array(ROOM_SCHEMA).optional(), // 新增: 房间列表（用于地板渲染）
 });
 
 // 游戏化增强: 服务端事件流 -> HUD Event Log

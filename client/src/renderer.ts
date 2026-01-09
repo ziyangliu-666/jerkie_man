@@ -18,6 +18,9 @@ export class Renderer {
   private worldWidth: number = 0;
   private worldHeight: number = 0;
   
+  // 新增: 房间列表（用于地板渲染）
+  private rooms: any[] = [];
+  
   // 新增: 允许屏幕超出地图边界的像素值（用于避免 DOM UI 挡住操作）
   private cameraOverflowPixels: number = 300;
   
@@ -2368,6 +2371,104 @@ export class Renderer {
         this.ctx.restore();
     }
 
+    // 2b. 绘制房间地板 (Rooms)
+    for (const room of this.rooms) {
+        // 简单的视锥剔除
+        if (
+            room.x + room.w < this.camX ||
+            room.x > this.camX + this.cssWidth ||
+            room.y + room.h < this.camY ||
+            room.y > this.camY + this.cssHeight
+        ) {
+            continue;
+        }
+
+        const rx = Math.round(room.x - this.camX);
+        const ry = Math.round(room.y - this.camY);
+        const rw = room.w;
+        const rh = room.h;
+
+        // 生成种子
+        const seedStr = room.id || `${room.x}_${room.y}`;
+        const seed = seedStr.split('').reduce((acc: number, char: string) => acc + char.charCodeAt(0), 0);
+
+        this.ctx.save();
+        this.ctx.beginPath();
+        this.ctx.rect(rx, ry, rw, rh);
+        this.ctx.clip(); // 限制绘制区域
+
+        const floorType = room.floorType || 'tile';
+        
+        switch (floorType) {
+            case 'wood':
+                this.ctx.fillStyle = '#3e2723'; // 深棕
+                this.ctx.fillRect(rx, ry, rw, rh);
+                // 绘制木板条纹
+                this.ctx.strokeStyle = '#281a17';
+                this.ctx.lineWidth = 2;
+                const plankSize = 25;
+                for (let y = 0; y < rh; y += plankSize) {
+                    this.ctx.beginPath();
+                    this.ctx.moveTo(rx, ry + y);
+                    this.ctx.lineTo(rx + rw, ry + y);
+                    this.ctx.stroke();
+                }
+                break;
+            case 'tile':
+                this.ctx.fillStyle = '#37474f'; // 蓝灰地砖
+                this.ctx.fillRect(rx, ry, rw, rh);
+                // 绘制方砖网格
+                this.ctx.strokeStyle = '#263238';
+                this.ctx.lineWidth = 2;
+                const tileSize = 40;
+                this.ctx.beginPath();
+                // 偏移以对齐世界坐标
+                const startX = -(room.x % tileSize);
+                const startY = -(room.y % tileSize);
+                for (let x = startX; x < rw; x += tileSize) {
+                    this.ctx.moveTo(rx + x, ry);
+                    this.ctx.lineTo(rx + x, ry + rh);
+                }
+                for (let y = startY; y < rh; y += tileSize) {
+                    this.ctx.moveTo(rx, ry + y);
+                    this.ctx.lineTo(rx + rw, ry + y);
+                }
+                this.ctx.stroke();
+                break;
+            case 'pave':
+            case 'concrete':
+                this.ctx.fillStyle = '#424242'; // 混凝土灰
+                this.ctx.fillRect(rx, ry, rw, rh);
+                // 噪点
+                this.ctx.fillStyle = '#303030';
+                for (let i = 0; i < rw * rh / 800; i++) {
+                     const px = (seed * (i + 1) * 31) % rw;
+                     const py = (seed * (i + 1) * 37) % rh;
+                     const s = ((seed * i) % 3) + 2;
+                     this.ctx.fillRect(rx + px, ry + py, s, s);
+                }
+                break;
+            case 'grass':
+                this.ctx.fillStyle = '#2d3a2d'; // 深绿
+                this.ctx.fillRect(rx, ry, rw, rh);
+                // 绘制草丛纹理 (杂点)
+                this.ctx.fillStyle = '#3a4a3a';
+                for (let i = 0; i < rw * rh / 400; i++) {
+                     const px = (seed * (i + 1) * 17) % rw;
+                     const py = (seed * (i + 1) * 23) % rh;
+                     this.ctx.fillRect(rx + px, ry + py, 3, 3);
+                }
+                break;
+            default:
+                // 默认: 略微提亮
+                this.ctx.fillStyle = 'rgba(255, 255, 255, 0.05)';
+                this.ctx.fillRect(rx, ry, rw, rh);
+                break;
+        }
+
+        this.ctx.restore();
+    }
+
     // 3. 绘制全局网格 (暗色细线，统一视觉)
     this.ctx.strokeStyle = 'rgba(255, 255, 255, 0.03)';
     this.ctx.lineWidth = 1;
@@ -2548,15 +2649,15 @@ export class Renderer {
         ctx.fillRect(screenX + rx, screenY + ry, rw, rh);
     }
     
-    // 高光边缘 (增加体积感)
-    ctx.strokeStyle = 'rgba(255, 255, 255, 0.1)';
-    ctx.lineWidth = 2;
-    ctx.strokeRect(screenX + 1, screenY + 1, w - 2, h - 2);
+    // 高光边缘 (增加体积感) - 只在内部绘制，不影响外边缘
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.08)';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(screenX + 2, screenY + 2, w - 4, h - 4);
 
-    // 外部主边框
-    ctx.strokeStyle = '#111111';
-    ctx.lineWidth = 2;
-    ctx.strokeRect(screenX, screenY, w, h);
+    // 移除粗边框，使用细线让相邻墙壁无缝连接
+    ctx.strokeStyle = 'rgba(0, 0, 0, 0.3)';
+    ctx.lineWidth = 0.5;
+    ctx.strokeRect(screenX + 0.5, screenY + 0.5, w - 1, h - 1);
   }
 
   // 新增: 绘制木箱
@@ -3961,6 +4062,11 @@ export class Renderer {
   setWorldBounds(width: number, height: number): void {
     this.worldWidth = width;
     this.worldHeight = height;
+  }
+  
+  // 新增: 设置房间列表（用于地板渲染）
+  setRooms(rooms: any[]): void {
+    this.rooms = rooms;
   }
   
   // 新增: 设置相机超出地图边界的像素值（用于避免 DOM UI 挡住操作）

@@ -1,4 +1,4 @@
-import { OBSTACLE_TYPE, type ObstacleType } from './protocol.js';
+import { OBSTACLE_TYPE, type ObstacleType } from './mapTemplate.js';
 
 /**
  * 障碍物配置

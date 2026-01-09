@@ -37,6 +37,15 @@
 @zone x=0 y=1000 w=1000 h=1000 id=southwest_zone type=loot name="Southwest Zone" desc="西南资源区"
 @zone x=1000 y=1000 w=1000 h=1000 id=southeast_zone type=loot name="Southeast Zone" desc="东南资源区"
 
+# === 中间层小型建筑（2个，避开所有现有元素）===
+# 西侧中间 - 小型哨站（单房间，避开水域 y=860-1140）
+@roomgroup layout=horizontal x=100 y=1200 cellW=120 cellH=120 id=west_outpost
+  outpost: doors=e floor=pave
+
+# 东侧中间 - 小型哨站（单房间，避开水域 y=860-1140）
+@roomgroup layout=horizontal x=1780 y=1200 cellW=120 cellH=120 id=east_outpost
+  outpost: doors=w floor=pave
+
 # === 少量水域（四边中段小水池，不封路）===
 @obstacle x=120 y=860 w=120 h=280 type=water
 @obstacle x=1760 y=860 w=120 h=280 type=water
@@ -295,8 +304,8 @@
 # 位置已避开主路节点箱群
 @aispawn x=1000 y=580 type=patrol role=scout count=1 patrol=north_resource,center_extract
 @aispawn x=1000 y=1500 type=patrol role=scout count=1 patrol=south_resource,center_extract
-@aispawn x=750 y=1080 type=patrol role=basic count=1 patrol=west_resource,center_extract
-@aispawn x=1250 y=1080 type=patrol role=basic count=1 patrol=east_resource,center_extract
+@aispawn x=700 y=1100 type=patrol role=basic count=1 patrol=west_resource,center_extract
+@aispawn x=1300 y=1100 type=patrol role=basic count=1 patrol=east_resource,center_extract
 
 # 四角资源点：狙击手远程守卫（紫色，600px视野，500px射程，±1°精度）
 # 刷在箱群外侧，覆盖整个资源区
@@ -328,4 +337,7 @@
 @note "- 巡逻东西：2个基础AI(橙色20px,标准配置)"
 @note "- 四角：4个狙击手(紫色18px,600视野,500射程,±1°精度远程狙杀)"
 @note "- AI重刷保持角色类型，maxAIs=10，每1800 ticks(90秒)重刷1个"
-@comment "战术建议：接近中心前先清理外围狙击手，侦察兵移动快需快速击杀，重机枪手硬刚需掩体。"
+@note "v5 建筑增强："
+@note "- 新增2个小型哨站：西侧和东侧中间位置"
+@note "- 每个哨站1个房间，有地板和门，可作为掩体或战术点"
+@comment "战术建议：接近中心前先清理外围狙击手，侦察兵移动快需快速击杀，重机枪手硬刚需掩体。哨站可作为中转休整点。"

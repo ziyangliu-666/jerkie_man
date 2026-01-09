@@ -25,11 +25,14 @@
     "build": "npm run build --workspaces --if-present",
     "start:server": "node server/dist/main.js",
     "start:client": "npm run preview --workspace=client",
-    "start:all": "concurrently \"npm run start:server\" \"npm run start:client\"",
+    "start:all": "node tools/select_map.mjs start:all:raw",
+    "start:all:raw": "concurrently \"npm run start:server\" \"npm run start:client\"",
     "restart:server": "npm run build && npm run start:server",
     "clean": "rimraf node_modules shared/node_modules server/node_modules client/node_modules",
     "test:smoke": "npm run build --workspace=shared && tsx server/src/smoke.ts",
-    "dump:key": "node tools/dump_key_code.mjs"
+    "dump:key": "node tools/dump_key_code.mjs",
+    "map:lint": "node tools/map_lint.mjs",
+    "map:lint:all": "node tools/map_lint.mjs --all"
   },
   "devDependencies": {
     "concurrently": "^8.2.2",
