@@ -1885,13 +1885,18 @@ export class Renderer {
 
 
   // 近战挥击特效（更加自然且高性能的扇形弧线）
-  drawMeleeSwing(effect: { x: number; y: number; aimRad: number; range: number; arcRad: number; age: number; side?: number }): void {
+  drawMeleeSwing(effect: { x: number; y: number; aimRad: number; range: number; arcRad: number; age: number; side?: number; weaponTypeId?: string }): void {
     const screenX = Math.round(effect.x - this.camX);
     const screenY = Math.round(effect.y - this.camY);
     
     // 使用 age (0-1) 来控制动画阶段
     const age = effect.age;
     if (age < 0 || age > 1) return;
+
+    // 日志输出武器ID（仅在挥击开始时输出一次）
+    if (age < 0.05) {
+      console.log('[MeleeSwing] weaponTypeId:', effect.weaponTypeId || 'default');
+    }
 
     this.ctx.save();
     
@@ -1919,18 +1924,81 @@ export class Renderer {
     }
 
     if (drawEnd > drawStart) {
+      // 根据武器类型选择颜色和样式
+      let glowColor = '#fff';
+      let trailColor = '#fff';
+      let bladeColor = '#fff';
+      let glowWidth = 12;
+      let bladeWidth = 2.5;
+      let glowAlpha = 0.2;
+      let trailAlpha = 0.1;
+      let bladeAlpha = 0.7;
+      
+      switch (effect.weaponTypeId) {
+        case 'w_katana':
+          // 武士刀 - 锐利的蓝白色光芒
+          glowColor = '#4499ff';
+          trailColor = '#66bbff';
+          bladeColor = '#88ddff';
+          glowWidth = 14;
+          bladeWidth = 2;
+          glowAlpha = 0.4;
+          trailAlpha = 0.2;
+          bladeAlpha = 0.9;
+          break;
+        case 'w_sledgehammer':
+          // 大锤 - 沉重的橙红色冲击
+          glowColor = '#ff6622';
+          trailColor = '#ff8844';
+          bladeColor = '#ffaa66';
+          glowWidth = 24;
+          bladeWidth = 5;
+          glowAlpha = 0.5;
+          trailAlpha = 0.25;
+          bladeAlpha = 0.9;
+          break;
+        case 'w_whip':
+          // 鞭子 - 明亮的紫色轨迹
+          glowColor = '#bb44ff';
+          trailColor = '#cc66ff';
+          bladeColor = '#dd88ff';
+          glowWidth = 10;
+          bladeWidth = 2;
+          glowAlpha = 0.5;
+          trailAlpha = 0.3;
+          bladeAlpha = 0.95;
+          break;
+        case 'w_chainsaw':
+          // 链锯 - 血红色
+          glowColor = '#ff2222';
+          trailColor = '#ff4444';
+          bladeColor = '#ff6666';
+          glowWidth = 16;
+          bladeWidth = 3.5;
+          glowAlpha = 0.45;
+          trailAlpha = 0.22;
+          bladeAlpha = 0.85;
+          break;
+        default:
+          // 默认白色
+          glowAlpha = 0.2;
+          trailAlpha = 0.1;
+          bladeAlpha = 0.7;
+          break;
+      }
+      
       // 1. 绘制底层辉光 (Glow)
-      this.ctx.globalAlpha = alpha * 0.2;
-      this.ctx.strokeStyle = '#fff';
-      this.ctx.lineWidth = 12;
+      this.ctx.globalAlpha = alpha * glowAlpha;
+      this.ctx.strokeStyle = glowColor;
+      this.ctx.lineWidth = glowWidth;
       this.ctx.lineCap = 'round';
       this.ctx.beginPath();
       this.ctx.arc(screenX, screenY, effect.range, drawStart, drawEnd);
       this.ctx.stroke();
 
       // 2. 绘制运动轨迹填充 (Blade Trail)
-      this.ctx.globalAlpha = alpha * 0.1;
-      this.ctx.fillStyle = '#fff';
+      this.ctx.globalAlpha = alpha * trailAlpha;
+      this.ctx.fillStyle = trailColor;
       this.ctx.beginPath();
       this.ctx.moveTo(screenX, screenY);
       this.ctx.arc(screenX, screenY, effect.range, drawStart, drawEnd);
@@ -1938,8 +2006,9 @@ export class Renderer {
       this.ctx.fill();
 
       // 3. 绘制核心锋刃 (Hard Blade)
-      this.ctx.globalAlpha = alpha * 0.7;
-      this.ctx.lineWidth = 2.5;
+      this.ctx.globalAlpha = alpha * bladeAlpha;
+      this.ctx.strokeStyle = bladeColor;
+      this.ctx.lineWidth = bladeWidth;
       this.ctx.beginPath();
       this.ctx.arc(screenX, screenY, effect.range, drawStart, drawEnd);
       this.ctx.stroke();
@@ -3523,7 +3592,7 @@ export class Renderer {
     obstacles: OBSTACLE_STATE[] = [], // Day4-2: 障碍物列表
     worldItems: WorldItem[] = [], // 新增: 世界物品列表
     lootBags: LootBag[] = [], // 新增: 掉落包列表
-    meleeSwings: Array<{ x: number; y: number; aimRad: number; range: number; arcRad: number; age: number }> = [],
+    meleeSwings: Array<{ x: number; y: number; aimRad: number; range: number; arcRad: number; age: number; weaponTypeId?: string }> = [],
     hitEffects: Array<{ x: number; y: number; age: number; type: 'obstacle' | 'player' }> = [], // 命中特效
     explosionEffects: Array<{ x: number; y: number; radius: number; age: number }> = [],
     smokes: { x: number; y: number; radius: number; age: number; durationMs?: number }[] = [],

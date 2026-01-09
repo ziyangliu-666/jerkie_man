@@ -160,8 +160,24 @@ export const WEAPONS: Record<string, WeaponDef> = {
     bulletSpeed: 520,
     damage: 12,
     bulletLifeMs: 3000, // 3秒后爆炸
-    explosionRadius: 120,
-    explosionDamage: 300,
+    explosionRadius: 200,
+    explosionDamage: 400,
+  },
+  w_burst_grenade_launcher: {
+    typeId: 'w_burst_grenade_launcher',
+    name: '多联榴弹炮',
+    weaponKind: 'launcher',
+    magSize: 6,          // 6发弹匣
+    reloadMs: 3000,      // 换弹较慢（4秒）
+    fireIntervalMs: 800, // 射击间隔
+    spreadDeg: 4,        // 散布稍大
+    bulletSpeed: 520,
+    damage: 8,           // 直接伤害更低
+    bulletLifeMs: 3000,  // 3秒后爆炸
+    explosionRadius: 100, // 爆炸半径稍小
+    explosionDamage: 180, // 爆炸伤害降低（原来300，现在180）
+    burstCount: 3,       // 三连发
+    burstIntervalMs: 150, // 连发间隔150ms
   },
   w_minigun: {
     typeId: 'w_minigun',
@@ -263,13 +279,64 @@ export const WEAPONS: Record<string, WeaponDef> = {
     weaponKind: 'melee',
     magSize: 0,
     reloadMs: 0,
-    fireIntervalMs: 200, // 快速连续攻击
+    fireIntervalMs: 50, // 快速连续攻击
     spreadDeg: 0,
     bulletSpeed: 0,
-    damage: 30,          // 高近战伤害
+    damage: 15,          // 高近战伤害
     bulletLifeMs: 0,
     meleeRange: 60,      // 稍长近战范围
     meleeArcDeg: 180,    // 180度扇形
+  },
+  w_katana: {
+    typeId: 'w_katana',
+    name: '武士刀',
+    weaponKind: 'melee',
+    magSize: 0,
+    reloadMs: 0,
+    fireIntervalMs: 350, // 中等攻击速度
+    spreadDeg: 0,
+    bulletSpeed: 0,
+    damage: 120,         // 超高伤害（一刀秒杀）
+    bulletLifeMs: 0,
+    meleeRange: 80,      // 长攻击范围
+    meleeArcDeg: 90,     // 窄扇形（精准斩击）
+    buffs: {
+      speedMultiplier: 1.15, // 增加15%移动速度（轻盈）
+    },
+  },
+  w_sledgehammer: {
+    typeId: 'w_sledgehammer',
+    name: '大锤',
+    weaponKind: 'melee',
+    magSize: 0,
+    reloadMs: 0,
+    fireIntervalMs: 1200, // 极慢攻击速度
+    spreadDeg: 0,
+    bulletSpeed: 0,
+    damage: 250,         // 极高伤害（秒杀一切）
+    bulletLifeMs: 0,
+    meleeRange: 70,      // 中等范围
+    meleeArcDeg: 120,    // 较宽扇形
+    buffs: {
+      speedMultiplier: 0.7, // 降低30%移动速度（沉重）
+    },
+  },
+  w_whip: {
+    typeId: 'w_whip',
+    name: '鞭子',
+    weaponKind: 'melee',
+    magSize: 0,
+    reloadMs: 0,
+    fireIntervalMs: 400, // 中等攻击速度
+    spreadDeg: 0,
+    bulletSpeed: 0,
+    damage: 10,          // 低伤害
+    bulletLifeMs: 0,
+    meleeRange: 350,     // 极长攻击范围
+    meleeArcDeg: 5,     // 窄扇形
+    buffs: {
+      speedMultiplier: 1.1, // 增加10%移动速度
+    },
   },
   w_bubble_gun: {
     typeId: 'w_bubble_gun',

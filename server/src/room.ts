@@ -54,7 +54,7 @@ export class Room {
   private readonly PICKUP_RADIUS = 40;
   public raidResults: Map<string, { result: 'EXTRACTED' | 'DIED'; accountId: string; loot?: ItemInstance[]; moneyGained?: number; moneyLost?: number; killedBy?: string; killedByWeaponName?: string }> = new Map();
   public combatEvents: Map<string, Array<{ kind: 'DRY_FIRE' | 'HIT' | 'DAMAGE_TAKEN'; direction?: number }>> = new Map();
-  public meleeSwings: Array<{ playerId: string; x: number; y: number; aimRad: number; range: number; arcRad: number; side?: number }> = [];
+  public meleeSwings: Array<{ playerId: string; x: number; y: number; aimRad: number; range: number; arcRad: number; side?: number; weaponTypeId?: string }> = [];
   public explosions: Array<{ x: number; y: number; radius: number }> = [];
   private smokes: Array<{ id: string; x: number; y: number; radius: number; durationMs: number; createdAt: number }> = [];
   private newSmokes: Array<{ id: string; x: number; y: number; radius: number; durationMs: number }> = []; // 新生成的烟雾（用于广播）
@@ -1939,6 +1939,7 @@ export class Room {
             range: visualRange,
             arcRad: visualArcRad,
             side: player.lastMeleeSide,
+            weaponTypeId: wr.weaponTypeId, // 传递武器类型
           });
           
           // 切换方向
@@ -4425,23 +4426,37 @@ export class Room {
   private generateWeaponLoot(): Array<{ typeId: string; qty: number }> {
     // 从物品目录动态获取所有武器
     const allItems = getAllItemTypes();
-    const weapons = allItems
-      .filter(item => item.category === 'weapon')
-      .map(item => item.id);
+    const weapons = allItems.filter(item => item.category === 'weapon');
     
     if (weapons.length === 0) {
       // 如果物品目录中没有武器，使用默认列表
-      const defaultWeapons = ['w_pistol', 'w_smg', 'w_burst', 'w_shotgun', 'w_sniper', 'w_dmr'];
-      return defaultWeapons.map(w => ({ typeId: w, qty: 1 })).slice(0, 1 + Math.floor(Math.random() * 2));
+      return [{ typeId: 'w_pistol', qty: 1 }];
     }
     
-    const count = 1 + Math.floor(Math.random() * 2); // 1-2把武器
-    const result = [];
-    for (let i = 0; i < count; i++) {
-      const weapon = weapons[Math.floor(Math.random() * weapons.length)];
-      result.push({ typeId: weapon, qty: 1 });
+    // 5% 概率掉落传说级，否则从其他稀有度中选择
+    const roll = Math.random();
+    let selectedWeapon;
+    
+    if (roll < 0.05) {
+      // 5% 传说级
+      const legendaryWeapons = weapons.filter(w => w.rarity === 'LEGENDARY');
+      if (legendaryWeapons.length > 0) {
+        selectedWeapon = legendaryWeapons[Math.floor(Math.random() * legendaryWeapons.length)];
+      } else {
+        // 如果没有传说级武器，从所有武器中随机选
+        selectedWeapon = weapons[Math.floor(Math.random() * weapons.length)];
+      }
+    } else {
+      // 95% 从非传说级中选择
+      const nonLegendaryWeapons = weapons.filter(w => w.rarity !== 'LEGENDARY');
+      if (nonLegendaryWeapons.length > 0) {
+        selectedWeapon = nonLegendaryWeapons[Math.floor(Math.random() * nonLegendaryWeapons.length)];
+      } else {
+        selectedWeapon = weapons[Math.floor(Math.random() * weapons.length)];
+      }
     }
-    return result;
+    
+    return [{ typeId: selectedWeapon.id, qty: 1 }];
   }
 
   // 生成投掷物箱掉落
@@ -4502,23 +4517,37 @@ export class Room {
   private generateEquipmentLoot(): Array<{ typeId: string; qty: number }> {
     // 从物品目录动态获取所有装备（防具和背包）
     const allItems = getAllItemTypes();
-    const equipment = allItems
-      .filter(item => item.category === 'armor' || item.category === 'bag')
-      .map(item => item.id);
+    const equipment = allItems.filter(item => item.category === 'armor' || item.category === 'bag');
     
     if (equipment.length === 0) {
       // 如果物品目录中没有装备，使用默认列表
-      const defaultEquipment = ['armor_kevlar', 'armor_plate', 'armor_heavy', 'bag_sling', 'bag_military'];
-      return defaultEquipment.map(e => ({ typeId: e, qty: 1 })).slice(0, 1 + Math.floor(Math.random() * 2));
+      return [{ typeId: 'armor_kevlar', qty: 1 }];
     }
     
-    const count = 1 + Math.floor(Math.random() * 2); // 1-2件
-    const result = [];
-    for (let i = 0; i < count; i++) {
-      const item = equipment[Math.floor(Math.random() * equipment.length)];
-      result.push({ typeId: item, qty: 1 });
+    // 5% 概率掉落传说级，否则从其他稀有度中选择
+    const roll = Math.random();
+    let selectedEquipment;
+    
+    if (roll < 0.05) {
+      // 5% 传说级
+      const legendaryEquipment = equipment.filter(e => e.rarity === 'LEGENDARY');
+      if (legendaryEquipment.length > 0) {
+        selectedEquipment = legendaryEquipment[Math.floor(Math.random() * legendaryEquipment.length)];
+      } else {
+        // 如果没有传说级装备，从所有装备中随机选
+        selectedEquipment = equipment[Math.floor(Math.random() * equipment.length)];
+      }
+    } else {
+      // 95% 从非传说级中选择
+      const nonLegendaryEquipment = equipment.filter(e => e.rarity !== 'LEGENDARY');
+      if (nonLegendaryEquipment.length > 0) {
+        selectedEquipment = nonLegendaryEquipment[Math.floor(Math.random() * nonLegendaryEquipment.length)];
+      } else {
+        selectedEquipment = equipment[Math.floor(Math.random() * equipment.length)];
+      }
     }
-    return result;
+    
+    return [{ typeId: selectedEquipment.id, qty: 1 }];
   }
 
   // 生成随机传奇物品（普通箱子）
@@ -5154,7 +5183,7 @@ export class Room {
   }
 
   // 新增: 获取并清空近战挥击事件（广播用）
-  drainMeleeSwings(): Array<{ playerId: string; x: number; y: number; aimRad: number; range: number; arcRad: number }> {
+  drainMeleeSwings(): Array<{ playerId: string; x: number; y: number; aimRad: number; range: number; arcRad: number; weaponTypeId?: string }> {
     const swings = [...this.meleeSwings];
     this.meleeSwings = [];
     return swings;

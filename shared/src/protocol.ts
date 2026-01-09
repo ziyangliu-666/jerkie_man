@@ -469,6 +469,7 @@ export const S2C_MELEE_SWING_SCHEMA = z.object({
   range: z.number(),
   arcRad: z.number(),
   side: z.number().int().optional(), // 新增: 挥砍方向 (1 或 -1)
+  weaponTypeId: z.string().optional(), // 新增: 武器类型ID，用于不同的视觉效果
 });
 
 export const S2C_EXPLOSION_SCHEMA = z.object({

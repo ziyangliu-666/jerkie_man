@@ -1701,6 +1701,7 @@ setInterval(() => {
         aimRad: swing.aimRad,
         range: swing.range,
         arcRad: swing.arcRad,
+        weaponTypeId: swing.weaponTypeId, // 传递武器类型
       });
 
       for (const ws of connections.keys()) {

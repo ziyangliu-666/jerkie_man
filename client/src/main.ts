@@ -76,6 +76,7 @@ type MeleeSwing = {
   arcRad: number;
   spawnTimeMs: number;
   side?: number; // 挥砍方向 (1 或 -1)
+  weaponTypeId?: string; // 武器类型ID
 };
 
 const DEFAULT_MELEE_RANGE = 35;
@@ -2714,6 +2715,15 @@ function getItemDescription(itemType: any): string {
     }
     const fireRatePerMin = Math.floor(60000 / weaponDef.fireIntervalMs);
     stats.push(`射速: ${fireRatePerMin}/分`);
+    // 添加速度buff/debuff显示
+    if (weaponDef.buffs?.speedMultiplier) {
+      const speedChange = Math.floor((weaponDef.buffs.speedMultiplier - 1) * 100);
+      if (speedChange > 0) {
+        stats.push(`速度: +${speedChange}%`);
+      } else if (speedChange < 0) {
+        stats.push(`速度: ${speedChange}%`);
+      }
+    }
     parts.push(stats.join(' | '));
     return parts.join('\n');
   } catch {}
@@ -3801,6 +3811,7 @@ const network = new Network(getWebSocketUrl(), 'local', {
       arcRad: event.arcRad,
       spawnTimeMs: performance.now(),
       side: event.side || 1, // 使用服务端同步的方向
+      weaponTypeId: event.weaponTypeId, // 传递武器类型
     });
   },
   onKillFeed: (feed) => {
@@ -4012,6 +4023,7 @@ function renderLoop(): void {
             range: swing.range,
             arcRad: swing.arcRad,
             side: swing.side,
+            weaponTypeId: swing.weaponTypeId, // 传递武器类型
             age: (nowPerf2 - swing.spawnTimeMs) / MELEE_SWING_TTL_MS,
           }))
           .filter((swing) => swing.age >= 0 && swing.age <= 1);
@@ -4466,6 +4478,7 @@ function renderLoop(): void {
                 arcRad: visualArcRad,
                 spawnTimeMs: nowPerf2,
                 side: localMeleeSide,
+                weaponTypeId: weaponRuntime.weaponTypeId, // 传递武器类型
               });
               
               // 触发小型屏幕抖动增加击打感
