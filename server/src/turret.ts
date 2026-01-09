@@ -24,10 +24,10 @@ export class Turret {
   // Combat stats
   public range: number = 400;
   // Using properties that mimic WeaponRuntime/WeaponDef
-  public weaponTypeId: string = 'w_minigun'; 
-  public ammo: number = 100;
-  public maxAmmo: number = 100;
-  public reloadTimeMs: number = 3000;
+  public weaponTypeId: string = 'w_smg'; 
+  public ammo: number = 30;
+  public maxAmmo: number = 30;
+  public reloadTimeMs: number = 2000;
   public spoolTimeMs: number = 1000; // Reaction time
   
   // Timers

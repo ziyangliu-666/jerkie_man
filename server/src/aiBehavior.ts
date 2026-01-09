@@ -3,8 +3,9 @@ import type { AI, PatrolConfig, GuardConfig } from './ai.js';
 import type { Pathfinder } from './pathfinding.js';
 import { Player } from './player.js';
 import { Decoy } from './decoy.js';
+import { Turret } from './turret.js';
 
-type AITarget = Player | Decoy;
+type AITarget = Player | Decoy | Turret;
 const DISGUISE_DETECTION_RADIUS = 150;
 import type { OBSTACLE_STATE } from '@jerkie-man/shared';
 import { msToTicks, getWeaponDef, advanceFireCooldown } from '@jerkie-man/shared';
@@ -78,6 +79,14 @@ export class AIBehaviorController {
     for (const decoy of this.room.decoys) {
       if (decoy.hp > 0) {
         potentialTargets.push(decoy);
+      }
+    }
+    // 添加炮台作为潜在目标
+    if (this.room.turrets) {
+      for (const turret of this.room.turrets.values()) {
+        if (turret.hp > 0) {
+          potentialTargets.push(turret);
+        }
       }
     }
 
