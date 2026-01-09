@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { DEFAULT_MAP_CONFIG, MAP_CONFIG_SCHEMA } from './content.js';
+import { DEFAULT_MAP_CONFIG, MAP_CONFIG_SCHEMA, Zone } from './content.js';
 import { OBSTACLE_STATE_SCHEMA } from './protocol.js';
 
 export const SPAWN_POINT_SCHEMA = z.object({
@@ -152,6 +152,7 @@ export const ITEM_RESPAWN_SCHEMA = z.object({
       COMMON: z.number().nonnegative().optional(),
       RARE: z.number().nonnegative().optional(),
       EPIC: z.number().nonnegative().optional(),
+      LEGENDARY: z.number().nonnegative().optional(),
     })
     .optional(),
 });
@@ -181,10 +182,35 @@ export const MAP_TEMPLATE_SCHEMA = z.object({
 export type MapTemplate = z.infer<typeof MAP_TEMPLATE_SCHEMA>;
 export type SpawnPoint = z.infer<typeof SPAWN_POINT_SCHEMA>;
 export type POI = z.infer<typeof POI_SCHEMA>;
-export type Zone = z.infer<typeof ZONE_SCHEMA>;
+// export type Zone = z.infer<typeof ZONE_SCHEMA>; // Removed to avoid duplicate export with content.ts
 export type AISpawn = z.infer<typeof AI_SPAWN_SCHEMA>;
 export type ItemRespawn = z.infer<typeof ITEM_RESPAWN_SCHEMA>;
 export type AIRespawn = z.infer<typeof AI_RESPAWN_SCHEMA>;
+
+// 新增: RoomGroup 房间组定义 (高级语法)
+export const ROOM_DEF_SCHEMA = z.object({
+  id: z.string(),
+  w: z.number().positive().optional(),
+  h: z.number().positive().optional(),
+  doors: z.string().default(''), // nsew组合
+});
+
+export const ROOM_GROUP_SCHEMA = z.object({
+  layout: z.enum(['horizontal', 'vertical', 'grid']),
+  x: z.number().nonnegative(),
+  y: z.number().nonnegative(),
+  cellW: z.number().positive().optional(),
+  cellH: z.number().positive().optional(),
+  cols: z.number().int().positive().optional(),
+  rows: z.number().int().positive().optional(),
+  wallThickness: z.number().positive().default(20),
+  doorWidth: z.number().positive().default(120),
+  rooms: z.array(ROOM_DEF_SCHEMA),
+});
+
+export type RoomDef = z.infer<typeof ROOM_DEF_SCHEMA>;
+export type RoomGroup = z.infer<typeof ROOM_GROUP_SCHEMA>;
+export type RoomGroupLayout = 'horizontal' | 'vertical' | 'grid';
 
 type TokenizedLine = {
   directive: string;
@@ -348,8 +374,9 @@ function getOverlapArea(
 /**
  * 检测地图模板中的区域重叠并输出警告
  */
-function detectOverlaps(template: MapTemplate): void {
+function detectOverlaps(template: MapTemplate, roomGroups: Array<{ group: RoomGroup; startObstacleIndex: number }> = []): void {
   const warnings: string[] = [];
+  const criticalWarnings: string[] = []; // 关键警告，不会被过滤
 
   // 1. 检测障碍物之间的重叠
   for (let i = 0; i < template.obstacles.length; i++) {
@@ -403,17 +430,501 @@ function detectOverlaps(template: MapTemplate): void {
     }
   }
 
+  // 3. 检测草丛是否在室内（房间内）
+  // 计算所有房间的边界
+  const roomBounds: Array<{ x: number; y: number; w: number; h: number; groupId: string }> = [];
+  for (const { group } of roomGroups) {
+    const roomRects = calculateRoomRects(group);
+    for (const rect of roomRects) {
+      roomBounds.push({
+        x: rect.x,
+        y: rect.y,
+        w: rect.w,
+        h: rect.h,
+        groupId: `roomgroup @ (${group.x}, ${group.y})`,
+      });
+    }
+  }
+
+  // 检查每个草丛是否在房间内
+  for (let i = 0; i < template.obstacles.length; i++) {
+    const obs = template.obstacles[i];
+    if (obs.type === 'bush') {
+      // 检查草丛中心点是否在任何房间内
+      const centerX = obs.x + obs.w / 2;
+      const centerY = obs.y + obs.h / 2;
+      
+      for (const room of roomBounds) {
+        if (
+          centerX >= room.x &&
+          centerX < room.x + room.w &&
+          centerY >= room.y &&
+          centerY < room.y + room.h
+        ) {
+          criticalWarnings.push(
+            `⚠️  草丛位于室内 [${i}]:
+    [${i}] ${obs.type} @ (${obs.x}, ${obs.y}) ${obs.w}x${obs.h} (id: ${obs.id})
+    位于房间: ${room.groupId}
+    建议: 将草丛移至室外区域`
+          );
+          break; // 只报告一次
+        }
+      }
+    }
+  }
+
+  // 4. 检测宝箱与墙壁的重叠
+  const chestTypes = ['crate', 'chest_closed', 'chest_open', 'weapon_crate', 'throwable_crate', 'medical_crate', 'equipment_crate'];
+  const wallTypes = ['wall', 'door_closed'];
+  
+  for (let i = 0; i < template.obstacles.length; i++) {
+    const chest = template.obstacles[i];
+    if (chestTypes.includes(chest.type)) {
+      // 检查与所有墙壁的重叠
+      for (let j = 0; j < template.obstacles.length; j++) {
+        if (i === j) continue;
+        const wall = template.obstacles[j];
+        
+        if (wallTypes.includes(wall.type)) {
+          const overlap = getOverlapArea(chest, wall);
+          if (overlap) {
+            const chestArea = chest.w * chest.h;
+            const wallArea = wall.w * wall.h;
+            const overlapArea = overlap.w * overlap.h;
+            const overlapPercentChest = ((overlapArea / chestArea) * 100).toFixed(1);
+            const overlapPercentWall = ((overlapArea / wallArea) * 100).toFixed(1);
+            
+            criticalWarnings.push(
+              `⚠️  宝箱与墙壁重叠 [${i}] <-> [${j}]:
+    [${i}] ${chest.type} @ (${chest.x}, ${chest.y}) ${chest.w}x${chest.h} (id: ${chest.id})
+    [${j}] ${wall.type} @ (${wall.x}, ${wall.y}) ${wall.w}x${wall.h} (id: ${wall.id})
+    重叠区域: (${overlap.x}, ${overlap.y}) ${overlap.w}x${overlap.h}
+    重叠面积: ${overlapArea} (占 [${i}] 的 ${overlapPercentChest}%, 占 [${j}] 的 ${overlapPercentWall}%)
+    建议: 调整宝箱位置以避免与墙壁重叠`
+            );
+          }
+        }
+      }
+    }
+  }
+
+  // 过滤掉小重叠（@roomgroup角落处的有意重叠）
+  const significantWarnings = warnings.filter(warning => {
+    // 提取重叠面积和百分比
+    const areaMatch = warning.match(/重叠面积: (\d+)/);
+    const percentMatches = warning.match(/占 \[.*?\] 的 ([\d.]+)%, 占 \[.*?\] 的 ([\d.]+)%/);
+    
+    if (areaMatch && percentMatches) {
+      const area = parseInt(areaMatch[1]);
+      const percent1 = parseFloat(percentMatches[1]);
+      const percent2 = parseFloat(percentMatches[2]);
+      const maxPercent = Math.max(percent1, percent2);
+      
+      // 过滤条件：重叠面积<500px² 且 重叠率<30% 的视为正常（角落重叠）
+      if (area < 500 && maxPercent < 30) {
+        return false; // 过滤掉
+      }
+    }
+    
+    return true; // 保留
+  });
+
+  // 合并所有警告（关键警告 + 过滤后的普通警告）
+  const allWarnings = [...criticalWarnings, ...significantWarnings];
+
   // 输出所有警告
-  if (warnings.length > 0) {
+  if (allWarnings.length > 0) {
     console.warn('\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-    console.warn(`📍 地图 "${template.id}" (${template.name || 'unnamed'}) 检测到 ${warnings.length} 个重叠问题:`);
+    console.warn(`📍 地图 "${template.id}" (${template.name || 'unnamed'}) 检测到 ${allWarnings.length} 个重叠问题:`);
     console.warn('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-    warnings.forEach((warning, index) => {
+    allWarnings.forEach((warning, index) => {
       console.warn(`${index + 1}. ${warning}`);
     });
     console.warn('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
     console.warn('💡 提示: 您可以使用 LLM 调整地图配置以消除这些重叠\n');
   }
+}
+
+/**
+ * 验证 RoomGroup 的可达性（检测是否有外部入口）
+ * 警告：如果整个房间组没有任何外部门，玩家将无法进入
+ */
+function validateRoomGroupAccessibility(roomGroups: Array<{ group: RoomGroup; startObstacleIndex: number }>): void {
+  const warnings: string[] = [];
+  
+  for (const { group, startObstacleIndex } of roomGroups) {
+    const roomRects = calculateRoomRects(group);
+    
+    // 检查每个房间是否有外部门（不与其他房间共享的门）
+    let hasExternalDoor = false;
+    
+    for (let i = 0; i < group.rooms.length; i++) {
+      const room = group.rooms[i];
+      const rect = roomRects[i];
+      const doors = room.doors.toLowerCase();
+      
+      // 检测该房间的外墙（不与其他房间共享的墙）
+      const externalWalls = detectExternalWalls(rect, i, roomRects);
+      
+      // 检查每个外墙是否有门
+      if (externalWalls.north && doors.includes('n')) hasExternalDoor = true;
+      if (externalWalls.south && doors.includes('s')) hasExternalDoor = true;
+      if (externalWalls.east && doors.includes('e')) hasExternalDoor = true;
+      if (externalWalls.west && doors.includes('w')) hasExternalDoor = true;
+      
+      if (hasExternalDoor) break;
+    }
+    
+    if (!hasExternalDoor) {
+      const layoutDesc = group.layout === 'horizontal' ? '横向排列' : 
+                         group.layout === 'vertical' ? '纵向排列' : '网格布局';
+      warnings.push(
+        `⚠️  封闭的房间组 (${layoutDesc}) @ (${group.x}, ${group.y}):\n` +
+        `    房间数量: ${group.rooms.length}\n` +
+        `    房间列表: ${group.rooms.map(r => `${r.id} (doors=${r.doors})`).join(', ')}\n` +
+        `    ❌ 问题: 所有门都是内部互通，没有对外的入口！\n` +
+        `    💡 建议: 至少为一个房间添加外部门，例如 doors=n 或 doors=wens`
+      );
+    }
+  }
+  
+  if (warnings.length > 0) {
+    console.warn('\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+    console.warn(`🚪 房间组可达性检查: 发现 ${warnings.length} 个封闭房间组`);
+    console.warn('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+    warnings.forEach((warning, index) => {
+      console.warn(`${index + 1}. ${warning}`);
+    });
+    console.warn('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
+  }
+}
+
+/**
+ * Room Group 辅助函数：计算每个房间的实际坐标和尺寸
+ */
+function calculateRoomRects(group: RoomGroup): Array<{ x: number; y: number; w: number; h: number }> {
+  const { layout, x, y, cellW, cellH, cols, rooms } = group;
+  const rects: Array<{ x: number; y: number; w: number; h: number }> = [];
+  
+  if (layout === 'horizontal') {
+    let currentX = x;
+    for (const room of rooms) {
+      const w = room.w ?? cellW ?? 300;
+      const h = cellH ?? 300;
+      rects.push({ x: currentX, y, w, h });
+      currentX += w;
+    }
+  } else if (layout === 'vertical') {
+    let currentY = y;
+    for (const room of rooms) {
+      const w = cellW ?? 300;
+      const h = room.h ?? cellH ?? 300;
+      rects.push({ x, y: currentY, w, h });
+      currentY += h;
+    }
+  } else if (layout === 'grid') {
+    const cw = cellW ?? 300;
+    const ch = cellH ?? 300;
+    const c = cols ?? 2;
+    for (let i = 0; i < rooms.length; i++) {
+      const row = Math.floor(i / c);
+      const col = i % c;
+      rects.push({
+        x: x + col * cw,
+        y: y + row * ch,
+        w: cw,
+        h: ch,
+      });
+    }
+  }
+  
+  return rects;
+}
+
+/**
+ * 检查两个矩形在X轴上是否有重叠
+ */
+function rectsOverlapX(a: { x: number; w: number }, b: { x: number; w: number }): boolean {
+  return !(a.x + a.w <= b.x || b.x + b.w <= a.x);
+}
+
+/**
+ * 检查两个矩形在Y轴上是否有重叠
+ */
+function rectsOverlapY(a: { y: number; h: number }, b: { y: number; h: number }): boolean {
+  return !(a.y + a.h <= b.y || b.y + b.h <= a.y);
+}
+
+/**
+ * 检测某个房间的哪些墙是外墙（不与其他房间共享）
+ */
+function detectExternalWalls(
+  rect: { x: number; y: number; w: number; h: number },
+  index: number,
+  allRects: Array<{ x: number; y: number; w: number; h: number }>
+): { north: boolean; south: boolean; east: boolean; west: boolean } {
+  const walls = { north: true, south: true, east: true, west: true };
+  
+  for (let i = 0; i < allRects.length; i++) {
+    if (i === index) continue;
+    const other = allRects[i];
+    
+    // 检测北侧是否有相邻房间（other在rect上方）
+    if (Math.abs(rect.y - (other.y + other.h)) < 1 && rectsOverlapX(rect, other)) {
+      walls.north = false;
+    }
+    // 南侧（other在rect下方）
+    if (Math.abs((rect.y + rect.h) - other.y) < 1 && rectsOverlapX(rect, other)) {
+      walls.south = false;
+    }
+    // 西侧（other在rect左侧）
+    if (Math.abs(rect.x - (other.x + other.w)) < 1 && rectsOverlapY(rect, other)) {
+      walls.west = false;
+    }
+    // 东侧（other在rect右侧）
+    if (Math.abs((rect.x + rect.w) - other.x) < 1 && rectsOverlapY(rect, other)) {
+      walls.east = false;
+    }
+  }
+  
+  return walls;
+}
+
+/**
+ * 生成单段墙体（可选带门）
+ */
+function generateWallSegmentWithDoor(
+  obstacles: any[],
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  hasDoor: boolean,
+  doorWidth: number
+): void {
+  if (!hasDoor) {
+    // 无门，整段墙
+    obstacles.push({
+      id: `wall_${obstacles.length}`,
+      x, y, w, h,
+      type: 'wall',
+    });
+  } else {
+    // 有门，分成三段：墙-门-墙
+    if (w > h) {
+      // 水平墙
+      const wallW = (w - doorWidth) / 2;
+      if (wallW > 0) {
+        obstacles.push({ id: `wall_${obstacles.length}`, x, y, w: wallW, h, type: 'wall' });
+        obstacles.push({
+          id: `door_${obstacles.length}`,
+          x: x + wallW,
+          y,
+          w: doorWidth,
+          h,
+          type: 'door_closed',
+          hp: 100,
+          maxHp: 100,
+        });
+        obstacles.push({ id: `wall_${obstacles.length}`, x: x + wallW + doorWidth, y, w: wallW, h, type: 'wall' });
+      }
+    } else {
+      // 垂直墙
+      const wallH = (h - doorWidth) / 2;
+      if (wallH > 0) {
+        obstacles.push({ id: `wall_${obstacles.length}`, x, y, w, h: wallH, type: 'wall' });
+        obstacles.push({
+          id: `door_${obstacles.length}`,
+          x,
+          y: y + wallH,
+          w,
+          h: doorWidth,
+          type: 'door_closed',
+          hp: 100,
+          maxHp: 100,
+        });
+        obstacles.push({ id: `wall_${obstacles.length}`, x, y: y + wallH + doorWidth, w, h: wallH, type: 'wall' });
+      }
+    }
+  }
+}
+
+/**
+ * 为某个房间的某一侧生成墙体（带门）
+ */
+function generateWallWithDoor(
+  obstacles: any[],
+  rect: { x: number; y: number; w: number; h: number },
+  side: 'north' | 'south' | 'east' | 'west',
+  hasDoor: boolean,
+  wallThickness: number,
+  doorWidth: number
+): void {
+  if (side === 'north') {
+    generateWallSegmentWithDoor(obstacles, rect.x, rect.y, rect.w, wallThickness, hasDoor, doorWidth);
+  } else if (side === 'south') {
+    generateWallSegmentWithDoor(obstacles, rect.x, rect.y + rect.h - wallThickness, rect.w, wallThickness, hasDoor, doorWidth);
+  } else if (side === 'west') {
+    generateWallSegmentWithDoor(obstacles, rect.x, rect.y, wallThickness, rect.h, hasDoor, doorWidth);
+  } else if (side === 'east') {
+    generateWallSegmentWithDoor(obstacles, rect.x + rect.w - wallThickness, rect.y, wallThickness, rect.h, hasDoor, doorWidth);
+  }
+}
+
+/**
+ * 生成共享墙（两个房间之间的墙）
+ */
+function generateSharedWalls(
+  obstacles: any[],
+  rects: Array<{ x: number; y: number; w: number; h: number }>,
+  rooms: RoomDef[],
+  wallThickness: number,
+  doorWidth: number
+): void {
+  // 检测所有相邻房间对，生成共享墙
+  for (let i = 0; i < rects.length; i++) {
+    for (let j = i + 1; j < rects.length; j++) {
+      const r1 = rects[i];
+      const r2 = rects[j];
+      const room1 = rooms[i];
+      const room2 = rooms[j];
+      
+      // 垂直共享墙 (r1在左，r2在右)
+      if (Math.abs((r1.x + r1.w) - r2.x) < 1 && rectsOverlapY(r1, r2)) {
+        const overlapY = Math.max(r1.y, r2.y);
+        const overlapH = Math.min(r1.y + r1.h, r2.y + r2.h) - overlapY;
+        const hasDoor = room1.doors.includes('e') || room2.doors.includes('w');
+        
+        const wallX = r1.x + r1.w - wallThickness / 2;
+        generateWallSegmentWithDoor(obstacles, wallX, overlapY, wallThickness, overlapH, hasDoor, doorWidth);
+      }
+      
+      // 水平共享墙 (r1在上，r2在下)
+      if (Math.abs((r1.y + r1.h) - r2.y) < 1 && rectsOverlapX(r1, r2)) {
+        const overlapX = Math.max(r1.x, r2.x);
+        const overlapW = Math.min(r1.x + r1.w, r2.x + r2.w) - overlapX;
+        const hasDoor = room1.doors.includes('s') || room2.doors.includes('n');
+        
+        const wallY = r1.y + r1.h - wallThickness / 2;
+        generateWallSegmentWithDoor(obstacles, overlapX, wallY, overlapW, wallThickness, hasDoor, doorWidth);
+      }
+    }
+  }
+}
+
+/**
+ * 根据 RoomGroup 定义生成所有墙体和门
+ */
+function generateRoomGroupWalls(group: RoomGroup): any[] {
+  const obstacles: any[] = [];
+  const { wallThickness, doorWidth, rooms } = group;
+  
+  // 计算每个房间的实际坐标和尺寸
+  const roomRects = calculateRoomRects(group);
+  
+  // 生成所有房间的外墙
+  for (let i = 0; i < rooms.length; i++) {
+    const room = rooms[i];
+    const rect = roomRects[i];
+    const doors = room.doors.toLowerCase();
+    
+    // 检测哪些墙是外墙（不与其他房间共享）
+    const walls = detectExternalWalls(rect, i, roomRects);
+    
+    // 生成外墙
+    if (walls.north) {
+      generateWallWithDoor(obstacles, rect, 'north', doors.includes('n'), wallThickness, doorWidth);
+    }
+    if (walls.south) {
+      generateWallWithDoor(obstacles, rect, 'south', doors.includes('s'), wallThickness, doorWidth);
+    }
+    if (walls.west) {
+      generateWallWithDoor(obstacles, rect, 'west', doors.includes('w'), wallThickness, doorWidth);
+    }
+    if (walls.east) {
+      generateWallWithDoor(obstacles, rect, 'east', doors.includes('e'), wallThickness, doorWidth);
+    }
+  }
+  
+  // 生成共享墙（位于两个房间之间）
+  generateSharedWalls(obstacles, roomRects, rooms, wallThickness, doorWidth);
+  
+  return obstacles;
+}
+
+/**
+ * 解析 @roomgroup 指令及其子房间定义
+ */
+function parseRoomGroup(
+  tokens: string[],
+  lines: string[],
+  currentIndex: number,
+  lineNumber: number
+): { roomGroup: RoomGroup; endLineIndex: number } {
+  const { kv } = parseKeyValues(tokens);
+  
+  // 解析基础参数
+  const layout = (kv.layout as RoomGroupLayout) || 'horizontal';
+  const x = parseNumber(kv.x ?? '', lineNumber, 'roomgroup.x');
+  const y = parseNumber(kv.y ?? '', lineNumber, 'roomgroup.y');
+  
+  // 解析房间定义（读取后续缩进行）
+  const rooms: RoomDef[] = [];
+  let endLineIndex = currentIndex;
+  
+  for (let i = currentIndex + 1; i < lines.length; i++) {
+    const line = lines[i];
+    const trimmed = line.trim();
+    
+    if (!trimmed || trimmed.startsWith('#')) {
+      endLineIndex = i;
+      continue;
+    }
+    
+    // 检查是否为缩进行（房间定义）
+    if (!line.startsWith(' ') && !line.startsWith('\t')) {
+      // 非缩进行，roomgroup定义结束
+      break;
+    }
+    
+    // 解析房间定义: "room1: w=300 doors=e"
+    const match = trimmed.match(/^(\w+):\s*(.+)$/);
+    if (!match) {
+      endLineIndex = i;
+      continue;
+    }
+    
+    const roomId = match[1];
+    const roomTokens = splitTokens(match[2]);
+    const roomKv = parseKeyValues(roomTokens).kv;
+    
+    rooms.push({
+      id: roomId,
+      w: roomKv.w ? parseNumber(roomKv.w, i + 1, 'room.w') : undefined,
+      h: roomKv.h ? parseNumber(roomKv.h, i + 1, 'room.h') : undefined,
+      doors: roomKv.doors || '',
+    });
+    
+    endLineIndex = i;
+  }
+  
+  const roomGroup: RoomGroup = {
+    layout,
+    x, 
+    y,
+    cellW: kv.cellw ? parseNumber(kv.cellw, lineNumber, 'cellW') : undefined,
+    cellH: kv.cellh ? parseNumber(kv.cellh, lineNumber, 'cellH') : undefined,
+    cols: kv.cols ? parseNumber(kv.cols, lineNumber, 'cols') : undefined,
+    rows: kv.rows ? parseNumber(kv.rows, lineNumber, 'rows') : undefined,
+    wallThickness: kv.wallthickness ? parseNumber(kv.wallthickness, lineNumber, 'wallThickness') : 20,
+    doorWidth: kv.doorwidth ? parseNumber(kv.doorwidth, lineNumber, 'doorWidth') : 120,
+    rooms,
+  };
+  
+  return {
+    roomGroup,
+    endLineIndex,
+  };
 }
 
 
@@ -433,6 +944,7 @@ export function createDefaultMapTemplate(id: string = 'default'): MapTemplate {
 
 export function parseMapTemplateText(text: string): MapTemplate {
   const template = createDefaultMapTemplate();
+  const roomGroups: Array<{ group: RoomGroup; startObstacleIndex: number }> = []; // 跟踪所有房间组
 
   const lines = text.split(/\r?\n/);
   for (let i = 0; i < lines.length; i++) {
@@ -487,17 +999,71 @@ export function parseMapTemplateText(text: string): MapTemplate {
         w: 'obstacle.w',
         h: 'obstacle.h',
       });
-      const type = kv.type || 'wall';
       const obstacle: any = {
         ...rect,
-        id: kv.id || `obs_${template.obstacles.length}`, // 确保每个障碍物有唯一ID（草丛逻辑依赖此ID）
-        type, // 支持 type 参数，默认为 wall
+        id: kv.id || `obstacle_${template.obstacles.length}`,
+        type: kv.type || 'wall',
+        hp: kv.hp ? parseNumber(kv.hp, lineNumber, 'obstacle.hp') : undefined,
+        maxHp: kv.maxhp ? parseNumber(kv.maxhp, lineNumber, 'obstacle.maxHp') : undefined,
+        // 额外属性
+        doorTargetId: kv.doortargetid || kv.targetid || undefined,
+        doorLocked: kv.doorlocked === 'true' || kv.locked === 'true',
+        doorKeyId: kv.doorkeyid || kv.keyid || undefined,
+        doorOpen: kv.dooropen === 'true' || kv.open === 'true',
+        doorAutoClose: kv.doorautoclose === 'true' || kv.autoclose === 'true',
+        doorAutoCloseDelay: kv.doorautoclosedelay ? parseNumber(kv.doorautoclosedelay, lineNumber, 'obstacle.doorAutoCloseDelay') : undefined,
+        doorOpenSound: kv.dooropensound || undefined,
+        doorCloseSound: kv.doorclosesound || undefined,
+        doorLockedSound: kv.doorlockedsound || undefined,
+        doorUnlockSound: kv.doorunlocksound || undefined,
+        chestItems: kv.chestitems ? kv.chestitems.split(',').map((s: string) => s.trim()) : undefined,
+        chestCapacity: kv.chestcapacity ? parseNumber(kv.chestcapacity, lineNumber, 'obstacle.chestCapacity') : undefined,
+        chestRespawnDelay: kv.chestrespawndelay ? parseNumber(kv.chestrespawndelay, lineNumber, 'obstacle.chestRespawnDelay') : undefined,
+        chestRespawnCount: kv.chestrespawncount ? parseNumber(kv.chestrespawncount, lineNumber, 'obstacle.chestRespawnCount') : undefined,
+        chestLootTable: kv.chestloottable || undefined,
+        chestRarityWeights: kv.chestrarityweights || undefined,
+        supplyStackItems: kv.supplysitems ? kv.supplysitems.split(',').map((s: string) => s.trim()) : undefined,
+        supplyStackCapacity: kv.supplyscapacity ? parseNumber(kv.supplyscapacity, lineNumber, 'obstacle.supplyStackCapacity') : undefined,
+        supplyStackRespawnDelay: kv.supplysrespawndelay ? parseNumber(kv.supplysrespawndelay, lineNumber, 'obstacle.supplyStackRespawnDelay') : undefined,
+        supplyStackRespawnCount: kv.supplysrespawncount ? parseNumber(kv.supplysrespawncount, lineNumber, 'obstacle.supplyStackRespawnCount') : undefined,
+        supplyStackLootTable: kv.supplysloottable || undefined,
+        supplyStackRarityWeights: kv.supplysrarityweights || undefined,
       };
 
-      // 对可破坏的木箱（crate）在导入时补齐 hp/maxHp，和随机生成逻辑保持一致
-      if (type === 'crate') {
-        obstacle.hp = 100;
-        obstacle.maxHp = 100;
+      const type = obstacle.type;
+      
+      // 为可破坏物体初始化hp（如果地图文件中没有指定）
+      if (!obstacle.hp || !obstacle.maxHp) {
+        if (type === 'crate') {
+          obstacle.hp = 100;
+          obstacle.maxHp = 100;
+        } else if (type === 'door_closed' || type === 'door') {
+          obstacle.type = 'door_closed';
+          obstacle.hp = 100;
+          obstacle.maxHp = 100;
+        } else if (type === 'glass') {
+          obstacle.hp = 30;
+          obstacle.maxHp = 30;
+        } else if (type === 'chest_closed' || type === 'chest') {
+          obstacle.type = 'chest_closed';
+          obstacle.hp = 100;
+          obstacle.maxHp = 100;
+        } else if (type === 'weapon_crate' || type === 'throwable_crate' || type === 'medical_crate' || type === 'equipment_crate') {
+          obstacle.hp = 100;
+          obstacle.maxHp = 100;
+        } else if (type === 'vehicle') {
+          obstacle.hp = 150;
+          obstacle.maxHp = 150;
+        } else if (type === 'supply_stack') {
+          obstacle.hp = 100;
+          obstacle.maxHp = 100;
+        } else if (type === 'fence_wood') {
+          obstacle.hp = 50;
+          obstacle.maxHp = 50;
+        } else if (type === 'fence_metal') {
+          obstacle.hp = 100;
+          obstacle.maxHp = 100;
+        }
       }
 
       template.obstacles.push(obstacle);
@@ -532,6 +1098,100 @@ export function parseMapTemplateText(text: string): MapTemplate {
         description: kv.description || kv.desc,
       };
       template.zones.push(zone);
+    } else if (directive === '@room') {
+      // 新增: 解析房间（生成四面墙和门）
+      const { kv, positionals } = parseKeyValues(tokens);
+      // 支持位置参数或kv参数
+      const roomX = positionals.length >= 1 ? parseNumber(positionals[0], lineNumber, 'room.x') : parseNumber(kv.x ?? '', lineNumber, 'room.x');
+      const roomY = positionals.length >= 2 ? parseNumber(positionals[1], lineNumber, 'room.y') : parseNumber(kv.y ?? '', lineNumber, 'room.y');
+      const roomW = positionals.length >= 3 ? parseNumber(positionals[2], lineNumber, 'room.w') : parseNumber(kv.w ?? '', lineNumber, 'room.w');
+      const roomH = positionals.length >= 4 ? parseNumber(positionals[3], lineNumber, 'room.h') : parseNumber(kv.h ?? '', lineNumber, 'room.h');
+      
+      const wallThickness = 20;
+      const doorWidth = 120;
+      const doorDirs = (kv.door || '').toLowerCase(); // n, s, e, w
+      // Default to all walls if not specified. Format: walls=nsw (missing e) or walls=all or empty
+      const wallsConfig = kv.walls ? kv.walls.toLowerCase() : 'nswe'; 
+      
+      const addWall = (x: number, y: number, w: number, h: number) => {
+        template.obstacles.push({
+          id: `roomwall_${template.obstacles.length}`,
+          x, y, w, h,
+          type: 'wall',
+        });
+      };
+
+      const addDoor = (x: number, y: number, w: number, h: number) => {
+        template.obstacles.push({
+          id: `roomdoor_${template.obstacles.length}`,
+          x, y, w, h,
+          type: 'door_closed',
+          hp: 100,
+          maxHp: 100,
+        });
+      };
+
+      // North Wall
+      if (wallsConfig.includes('n')) {
+        if (doorDirs.includes('n')) {
+          const wallW = (roomW - doorWidth) / 2;
+          addWall(roomX, roomY, wallW, wallThickness); // Left part
+          addDoor(roomX + wallW, roomY, doorWidth, wallThickness); // Door
+          addWall(roomX + wallW + doorWidth, roomY, wallW, wallThickness); // Right part
+        } else {
+          addWall(roomX, roomY, roomW, wallThickness);
+        }
+      }
+
+      // South Wall
+      if (wallsConfig.includes('s')) {
+        if (doorDirs.includes('s')) {
+          const wallW = (roomW - doorWidth) / 2;
+          const y = roomY + roomH - wallThickness;
+          addWall(roomX, y, wallW, wallThickness);
+          addDoor(roomX + wallW, y, doorWidth, wallThickness);
+          addWall(roomX + wallW + doorWidth, y, wallW, wallThickness);
+        } else {
+          addWall(roomX, roomY + roomH - wallThickness, roomW, wallThickness);
+        }
+      }
+
+      // West Wall
+      if (wallsConfig.includes('w')) {
+        if (doorDirs.includes('w')) {
+          const wallH = (roomH - doorWidth) / 2;
+          addWall(roomX, roomY, wallThickness, wallH);
+          addDoor(roomX, roomY + wallH, wallThickness, doorWidth);
+          addWall(roomX, roomY + wallH + doorWidth, wallThickness, wallH);
+        } else {
+          addWall(roomX, roomY, wallThickness, roomH);
+        }
+      }
+
+      // East Wall
+      if (wallsConfig.includes('e')) {
+        if (doorDirs.includes('e')) {
+          const wallH = (roomH - doorWidth) / 2;
+          const x = roomX + roomW - wallThickness;
+          addWall(x, roomY, wallThickness, wallH);
+          addDoor(x, roomY + wallH, wallThickness, doorWidth);
+          addWall(x, roomY + wallH + doorWidth, wallThickness, wallH);
+        } else {
+          addWall(roomX + roomW - wallThickness, roomY, wallThickness, roomH);
+        }
+      }
+
+    } else if (directive === '@roomgroup') {
+      // 新增: 解析房间组（高级语法）
+      const result = parseRoomGroup(tokens, lines, i, lineNumber);
+      const startObstacleIndex = template.obstacles.length; // 记录起始索引
+      const obstacles = generateRoomGroupWalls(result.roomGroup);
+      template.obstacles.push(...obstacles);
+      // 跟踪房间组用于后续验证
+      roomGroups.push({ group: result.roomGroup, startObstacleIndex });
+      // 跳过已读取的房间定义行
+      i = result.endLineIndex;
+
     } else if (directive === '@aispawn' || directive === '@ai') {
       // 新增: 解析AI spawn点
       const { kv, positionals } = parseKeyValues(tokens);
@@ -587,7 +1247,7 @@ export function parseMapTemplateText(text: string): MapTemplate {
           const upperK = k.toUpperCase();
           const num = Number(v);
           if (!Number.isFinite(num)) continue;
-          if (upperK === 'COMMON' || upperK === 'RARE' || upperK === 'EPIC') {
+          if (upperK === 'COMMON' || upperK === 'RARE' || upperK === 'EPIC' || upperK === 'LEGENDARY') {
             weights[upperK] = num;
           }
         }
@@ -638,7 +1298,10 @@ export function parseMapTemplateText(text: string): MapTemplate {
   }
 
   // 区域重叠检测
-  detectOverlaps(template);
+  detectOverlaps(template, roomGroups);
+
+  // 房间组可达性检测
+  validateRoomGroupAccessibility(roomGroups);
 
   return MAP_TEMPLATE_SCHEMA.parse(template);
 }

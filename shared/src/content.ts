@@ -13,9 +13,30 @@ export const MAP_CONFIG_SCHEMA = z.object({
     w: z.number().positive(),
     h: z.number().positive(),
   }),
+  // 新增: 地图区域（用于不同地面材质等）
+  zones: z.array(z.object({
+    id: z.string().min(1),
+    name: z.string().optional(),
+    x: z.number().nonnegative(),
+    y: z.number().nonnegative(),
+    w: z.number().positive(),
+    h: z.number().positive(),
+    type: z.string().default('generic'), // grass, wood, tile, concrete, puddle
+    description: z.string().optional(),
+    renderingProps: z.any().optional(), // 额外的渲染属性
+  })).optional().default([]),
 });
 
 export type MAP_CONFIG = z.infer<typeof MAP_CONFIG_SCHEMA>;
+export type Zone = NonNullable<MAP_CONFIG['zones']>[number];
+
+// 新增: POI (Point of Interest) 定义
+// moved here to avoid circular deps if needed, but currently keeping POI in mapTemplate is fine if MAP_CONFIG doesn't use it.
+// Actually POI is also map data. Let's move it here too? No, existing code puts it in Template.
+// But Zone is needed in Config because Config is what Client receives (often).
+// Server sends Config to Client.
+// MapTemplate is Server-side asset.
+
 
 // 默认地图配置（Day1占位）
 export const DEFAULT_MAP_CONFIG: MAP_CONFIG = {
@@ -28,6 +49,7 @@ export const DEFAULT_MAP_CONFIG: MAP_CONFIG = {
     w: 200,
     h: 200,
   },
+  zones: [], // 初始化为空
 };
 
 // 物品类型配置（Day1占位，已废弃，保留用于兼容）

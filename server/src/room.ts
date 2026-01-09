@@ -106,7 +106,12 @@ export class Room {
       this.seed = Math.floor(Math.random() * 2**31);
     }
 
-    this.mapConfig = mapTemplate ? { ...mapTemplate.mapConfig, seed: this.seed } : loadMapConfig(this.seed);
+    this.mapConfig = mapTemplate ? { 
+        ...mapTemplate.mapConfig, 
+        seed: this.seed,
+        // 将模板中的 zones 合并到 mapConfig (如果 mapConfig.zones 已经在 MAP_CONFIG 定义中)
+        zones: mapTemplate.zones || [] 
+    } : loadMapConfig(this.seed);
     this.mapTemplateId = mapTemplate?.id;
     this.mapTemplate = mapTemplate; // 保存模板引用用于重刷
     this.spawnPoints = mapTemplate?.spawns ? mapTemplate.spawns.map((s) => ({ ...s })) : [];
@@ -145,6 +150,64 @@ export class Room {
       }
       this.spawnAIsFromTemplate(mapTemplate);
     }
+    
+    // 启动时检查地图连通性
+    this.validateConnectivity();
+  }
+
+  // 新增: 验证地图连通性
+  private validateConnectivity(): void {
+    if (this.spawnPoints.length === 0) return;
+
+    const startNode = this.spawnPoints[0];
+    const reachable = new Set<string>();
+    const keyPoints: { x: number, y: number, name: string }[] = [];
+
+    // 收集关键点
+    this.spawnPoints.forEach((s, i) => keyPoints.push({ x: s.x, y: s.y, name: `Spawn ${i}` }));
+    if (this.mapConfig.extractZone) {
+       const e = this.mapConfig.extractZone;
+       keyPoints.push({ x: e.x + e.w/2, y: e.y + e.h/2, name: `Extract Zone` });
+    }
+    // POI
+    if (this.mapTemplate?.pois) {
+        this.mapTemplate.pois.forEach((p) => keyPoints.push({ x: p.x, y: p.y, name: `POI ${p.name || p.id}` }));
+    }
+
+    // 简单的 BFS 检查连通性 (基于 NavGrid)
+    // 注意: 这里假设 NavGrid 已经构建好，并且 obstacles 是静态的
+    // 我们暂时只检查 spawnPoints 是否都能互相到达 (或者至少能从 Spawn 0 到达其他点)
+    
+    // 由于 NavGrid 是 grid-based，我们把世界坐标转 Grid 坐标
+    const checkPoint = (pt: {x: number, y: number, name: string }) => {
+        // 使用 pathfinder 尝试寻路 (或者直接用 navGrid 的 flood fill 如果有的话)
+        // 这里为了简单，我们直接调用 findPath。虽然慢一点，但只在启动时跑一次。
+        // 优化: 其实只需要从 startNode 跑一次 Dijkstra/BFS 得到所有可达节点。
+        // 但 pathfinder 封装了 A*。
+        // 既然 "优化检查器" 是需求，我们应该做得像样点。
+        
+        // 让我们直接访问 navGrid 的 grid
+        // 无论如何，先简单用 pathfinder 测试连通性
+        if (pt === keyPoints[0]) return; // 跳过自己
+
+        const path = this.pathfinder.findPath(
+            startNode.x, startNode.y,
+            pt.x, pt.y
+        );
+        
+        if (path.length === 0) {
+            log(`[MapValidation] WARNING: Unreachable key point detected: ${pt.name} at (${pt.x}, ${pt.y})`);
+        } else {
+             // log(`[MapValidation] Verified ${pt.name} is reachable.`);
+        }
+    };
+
+    log(`[MapValidation] Starting connectivity check for ${keyPoints.length} key points...`);
+    const startTime = Date.now();
+    for (const pt of keyPoints) {
+        checkPoint(pt);
+    }
+    log(`[MapValidation] Check complete in ${Date.now() - startTime}ms.`);
   }
 
 
@@ -233,7 +296,7 @@ export class Room {
   private pickItemTypeForSpawn(
     rng: () => number,
     allItemTypes = getAllItemTypes(),
-    config?: { itemIds?: string[]; rarityWeights?: { COMMON?: number; RARE?: number; EPIC?: number } }
+    config?: { itemIds?: string[]; rarityWeights?: { COMMON?: number; RARE?: number; EPIC?: number; LEGENDARY?: number } }
   ) {
     let pool = allItemTypes;
 
@@ -251,12 +314,14 @@ export class Room {
     const commonItems = pool.filter((it) => it.rarity === 'COMMON');
     const rareItems = pool.filter((it) => it.rarity === 'RARE');
     const epicItems = pool.filter((it) => it.rarity === 'EPIC');
+    const legendaryItems = pool.filter((it) => it.rarity === 'LEGENDARY');
 
-    // 默认权重：60/30/10
+    // 默认权重：60/30/10/2
     const wCommon = config?.rarityWeights?.COMMON ?? 60;
     const wRare = config?.rarityWeights?.RARE ?? 30;
     const wEpic = config?.rarityWeights?.EPIC ?? 10;
-    const totalW = wCommon + wRare + wEpic;
+    const wLegendary = config?.rarityWeights?.LEGENDARY ?? 2;
+    const totalW = wCommon + wRare + wEpic + wLegendary;
 
     if (totalW <= 0) {
       // 权重非法时，回退到均匀随机
@@ -276,11 +341,18 @@ export class Room {
       return rareItems[Math.floor(rng() * rareItems.length)];
     }
 
-    if (epicItems.length > 0) {
+    acc += wEpic;
+    if (roll < acc && epicItems.length > 0) {
       return epicItems[Math.floor(rng() * epicItems.length)];
     }
 
-    // 如果某个稀有度池子是空的，回退到整体池子
+    if (legendaryItems.length > 0) {
+      return legendaryItems[Math.floor(rng() * legendaryItems.length)];
+    }
+    
+    // 如果还没选中（例如 roll 进了 legendary 区间但没有 legendary 物品），
+    // 或者其他区间为空导致 fallthrough，回退到整体池子（排除掉已经尝试过为空的那些？）
+    // 简单起见，直接从 pool 里随机
     return pool[Math.floor(rng() * pool.length)];
   }
 
@@ -1695,9 +1767,10 @@ export class Room {
     // P0-1 修复: 移除旧拾取逻辑（interact 不再触发拾取）
     // 拾取现在只通过 C2S_PICKUP_WORLD_ITEM / C2S_PICKUP_LOOT_BAG 消息处理
     // 保留 legacy items 拾取逻辑注释，以便未来需要时参考：
-    // if (input.interact && player.status === 'ALIVE') {
-    //   // 旧逻辑，对 this.items 拾取，已废弃
-    // }
+    // Day3: 处理交互（E键）- 打开宝箱/门
+    if (input.interact && player.status === 'ALIVE') {
+      this.handleInteraction(playerId);
+    }
     
     // 撤离进度检查已移至 updateExtractProgress 方法（每 tick 自动检查，不依赖输入）
     
@@ -1991,20 +2064,29 @@ export class Room {
               const obsType = (obstacle as any).type || 'wall';
               if (!isObstacleDestructible(obsType)) continue;
               
-              // 检查障碍物是否在攻击范围内
-              const obsCenterX = obstacle.x + obstacle.w / 2;
-              const obsCenterY = obstacle.y + obstacle.h / 2;
-              const dx = obsCenterX - player.x;
-              const dy = obsCenterY - player.y;
+              // 检查障碍物是否在攻击范围内 (使用最近点检测，而不是中心点圆形检测)
+              const closestX = Math.max(obstacle.x, Math.min(player.x, obstacle.x + obstacle.w));
+              const closestY = Math.max(obstacle.y, Math.min(player.y, obstacle.y + obstacle.h));
+              const dx = closestX - player.x;
+              const dy = closestY - player.y;
               const dist = Math.sqrt(dx * dx + dy * dy);
-              
-              if (dist <= meleeRange + Math.max(obstacle.w, obstacle.h) / 2) {
-                // 检查是否在瞄准方向
-                const aimDir = Math.atan2(dy, dx);
-                const aimDiff = Math.abs(aimDir - input.aim);
-                const normalizedDiff = Math.min(aimDiff, Math.PI * 2 - aimDiff);
+
+              if (dist <= meleeRange) {
+                // 检查是否在瞄准方向 (使用最近点计算角度)
+                // 注意：如果非常近(距离近似0)，则认为直接命中（在障碍物内部或贴着）
+                if (dist < 1) {
+                    // Inside or touching
+                } else {
+                    const aimDir = Math.atan2(dy, dx);
+                    const aimDiff = Math.abs(aimDir - input.aim);
+                    const normalizedDiff = Math.min(aimDiff, Math.PI * 2 - aimDiff);
+                    
+                    if (normalizedDiff > meleeArcRad / 2) {
+                        continue; // 不在扇形范围内
+                    }
+                }
                 
-                if (normalizedDiff < meleeArcRad / 2) {
+                // 命中逻辑继续...
                   // 命中障碍物！造成伤害
                   const obstacleHp = (obstacle as any).hp ?? Infinity;
                   const damage = weaponDef.damage;
@@ -2030,7 +2112,6 @@ export class Room {
                   this.combatEvents.get(playerId)!.push({ kind: 'HIT' });
                   
                   break; // 只命中一个障碍物
-                }
               }
             }
           }
@@ -3356,6 +3437,23 @@ export class Room {
       if (!isObstacleDestructible(obsType)) return true; // 不可破坏的永久保留
       const isDestroyed = (obs.hp ?? Infinity) <= 0;
       if (isDestroyed) {
+        // 宝箱和所有类型的箱子/资源点被破坏时生成掉落物
+        const crateTypes = [
+          'chest_closed', 'crate', 'weapon_crate', 'throwable_crate', 'medical_crate', 'equipment_crate',
+          'vehicle', 'supply_stack'
+        ];
+        if (crateTypes.includes(obsType)) {
+          this.spawnLootFromChest(obs);
+          log('CHEST_DESTROYED_WITH_LOOT', {
+            room: this.id,
+            obstacleId: obs.id ?? 'unknown',
+            obstacleType: obsType,
+            x: obs.x,
+            y: obs.y,
+            tick: this.tick,
+          });
+        }
+        
         log('OBSTACLE_DESTROYED', {
           room: this.id,
           obstacleId: obs.id ?? 'unknown',
@@ -4073,6 +4171,257 @@ export class Room {
   // P2-1: 旧 items 系统已停用，返回空数组（保持协议兼容）
   getItems(): ITEM_STATE[] {
     return []; // 返回空数组，不再使用旧 items
+  }
+
+  // 新增: 处理交互
+  handleInteraction(playerId: string): void {
+    const player = this.players.get(playerId);
+    if (!player || player.status !== 'ALIVE') return;
+
+    // 交互范围
+    const INTERACT_RANGE = 80;
+    
+    let bestDist = INTERACT_RANGE;
+    let bestObs: any = null;
+
+    for (const obs of this.obstacles) {
+      const type = (obs as any).type;
+      // 只处理门和宝箱
+      if (type !== 'door_closed' && type !== 'door_open' && type !== 'chest_closed') continue;
+
+      // 计算到障碍物矩形的最近距离
+      const closestX = Math.max(obs.x, Math.min(player.x, obs.x + obs.w));
+      const closestY = Math.max(obs.y, Math.min(player.y, obs.y + obs.h));
+      const dist = Math.hypot(player.x - closestX, player.y - closestY);
+
+      if (dist < bestDist) {
+        bestDist = dist;
+        bestObs = obs;
+      }
+    }
+
+    if (bestObs) {
+        const type = bestObs.type;
+        if (type === 'door_closed') {
+             bestObs.type = 'door_open';
+             this.pushEvent(`Player ${player.name || playerId} opened a door`);
+        } else if (type === 'door_open') {
+             bestObs.type = 'door_closed';
+             this.pushEvent(`Player ${player.name || playerId} closed a door`);
+        } else if (type === 'chest_closed') {
+             bestObs.type = 'chest_open';
+             this.spawnLootFromChest(bestObs);
+             this.pushEvent(`Player ${player.name || playerId} opened a chest`);
+        }
+    }
+  }
+
+  // 新增: 从宝箱生成掉落物 (80% EPIC, 20% LEGENDARY)
+  private spawnLootFromChest(chest: any): void {
+    const lootX = chest.x + chest.w / 2;
+    const lootY = chest.y + chest.h / 2;
+    const crateType = chest.type || 'crate';
+    
+    // 根据箱子类型选择掉落表
+    let lootItems: Array<{ typeId: string; qty: number }> = [];
+    
+    switch (crateType) {
+      case 'weapon_crate':
+        lootItems = this.generateWeaponLoot();
+        break;
+      case 'throwable_crate':
+        lootItems = this.generateThrowableLoot();
+        break;
+      case 'medical_crate':
+        lootItems = this.generateMedicalLoot();
+        break;
+      case 'equipment_crate':
+        lootItems = this.generateEquipmentLoot();
+        break;
+      case 'vehicle':
+        lootItems = this.generateVehicleLoot(); // 车辆：随机
+        break;
+      case 'supply_stack':
+        lootItems = this.generateSupplyStackLoot(); // 物资堆：混合
+        break;
+      default:
+        // 普通箱子和宝箱：掉落传奇物品
+        lootItems = this.generateRandomLegendaryLoot();
+        break;
+    }
+    
+    // 生成world items
+    for (const loot of lootItems) {
+      const wid = `world_item_${this.seed}_${this.worldItemIdCounter++}`;
+      // 稍微随机偏移位置避免重叠
+      const offsetX = (Math.random() - 0.5) * 30;
+      const offsetY = (Math.random() - 0.5) * 30;
+      this.worldItems.set(wid, {
+        wid,
+        x: lootX + offsetX,
+        y: lootY + offsetY,
+        typeId: loot.typeId,
+        qty: loot.qty,
+      });
+    }
+  }
+
+  // 生成武器箱掉落
+  private generateWeaponLoot(): Array<{ typeId: string; qty: number }> {
+    const weapons = ['w_pistol', 'w_smg', 'w_ar', 'w_shotgun', 'w_sniper', 'w_dmr'];
+    const count = 1 + Math.floor(Math.random() * 2); // 1-2把武器
+    const result = [];
+    for (let i = 0; i < count; i++) {
+      const weapon = weapons[Math.floor(Math.random() * weapons.length)];
+      result.push({ typeId: weapon, qty: 1 });
+    }
+    return result;
+  }
+
+  // 生成投掷物箱掉落
+  private generateThrowableLoot(): Array<{ typeId: string; qty: number }> {
+    const throwables = ['frag_grenade', 'smoke_grenade', 'molotov', 'flash_grenade'];
+    const count = 2 + Math.floor(Math.random() * 3); // 2-4个
+    const result = [];
+    for (let i = 0; i < count; i++) {
+      const item = throwables[Math.floor(Math.random() * throwables.length)];
+      result.push({ typeId: item, qty: 1 });
+    }
+    return result;
+  }
+
+  // 生成医疗箱掉落
+  private generateMedicalLoot(): Array<{ typeId: string; qty: number }> {
+    const medical = ['medkit', 'advanced_medkit', 'regeneration_serum', 'combat_stim'];
+    const count = 2 + Math.floor(Math.random() * 2); // 2-3个
+    const result = [];
+    for (let i = 0; i < count; i++) {
+      const item = medical[Math.floor(Math.random() * medical.length)];
+      result.push({ typeId: item, qty: 1 });
+    }
+    return result;
+  }
+
+  // 生成装备箱掉落
+  private generateEquipmentLoot(): Array<{ typeId: string; qty: number }> {
+    const equipment = ['armor_kevlar', 'armor_tactical', 'armor_heavy', 'bag_sling', 'bag_military'];
+    const count = 1 + Math.floor(Math.random() * 2); // 1-2件
+    const result = [];
+    for (let i = 0; i < count; i++) {
+      const item = equipment[Math.floor(Math.random() * equipment.length)];
+      result.push({ typeId: item, qty: 1 });
+    }
+    return result;
+  }
+
+  // 生成随机传奇物品（普通箱子）
+  private generateRandomLegendaryLoot(): Array<{ typeId: string; qty: number }> {
+    const allItems = getAllItemTypes();
+    const epicItems = allItems.filter(item => item.rarity === 'EPIC');
+    const legendaryItems = allItems.filter(item => item.rarity === 'LEGENDARY');
+    
+    let typeId = 'legendary_core';
+    const rng = createRng(this.tick + Math.random());
+    const roll = rng();
+    
+    // 80% EPIC, 20% LEGENDARY
+    if (roll < 0.8 && epicItems.length > 0) {
+      const index = Math.floor(rng() * epicItems.length);
+      typeId = epicItems[index].id;
+    } else if (legendaryItems.length > 0) {
+      const index = Math.floor(rng() * legendaryItems.length);
+      typeId = legendaryItems[index].id;
+    }
+    
+    return [{ typeId, qty: 1 }];
+  }
+
+  // 生成车辆掉落（随机混合）
+  private generateVehicleLoot(): Array<{ typeId: string; qty: number }> {
+    const commonItems = ['medkit', 'frag_grenade', 'smoke_grenade', 'bag_sling'];
+    const count = 1 + Math.floor(Math.random() * 2); // 1-2件
+    const result = [];
+    
+    for (let i = 0; i < count; i++) {
+      const item = commonItems[Math.floor(Math.random() * commonItems.length)];
+      result.push({ typeId: item, qty: 1 });
+    }
+    
+    return result;
+  }
+
+  // 生成物资堆掉落（混合物资）
+  private generateSupplyStackLoot(): Array<{ typeId: string; qty: number }> {
+    const result = [];
+    const categories = [
+      ['w_pistol', 'w_smg'], // 武器
+      ['medkit', 'advanced_medkit'], // 医疗
+      ['frag_grenade', 'smoke_grenade'], // 投掷物
+      ['bag_sling', 'armor_kevlar'] // 装备
+    ];
+    
+    // 从2-4个类别中随机选择
+    const count = 2 + Math.floor(Math.random() * 3);
+    const shuffled = categories.sort(() => Math.random() - 0.5);
+    
+    for (let i = 0; i < Math.min(count, shuffled.length); i++) {
+      const category = shuffled[i];
+      const item = category[Math.floor(Math.random() * category.length)];
+      result.push({ typeId: item, qty: 1 });
+    }
+    
+    return result;
+  }
+
+  // 新增: 更新障碍物状态（破坏逻辑）
+  private updateObstacles(): void {
+    // 遍历所有障碍物，处理HP<=0的情况
+    // 使用 for loop 以便原地修改或替换
+    for (const obs of this.obstacles) {
+       const hp = (obs as any).hp;
+       if (hp !== undefined && hp <= 0) {
+           const type = (obs as any).type;
+           
+           // 如果是还没“坏掉”的状态
+           if (type !== 'broken') {
+               // 宝箱被破坏也会掉落（如果还没开）
+               if (type === 'chest_closed') {
+                   this.spawnLootFromChest(obs);
+                   (obs as any).type = 'broken';
+                   (obs as any).hp = Infinity; // 残骸不可破坏
+               } else if (type === 'door_closed' || type === 'door_open' || type === 'glass') {
+                   // 门和玻璃变为残骸
+                   (obs as any).type = 'broken';
+                   (obs as any).hp = Infinity;
+                   // 木箱被破坏，应当掉落物品
+                   this.spawnLootFromChest(obs);
+                   log('CRATE_DESTROYED_WITH_LOOT', {
+                     room: this.id,
+                     obsId: (obs as any).id,
+                     x: obs.x,
+                     y: obs.y,
+                     tick: this.tick
+                   });
+                   // 之后会在 filter 中被移除
+               }
+           }
+       }
+    }
+
+    // 真正移除需要移除的障碍物（crate）
+    // 保留 (hp > 0) 或者 (type === 'broken' or 'chest_open')
+    // 注意：墙壁 HP 是 Infinity，也会保留
+    this.obstacles = this.obstacles.filter(obs => {
+        const hp = (obs as any).hp;
+        if (hp !== undefined && hp <= 0) {
+            const type = (obs as any).type;
+            // 保留残骸和已开启的宝箱
+            if (type === 'broken' || type === 'chest_open') return true;
+            // 其他（如 crate）移除
+            return false;
+        }
+        return true;
+    });
   }
 
   // 新增: 拾取世界物品

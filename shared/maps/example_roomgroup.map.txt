@@ -1,0 +1,69 @@
+# MAPTEXT v1
+# RoomGroup Feature Showcase
+# 展示 @roomgroup 高级语法的各种布局
+
+@meta id=roomgroup_showcase name="RoomGroup Showcase" desc="展示@roomgroup高级语法：横向、纵向、网格布局"
+@map width=2000 height=1500 seed=20260109
+
+@extract x=1700 y=1300 w=150 h=150
+@spawn x=100 y=100
+@spawn x=100 y=1400
+@spawn x=1800 y=100
+
+# === 示例1: 横向排列 (T型结构) ===
+# 三个房间水平排列，中间房间有四个门连接所有方向
+@roomgroup layout=horizontal x=500 y=500 cellH=400
+  west: w=300 doors=e
+  center: w=500 doors=wens
+  east: w=300 doors=w
+
+# === 示例2: 纵向排列 ===
+# 三个房间垂直堆叠，顶部房间有北门对外
+@roomgroup layout=vertical x=100 y=600 cellW=300
+  top: h=200 doors=ns
+  mid: h=300 doors=ns
+  bot: h=200 doors=n
+
+# === 示例3: 2x2网格布局 ===
+# 四个房间组成2x2网格，四个角有对外门
+@roomgroup layout=grid x=1400 y=100 cols=2 rows=2 cellW=250 cellH=200
+  nw: doors=nse
+  ne: doors=nsw
+  sw: doors=nse
+  se: doors=nsw
+
+# === 示例4: 复杂横向布局 ===
+# 展示不同宽度的房间组合，两端有对外门
+@roomgroup layout=horizontal x=200 y=200 cellH=250
+  r1: w=200 doors=ne
+  r2: w=400 doors=we
+  r3: w=250 doors=we
+  r4: w=200 doors=sw
+
+# === 添加不同类型的箱子展示 ===
+# 展示5种不同类型的箱子
+@obstacle x=700 y=650 w=50 h=50 type=weapon_crate
+@obstacle x=770 y=650 w=50 h=50 type=throwable_crate
+@obstacle x=840 y=650 w=50 h=50 type=medical_crate
+@obstacle x=910 y=650 w=50 h=50 type=equipment_crate
+@obstacle x=980 y=650 w=50 h=50 type=crate
+@obstacle x=1050 y=650 w=50 h=50 type=chest_closed
+
+# === AI 守卫 ===
+@aispawn x=750 y=700 type=guard role=basic count=1 radius=100
+@aispawn x=250 y=850 type=guard role=sniper count=1 radius=120
+@aispawn x=1500 y=250 type=patrol role=scout count=1 patrol=nw,ne,sw,se
+
+# === 添加一些草丛 ===
+@obstacle x=1300 y=500 w=80 h=60 type=bush
+@obstacle x=400 y=1000 w=100 h=70 type=bush
+
+# === 区域定义 ===
+@zone x=500 y=500 w=1100 h=400 id=main_hall type=tile name="Main Hall" desc="中央大厅区域"
+@zone x=1400 y=100 w=500 h=400 id=grid_area type=wood name="Grid Rooms" desc="网格房间区域"
+
+# === 物品刷新 ===
+@itemrespawn id=hall_loot mode=initial count=3 maxItems=5 zoneId=main_hall rarityWeights=COMMON:70,RARE:25,EPIC:5
+@itemrespawn id=grid_loot mode=initial count=2 maxItems=3 zoneId=grid_area rarityWeights=RARE:60,EPIC:30,LEGENDARY:10
+
+@airespawn intervalTicks=1200 maxAIs=8

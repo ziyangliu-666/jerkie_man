@@ -3971,7 +3971,8 @@ function renderLoop(): void {
       // 新增: 在 RAID phase 或 phase 未接收时渲染世界
       if (currentPhase === 'RAID' || currentPhase === null) {
         // Day4-1: 使用 server 下发的 mapConfig（优先），fallback 到本地配置
-        const extractZone = serverMapConfig?.extractZone ?? fallbackMapConfig.extractZone;
+        const mapConfig = serverMapConfig ?? fallbackMapConfig;
+        const extractZone = mapConfig.extractZone;
         
         // 修复: 使用 snapshot 中的障碍物（可破坏，需要实时同步）
         // 如果 snapshot 中没有 obstacles，则使用缓存的（向后兼容）
@@ -4090,7 +4091,6 @@ function renderLoop(): void {
         // 计算最近可交互目标（用于在canvas中显示物品信息提示框）
         let nearbyInteractableForRender: { type: 'worldItem' | 'lootBag' | 'extractZone'; name: string; distance: number } | null = null;
         if (renderLocalPlayerForTooltip && renderLocalPlayerForTooltip.status === 'ALIVE') {
-          const mapConfig = serverMapConfig ?? fallbackMapConfig;
           nearbyInteractableForRender = findNearestInteractable(
             renderLocalPlayerForTooltip.x,
             renderLocalPlayerForTooltip.y,
@@ -4128,7 +4128,9 @@ function renderLoop(): void {
           renderLocalPlayerForTooltip?.inBush ?? false, // 新增: 本地玩家是否在草丛内
           state.ais ?? [], // 新增: AI实体列表
           state.decoys ?? [], // 新增: 诱饵列表
-          state.turrets ?? [] // 新增: 炮台列表
+          state.turrets ?? [], // 新增: 炮台列表
+          // 新增: 地图区域
+          mapConfig.zones || [] 
         );
       } else {
         // 非 RAID phase: 只清屏（显示暗背景）
@@ -4994,4 +4996,3 @@ function renderKillFeed(feed: S2C_KILL_FEED): void {
     container.removeChild(container.firstChild as Node);
   }
 }
-

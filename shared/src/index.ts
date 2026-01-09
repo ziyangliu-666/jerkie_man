@@ -11,7 +11,16 @@ export * from './rng.js';
 export * from './sim.js';
 
 // 内容配置
-export * from './content.js';
+// 内容配置
+export { 
+  MAP_CONFIG_SCHEMA, 
+  DEFAULT_MAP_CONFIG, 
+  ITEM_TYPE_SCHEMA, 
+  DEFAULT_ITEM_TYPES, 
+  loadMapConfig, 
+  loadItemTypes 
+} from './content.js';
+export type { MAP_CONFIG, Zone, ITEM_TYPE } from './content.js';
 
 // 物品系统类型和目录
 export * from './types.js';
@@ -36,5 +45,5 @@ export * from './mapTemplate.js';
 // 障碍物配置
 export * from './obstacleConfig.js';
 
-// 显式导出内容加载器函数
-export { loadMapConfig, loadItemTypes } from './content.js';
+// 显式导出内容加载器函数 (已在上文导出)
+// export { loadMapConfig, loadItemTypes } from './content.js';

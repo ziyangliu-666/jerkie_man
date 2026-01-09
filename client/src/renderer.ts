@@ -1,4 +1,4 @@
-import type { PLAYER_STATE, BULLET_STATE, ITEM_STATE, OBSTACLE_STATE, WorldItem, LootBag, DECOY_STATE, TURRET_STATE } from '@jerkie-man/shared';
+import type { PLAYER_STATE, BULLET_STATE, ITEM_STATE, OBSTACLE_STATE, WorldItem, LootBag, DECOY_STATE, TURRET_STATE, Zone } from '@jerkie-man/shared';
 import { getItemType, getWeaponDef, msToTicks, PLAYER_SPEED } from '@jerkie-man/shared';
 
 export class Renderer {
@@ -1970,31 +1970,74 @@ export class Renderer {
     const now = Date.now();
     
     let color = '#00ff00';
+    let isLegendary = false;
+    let itemType;
     try {
-      const itemType = getItemType(worldItem.typeId);
+      itemType = getItemType(worldItem.typeId);
       if (itemType.rarity === 'RARE') color = '#0088ff';
       else if (itemType.rarity === 'EPIC') color = '#9d4edd';
-      else if (itemType.rarity === 'LEGENDARY') color = '#ffaa00';
+      else if (itemType.rarity === 'LEGENDARY') {
+          color = '#ffaa00';
+          isLegendary = true;
+      }
     } catch {}
 
     this.ctx.save();
     
+    // Legendary Special Effects
+    if (isLegendary) {
+        const time = now / 300; // Speed of animation
+        const pulse = 1 + Math.sin(time) * 0.3; // 0.7 to 1.3
+        
+        // 1. Pulsating Outer Glow (Larger)
+        const glowRadius = size * 2.5 * pulse;
+        const glow = this.ctx.createRadialGradient(screenX, screenY, 0, screenX, screenY, glowRadius);
+        glow.addColorStop(0, `rgba(255, 215, 0, 0.8)`); // Gold center
+        glow.addColorStop(0.5, `rgba(255, 165, 0, 0.4)`); // Orange mid
+        glow.addColorStop(1, `rgba(255, 165, 0, 0)`); // Transparent edge
+        
+        this.ctx.fillStyle = glow;
+        this.ctx.beginPath();
+        this.ctx.arc(screenX, screenY, glowRadius, 0, Math.PI * 2);
+        this.ctx.fill();
+
+        // 2. Rotating Halo / Star
+        const angle = now / 500;
+        this.ctx.translate(screenX, screenY);
+        this.ctx.rotate(angle);
+        
+        this.ctx.strokeStyle = `rgba(255, 255, 200, 0.8)`;
+        this.ctx.lineWidth = 2;
+        this.ctx.beginPath();
+        const haloSize = size * 1.8;
+        this.ctx.rect(-haloSize/2, -haloSize/2, haloSize, haloSize);
+        this.ctx.stroke();
+        
+        // Reset transform for main item
+        this.ctx.rotate(-angle);
+        this.ctx.translate(-screenX, -screenY);
+    } else {
+        // Normal Glow
+        const finalY = screenY;
+        const glow = this.ctx.createRadialGradient(screenX, finalY, 0, screenX, finalY, size * 1.5);
+        glow.addColorStop(0, `${color}66`); // 40% alpha
+        glow.addColorStop(1, `${color}00`); // transparent
+        this.ctx.fillStyle = glow;
+        this.ctx.beginPath();
+        this.ctx.arc(screenX, finalY, size * 1.5, 0, Math.PI * 2);
+        this.ctx.fill();
+    }
+
     // 绘制物品主体 (菱形旋转)
     const finalY = screenY;
-
-    // 绘制底部光晕
-    const glow = this.ctx.createRadialGradient(screenX, finalY, 0, screenX, finalY, size * 1.5);
-    glow.addColorStop(0, `${color}66`); // 40% alpha
-    glow.addColorStop(1, `${color}00`); // transparent
-    this.ctx.fillStyle = glow;
-    this.ctx.beginPath();
-    this.ctx.arc(screenX, finalY, size * 1.5, 0, Math.PI * 2);
-    this.ctx.fill();
-
-    // 绘制物品主体 (菱形旋转)
+    
     this.ctx.translate(screenX, finalY);
     this.ctx.rotate(Math.PI / 4); // 旋转45度成菱形
     
+    // Legendary pulsates size too
+    const scale = isLegendary ? (1 + Math.sin(now/200)*0.1) : 1;
+    this.ctx.scale(scale, scale);
+
     this.ctx.fillStyle = color;
     this.ctx.fillRect(-size / 2, -size / 2, size, size);
     
@@ -2205,19 +2248,127 @@ export class Renderer {
     this.ctx.restore();
   }
 
-  // 新增: 绘制地图背景（地板、网格、灰尘等）
-  private drawFloor(): void {
+  // 新增: 绘制地图背景和地板
+  private drawFloor(zones: Zone[] = []): void {
     if (this.worldWidth <= 0 || this.worldHeight <= 0) return;
 
     this.ctx.save();
     
-    // 基础颜色 (深灰褐色，比单纯的 #2a2a2a 更有质感)
+    // 1. 基础颜色 (深灰褐色，比单纯的 #2a2a2a 更有质感)
     this.ctx.fillStyle = '#222222';
     const floorX = Math.round(0 - this.camX);
     const floorY = Math.round(0 - this.camY);
     this.ctx.fillRect(floorX, floorY, this.worldWidth, this.worldHeight);
 
-    // 绘制网格 (暗色细线)
+    // 2. 绘制区域 (Zones)
+    for (const zone of zones) {
+        // 简单的视锥剔除
+        if (
+            zone.x + zone.w < this.camX ||
+            zone.x > this.camX + this.cssWidth ||
+            zone.y + zone.h < this.camY ||
+            zone.y > this.camY + this.cssHeight
+        ) {
+            continue;
+        }
+
+        const zx = Math.round(zone.x - this.camX);
+        const zy = Math.round(zone.y - this.camY);
+        const zw = zone.w;
+        const zh = zone.h;
+
+        // 生成种子
+        const seedStr = zone.id || `${zone.x}_${zone.y}`;
+        const seed = seedStr.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
+
+        this.ctx.save();
+        this.ctx.beginPath();
+        this.ctx.rect(zx, zy, zw, zh);
+        this.ctx.clip(); // 限制绘制区域
+
+        switch (zone.type) {
+            case 'grass':
+                this.ctx.fillStyle = '#2d3a2d'; // 深绿
+                this.ctx.fillRect(zx, zy, zw, zh);
+                // 绘制草丛纹理 (杂点)
+                this.ctx.fillStyle = '#3a4a3a';
+                for (let i = 0; i < zw * zh / 400; i++) {
+                     const rx = (seed * (i + 1) * 17) % zw;
+                     const ry = (seed * (i + 1) * 23) % zh;
+                     this.ctx.fillRect(zx + rx, zy + ry, 3, 3);
+                }
+                break;
+            case 'wood':
+                this.ctx.fillStyle = '#3e2723'; // 深棕
+                this.ctx.fillRect(zx, zy, zw, zh);
+                // 绘制木板条纹
+                this.ctx.strokeStyle = '#281a17';
+                this.ctx.lineWidth = 2;
+                const plankSize = 25;
+                for (let y = 0; y < zh; y += plankSize) {
+                    this.ctx.beginPath();
+                    this.ctx.moveTo(zx, zy + y);
+                    this.ctx.lineTo(zx + zw, zy + y);
+                    this.ctx.stroke();
+                }
+                break;
+            case 'tile':
+                this.ctx.fillStyle = '#37474f'; // 蓝灰地砖
+                this.ctx.fillRect(zx, zy, zw, zh);
+                // 绘制方砖网格
+                this.ctx.strokeStyle = '#263238';
+                this.ctx.lineWidth = 2;
+                const tileSize = 40;
+                this.ctx.beginPath();
+                // 偏移以对齐世界坐标
+                const startX = -(zone.x % tileSize);
+                const startY = -(zone.y % tileSize);
+                for (let x = startX; x < zw; x += tileSize) {
+                    this.ctx.moveTo(zx + x, zy);
+                    this.ctx.lineTo(zx + x, zy + zh);
+                }
+                for (let y = startY; y < zh; y += tileSize) {
+                    this.ctx.moveTo(zx, zy + y);
+                    this.ctx.lineTo(zx + zw, zy + y);
+                }
+                this.ctx.stroke();
+                break;
+            case 'pave':
+            case 'concrete':
+                this.ctx.fillStyle = '#424242'; // 混凝土灰
+                this.ctx.fillRect(zx, zy, zw, zh);
+                // 噪点
+                this.ctx.fillStyle = '#303030';
+                for (let i = 0; i < zw * zh / 800; i++) {
+                     const rx = (seed * (i + 1) * 31) % zw;
+                     const ry = (seed * (i + 1) * 37) % zh;
+                     const s = ((seed * i) % 3) + 2;
+                     this.ctx.fillRect(zx + rx, zy + ry, s, s);
+                }
+                break;
+             case 'water':
+                 this.ctx.fillStyle = '#01579b'; 
+                 this.ctx.fillRect(zx, zy, zw, zh);
+                 // 简单的波纹
+                 this.ctx.fillStyle = 'rgba(255, 255, 255, 0.1)';
+                 const time = performance.now() / 1000;
+                 for (let i = 0; i < zw * zh / 1000; i++) {
+                     const rx = (seed * (i + 1) * 11 + time * 10) % zw;
+                     const ry = (seed * (i + 1) * 13) % zh;
+                     this.ctx.fillRect(zx + rx, zy + ry, 10, 2);
+                 }
+                 break;
+            default:
+                // 通用/默认: 略微提亮
+                this.ctx.fillStyle = 'rgba(255, 255, 255, 0.05)';
+                this.ctx.fillRect(zx, zy, zw, zh);
+                break;
+        }
+
+        this.ctx.restore();
+    }
+
+    // 3. 绘制全局网格 (暗色细线，统一视觉)
     this.ctx.strokeStyle = 'rgba(255, 255, 255, 0.03)';
     this.ctx.lineWidth = 1;
     const gridSize = 100;
@@ -2299,8 +2450,25 @@ export class Renderer {
       // 调用原有的绘制函数，但画到离屏画布上（坐标从 0,0 开始）
       if (type === 'wall') this.drawWall(0, 0, w, h, seed);
       else if (type === 'crate') this.drawCrateImprove(0, 0, w, h, seed);
+      else if (type === 'weapon_crate') this.drawSpecializedCrate(0, 0, w, h, seed, '#8B0000', '🔫');
+      else if (type === 'throwable_crate') this.drawSpecializedCrate(0, 0, w, h, seed, '#FF8C00', '💣');
+      else if (type === 'medical_crate') this.drawSpecializedCrate(0, 0, w, h, seed, '#FFFFFF', '⚕️');
+      else if (type === 'equipment_crate') this.drawSpecializedCrate(0, 0, w, h, seed, '#4169E1', '🎒');
+      
+      // 户外景观类（俯视图）
+      else if (type === 'fence_wood') this.drawFence(0, 0, w, h, '#D2691E');
+      else if (type === 'fence_metal') this.drawFence(0, 0, w, h, '#778899');
+      else if (type === 'shrub') this.drawSimpleCircle(0, 0, w, h, '#6B8E23');
+      else if (type === 'rock_large') this.drawRockLarge(0, 0, w, h, seed);
+      
       else if (type === 'bush') this.drawBushImprove(0, 0, w, h, seed);
       else if (type === 'water') this.drawWaterImprove(0, 0, w, h, seed);
+      else if (type === 'door_closed') this.drawDoor(0, 0, w, h, false, seed);
+      else if (type === 'door_open') this.drawDoor(0, 0, w, h, true, seed);
+      else if (type === 'glass') this.drawGlass(0, 0, w, h, seed);
+      else if (type === 'chest_closed') this.drawChest(0, 0, w, h, false, seed);
+      else if (type === 'chest_open') this.drawChest(0, 0, w, h, true, seed);
+      else if (type === 'broken') this.drawBroken(0, 0, w, h, seed);
       
       // 绘制裂痕（根据 damageTier）
       if (damageTier > 0) {
@@ -2432,6 +2600,327 @@ export class Renderer {
     ctx.strokeRect(screenX, screenY, w, h);
   }
 
+  // 新增: 绘制专门类型的箱子（武器箱、投掷物箱、医疗箱、装备箱）
+  private drawSpecializedCrate(screenX: number, screenY: number, w: number, h: number, seed: number, color: string, icon: string): void {
+    const ctx = this.ctx;
+    
+    // 基础渐变：使用专门的颜色
+    const gradient = ctx.createLinearGradient(screenX, screenY, screenX, screenY + h);
+    gradient.addColorStop(0, color);
+    gradient.addColorStop(1, this.darkenColor(color, 0.4));
+    ctx.fillStyle = gradient;
+    ctx.fillRect(screenX, screenY, w, h);
+
+    // 绘制加固边缘（金属/加强边框）
+    ctx.strokeStyle = this.darkenColor(color, 0.6);
+    ctx.lineWidth = 4;
+    ctx.strokeRect(screenX + 3, screenY + 3, w - 6, h - 6);
+    
+    // 绘制对角线加固条
+    ctx.strokeStyle = this.darkenColor(color, 0.5);
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(screenX + 8, screenY + 8);
+    ctx.lineTo(screenX + w - 8, screenY + h - 8);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(screenX + w - 8, screenY + 8);
+    ctx.lineTo(screenX + 8, screenY + h - 8);
+    ctx.stroke();
+
+    // 绘制图标/符号
+    ctx.font = `${Math.min(w, h) * 0.5}px Arial`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    
+    // 图标阴影效果
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
+    ctx.fillText(icon, screenX + w / 2 + 2, screenY + h / 2 + 2);
+    
+    // 图标主体
+    ctx.fillStyle = color === '#FFFFFF' ? '#000000' : '#FFFFFF'; // 白箱用黑图标，其他用白图标
+    ctx.fillText(icon, screenX + w / 2, screenY + h / 2);
+
+    // 外部主边框
+    ctx.strokeStyle = this.darkenColor(color, 0.7);
+    ctx.lineWidth = 2;
+    ctx.strokeRect(screenX, screenY, w, h);
+  }
+
+  // 简洁渲染：集装箱（方形+文字）
+  private drawContainer(x: number, y: number, w: number, h: number, seed: number): void {
+    const ctx = this.ctx;
+    
+    // 背景色
+    ctx.fillStyle = '#8B4513';
+    ctx.fillRect(x, y, w, h);
+    
+    // 纵向条纹
+    ctx.strokeStyle = 'rgba(0, 0, 0, 0.2)';
+    ctx.lineWidth = 2;
+    for (let i = 1; i < 5; i++) {
+      ctx.beginPath();
+      ctx.moveTo(x + (w * i) / 5, y);
+      ctx.lineTo(x + (w * i) / 5, y + h);
+      ctx.stroke();
+    }
+    
+    // 文字标识
+    ctx.fillStyle = '#FFFFFF';
+    ctx.font = 'bold 16px Arial';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('集装箱', x + w / 2, y + h / 2);
+    
+    // 边框
+    ctx.strokeStyle = '#654321';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(x, y, w, h);
+  }
+
+  // 简洁渲染：车辆（方形+文字）
+  private drawVehicle(x: number, y: number, w: number, h: number, seed: number): void {
+    const ctx = this.ctx;
+    
+    // 背景色
+    ctx.fillStyle = '#696969';
+    ctx.fillRect(x, y, w, h);
+    
+    // 前后挡风玻璃（浅蓝）
+    ctx.fillStyle = 'rgba(150, 200, 255, 0.5)';
+    ctx.fillRect(x + w * 0.1, y + 5, w * 0.8, h * 0.2);
+    ctx.fillRect(x + w * 0.1, y + h - h * 0.2 - 5, w * 0.8, h * 0.2);
+    
+    // 文字标识
+    ctx.fillStyle = '#FFFFFF';
+    ctx.font = 'bold 16px Arial';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('车辆', x + w / 2, y + h / 2);
+    
+    // 边框
+    ctx.strokeStyle = '#3F3F3F';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(x, y, w, h);
+  }
+
+  // 简洁渲染：帐篷（方形+文字）
+  private drawSupplyTent(x: number, y: number, w: number, h: number, seed: number): void {
+    const ctx = this.ctx;
+    
+    // 背景色（军绿）
+    ctx.fillStyle = '#556B2F';
+    ctx.fillRect(x, y, w, h);
+    
+    // 交叉线（帐篷结构）
+    ctx.strokeStyle = 'rgba(0, 0, 0, 0.3)';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(x + w / 2, y);
+    ctx.lineTo(x + w / 2, y + h);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(x, y + h / 2);
+    ctx.lineTo(x + w, y + h / 2);
+    ctx.stroke();
+    
+    // 文字标识
+    ctx.fillStyle = '#FFFFFF';
+    ctx.font = 'bold 14px Arial';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('补给帐篷', x + w / 2, y + h / 2);
+    
+    // 边框
+    ctx.strokeStyle = '#3E4A21';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(x, y, w, h);
+  }
+
+  // 简洁渲染：瞭望塔（方形+文字）
+  private drawWatchtower(x: number, y: number, w: number, h: number, seed: number): void {
+    const ctx = this.ctx;
+    
+    // 背景色（木色）
+    ctx.fillStyle = '#6D4C41';
+    ctx.fillRect(x, y, w, h);
+    
+    // 木板纹理（横向）
+    ctx.strokeStyle = 'rgba(0, 0, 0, 0.2)';
+    ctx.lineWidth = 1;
+    for (let i = 0; i < h; i += 12) {
+      ctx.beginPath();
+      ctx.moveTo(x, y + i);
+      ctx.lineTo(x + w, y + i);
+      ctx.stroke();
+    }
+    
+    // 文字标识
+    ctx.fillStyle = '#FFFFFF';
+    ctx.font = 'bold 16px Arial';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('瞭望塔', x + w / 2, y + h / 2);
+    
+    // 边框
+    ctx.strokeStyle = '#4E342E';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(x, y, w, h);
+  }
+
+  // 简洁渲染：小房屋（方形+文字）
+  private drawSmallHouse(x: number, y: number, w: number, h: number, seed: number): void {
+    const ctx = this.ctx;
+    
+    // 背景色（红褐）
+    ctx.fillStyle = '#A0522D';
+    ctx.fillRect(x, y, w, h);
+    
+    // 瓦片纹理（横向密集线）
+    ctx.strokeStyle = 'rgba(0, 0, 0, 0.15)';
+    ctx.lineWidth = 1;
+    for (let i = 0; i < h; i += 6) {
+      ctx.beginPath();
+      ctx.moveTo(x, y + i);
+      ctx.lineTo(x + w, y + i);
+      ctx.stroke();
+    }
+    
+    // 文字标识
+    ctx.fillStyle = '#FFFFFF';
+    ctx.font = 'bold 16px Arial';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('房屋', x + w / 2, y + h / 2);
+    
+    // 边框
+    ctx.strokeStyle = '#654321';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(x, y, w, h);
+  }
+
+  // 简洁渲染：树木（方形+文字）
+  private drawTreeLarge(x: number, y: number, w: number, h: number, seed: number): void {
+    const ctx = this.ctx;
+    
+    // 背景色（深绿）
+    ctx.fillStyle = '#2E7D32';
+    ctx.fillRect(x, y, w, h);
+    
+    // 叶子纹理（深绿斑点）
+    ctx.fillStyle = 'rgba(27, 94, 32, 0.4)';
+    for (let i = 0; i < 8; i++) {
+      const px = x + (w * ((seed + i * 17) % 100)) / 100;
+      const py = y + (h * ((seed + i * 23) % 100)) / 100;
+      ctx.fillRect(px - 3, py - 3, 6, 6);
+    }
+    
+    // 中心树干标记
+    ctx.fillStyle = '#5D4037';
+    ctx.fillRect(x + w / 2 - 5, y + h / 2 - 5, 10, 10);
+    
+    // 文字标识
+    ctx.fillStyle = '#FFFFFF';
+    ctx.font = 'bold 16px Arial';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('树', x + w / 2, y + h / 2 + 20);
+    
+    // 边框
+    ctx.strokeStyle = '#1B5E20';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(x, y, w, h);
+  }
+
+  // 简洁渲染：岩石（方形+文字）
+  private drawRockLarge(x: number, y: number, w: number, h: number, seed: number): void {
+    const ctx = this.ctx;
+    
+    // 背景色（灰色）
+    ctx.fillStyle = '#696969';
+    ctx.fillRect(x, y, w, h);
+    
+    // 岩石纹理（深色斑点）
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.3)';
+    for (let i = 0; i < 6; i++) {
+      const px = x + (w * ((seed + i * 19) % 100)) / 100;
+      const py = y + (h * ((seed + i * 29) % 100)) / 100;
+      const size = 4 + ((seed + i) % 6);
+      ctx.fillRect(px - size / 2, py - size / 2, size, size);
+    }
+    
+    // 高光
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.2)';
+    ctx.fillRect(x + w * 0.2, y + h * 0.2, w * 0.3, h * 0.3);
+    
+    // 文字标识
+    ctx.fillStyle = '#FFFFFF';
+    ctx.font = 'bold 16px Arial';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('岩石', x + w / 2, y + h / 2);
+    
+    // 边框
+    ctx.strokeStyle = '#4A4A4A';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(x, y, w, h);
+  }
+
+  // 简化渲染：绘制简单方形（用于景观）
+  private drawSimpleBox(x: number, y: number, w: number, h: number, color: string): void {
+    const ctx = this.ctx;
+    ctx.fillStyle = color;
+    ctx.fillRect(x, y, w, h);
+    ctx.strokeStyle = this.darkenColor(color, 0.3);
+    ctx.lineWidth = 2;
+    ctx.strokeRect(x, y, w, h);
+  }
+
+  // 简化渲染：绘制简单圆形（用于树/灌木）
+  private drawSimpleCircle(x: number, y: number, w: number, h: number, color: string): void {
+    const ctx = this.ctx;
+    const centerX = x + w / 2;
+    const centerY = y + h / 2;
+    const radius = Math.min(w, h) / 2;
+    
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.arc(centerX, centerY, radius, 0, Math.PI * 2);
+    ctx.fill();
+    
+    ctx.strokeStyle = this.darkenColor(color, 0.3);
+    ctx.lineWidth = 2;
+    ctx.stroke();
+  }
+
+  // 简化渲染：绘制栅栏
+  private drawFence(x: number, y: number, w: number, h: number, color: string): void {
+    const ctx = this.ctx;
+    ctx.fillStyle = color;
+    ctx.fillRect(x, y, w, h);
+    
+    // 绘制栅栏条纹
+    ctx.strokeStyle = this.darkenColor(color, 0.4);
+    ctx.lineWidth = 2;
+    const spacing = w > h ? h / 3 : w / 3;
+    
+    if (w > h) { // 横向栅栏
+      for (let i = 0; i < w; i += spacing) {
+        ctx.beginPath();
+        ctx.moveTo(x + i, y);
+        ctx.lineTo(x + i, y + h);
+        ctx.stroke();
+      }
+    } else { // 纵向栅栏
+      for (let i = 0; i < h; i += spacing) {
+        ctx.beginPath();
+        ctx.moveTo(x, y + i);
+        ctx.lineTo(x + w, y + i);
+        ctx.stroke();
+      }
+    }
+  }
+
   // 新增: 绘制草丛 (改为方形，满足用户需求)
   private drawBushImprove(screenX: number, screenY: number, w: number, h: number, seed: number): void {
     const ctx = this.ctx;
@@ -2524,6 +3013,231 @@ export class Renderer {
     ctx.strokeRect(screenX + 2, screenY + 2, w - 4, h - 4);
     
     ctx.restore();
+  }
+
+  // 新增: 绘制门
+  private drawDoor(x: number, y: number, w: number, h: number, isOpen: boolean, seed: number): void {
+      const ctx = this.ctx;
+      ctx.save();
+      
+      // 门框
+      ctx.fillStyle = '#4a3b2a';
+      ctx.fillRect(x, y, w, h);
+      
+      const frameSize = 4;
+      const doorX = x + frameSize;
+      const doorY = y + frameSize;
+      const doorW = w - frameSize * 2;
+      const doorH = h - frameSize * 2;
+      
+      if (isOpen) {
+          // 打开的门：画一个半透明的深色区域表示内部，或者画开启的门扇
+          // 简单起见：画半透明
+          ctx.fillStyle = 'rgba(0, 0, 0, 0.4)';
+          ctx.fillRect(doorX, doorY, doorW, doorH);
+          
+          // 画开着的门扇（稍微偏移）
+          ctx.fillStyle = 'rgba(101, 67, 33, 0.6)'; // 半透明棕色
+          // 假设向某侧开启
+          ctx.beginPath();
+          ctx.moveTo(doorX, doorY);
+          ctx.lineTo(doorX + doorW * 0.2, doorY + doorH * 0.1); // 透视感
+          ctx.lineTo(doorX + doorW * 0.2, doorY + doorH * 0.9);
+          ctx.lineTo(doorX, doorY + doorH);
+          ctx.fill();
+      } else {
+          // 关闭的门
+          const grad = ctx.createLinearGradient(doorX, doorY, doorX + doorW, doorY);
+          grad.addColorStop(0, '#8B4513');
+          grad.addColorStop(1, '#A0522D');
+          ctx.fillStyle = grad;
+          ctx.fillRect(doorX, doorY, doorW, doorH);
+          
+          // 门把手
+          const knobSize = 6;
+          ctx.fillStyle = '#FFD700'; // 金色
+          ctx.beginPath();
+          ctx.arc(doorX + doorW - 10, doorY + doorH / 2, knobSize/2, 0, Math.PI*2);
+          ctx.fill();
+          
+          // 门缝/纹理
+          ctx.strokeStyle = 'rgba(0,0,0,0.3)';
+          ctx.beginPath();
+          ctx.moveTo(doorX + doorW/2, doorY);
+          ctx.lineTo(doorX + doorW/2, doorY + doorH);
+          ctx.stroke();
+      }
+      
+      ctx.restore();
+  }
+
+  // 新增: 绘制玻璃
+  private drawGlass(x: number, y: number, w: number, h: number, seed: number): void {
+      const ctx = this.ctx;
+      ctx.save();
+      
+      ctx.fillStyle = 'rgba(173, 216, 230, 0.3)'; // 浅蓝透明
+      ctx.fillRect(x, y, w, h);
+      
+      // 高光反光线条
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.6)';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(x + w * 0.7, y);
+      ctx.lineTo(x + w * 0.3, y + h);
+      ctx.stroke();
+      
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(x + w * 0.8, y);
+      ctx.lineTo(x + w * 0.4, y + h);
+      ctx.stroke();
+      
+      // 边框
+      ctx.strokeStyle = '#888888';
+      ctx.lineWidth = 2;
+      ctx.strokeRect(x, y, w, h);
+      
+      ctx.restore();
+  }
+
+  // 新增: 绘制宝箱
+  private drawChest(x: number, y: number, w: number, h: number, isOpen: boolean, seed: number): void {
+      const ctx = this.ctx;
+      ctx.save();
+      
+      // 阴影
+      ctx.shadowColor = 'rgba(0,0,0,0.5)';
+      ctx.shadowBlur = 10;
+      
+      const lidHeight = h * 0.4;
+      const bodyHeight = h - lidHeight;
+      const bodyY = y + lidHeight;
+
+      // 材质颜色
+      const woodDark = '#5D4037';
+      const woodLight = '#8D6E63';
+      const gold = '#FFD700';
+      const goldDark = '#B8860B';
+
+      if (isOpen) {
+          // --- 开启状态 ---
+          
+          // 1. 内部（暗色背景 + 宝物光芒）
+          ctx.fillStyle = '#26160e';
+          ctx.fillRect(x + 2, bodyY, w - 4, bodyHeight - 2);
+          
+          // 金币堆积效果 (简单表示)
+          ctx.fillStyle = gold;
+          ctx.beginPath();
+          ctx.arc(x + w * 0.3, bodyY + bodyHeight * 0.8, w * 0.2, 0, Math.PI * 2);
+          ctx.arc(x + w * 0.7, bodyY + bodyHeight * 0.7, w * 0.25, 0, Math.PI * 2);
+          ctx.fill();
+          
+          // 2. 箱体前壁 (下半部分)
+          ctx.fillStyle = woodDark;
+          ctx.fillRect(x, bodyY, w, bodyHeight);
+          // 金边框
+          ctx.strokeStyle = goldDark;
+          ctx.lineWidth = 3;
+          ctx.strokeRect(x, bodyY, w, bodyHeight);
+          // 垂直金条
+          ctx.fillStyle = goldDark;
+          ctx.fillRect(x + 10, bodyY, 5, bodyHeight);
+          ctx.fillRect(x + w - 15, bodyY, 5, bodyHeight);
+
+          // 3. 开启的盖子 (梯形透视，向后上方)
+          ctx.fillStyle = woodLight;
+          ctx.strokeStyle = '#3E2723';
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          // 盖子底部连接处
+          ctx.moveTo(x, bodyY); 
+          ctx.lineTo(x + w, bodyY);
+          // 盖子顶部 (远端，稍窄)
+          ctx.lineTo(x + w - 5, y - 10);
+          ctx.lineTo(x + 5, y - 10);
+          ctx.closePath();
+          ctx.fill();
+          ctx.stroke();
+          
+          // 盖子内部阴影
+          ctx.fillStyle = 'rgba(0,0,0,0.3)';
+          ctx.fill();
+
+      } else {
+          // --- 关闭状态 ---
+          
+          // 1. 箱体 (下半部分)
+          ctx.fillStyle = woodDark;
+          ctx.fillRect(x, bodyY, w, bodyHeight);
+          
+          // 2. 箱盖 (上半部分，半圆拱形效果)
+          // 通过渐变模拟圆柱面
+          const lidGrad = ctx.createLinearGradient(x, y, x, bodyY);
+          lidGrad.addColorStop(0, woodDark);
+          lidGrad.addColorStop(0.5, woodLight); // 高光在中间
+          lidGrad.addColorStop(1, woodDark);
+          ctx.fillStyle = lidGrad;
+          // 画一个稍微突出的盖子
+          ctx.fillRect(x, y, w, lidHeight);
+          
+          // 3. 金色装饰带 (垂直环绕)
+          ctx.fillStyle = gold;
+          const bandWidth = 6;
+          // 左带
+          ctx.fillRect(x + 12, y, bandWidth, h);
+          // 右带
+          ctx.fillRect(x + w - 18, y, bandWidth, h);
+          
+          // 4. 锁头 (中间)
+          const lockSize = 12;
+          const lockX = x + w / 2 - lockSize / 2;
+          const lockY = bodyY - lockSize / 2;
+          
+          // 锁底座
+          ctx.fillStyle = goldDark;
+          ctx.fillRect(lockX - 2, lockY - 2, lockSize + 4, lockSize + 4);
+          // 锁孔
+          ctx.fillStyle = '#000';
+          ctx.beginPath();
+          ctx.arc(x + w/2, bodyY, 3, 0, Math.PI*2);
+          ctx.fill();
+          
+          // 5. 轮廓描边
+          ctx.strokeStyle = '#3E2723';
+          ctx.lineWidth = 2;
+          ctx.strokeRect(x, y, w, h);
+      }
+      
+      ctx.restore();
+  }
+
+  // 新增: 绘制残骸
+  private drawBroken(x: number, y: number, w: number, h: number, seed: number): void {
+      const ctx = this.ctx;
+      ctx.save();
+      
+      // 地上的碎片
+      ctx.fillStyle = '#555555';
+      const count = 5;
+      for (let i=0; i<count; i++) {
+          const debrisX = x + ((seed * (i+1) * 17) % w);
+          const debrisY = y + ((seed * (i+1) * 23) % h);
+          const size = 5 + ((seed * i) % 10);
+          ctx.fillRect(debrisX, debrisY, size, size);
+      }
+      
+      // 很多灰尘/杂乱线条
+      ctx.strokeStyle = '#333333';
+      ctx.beginPath();
+      ctx.moveTo(x, y);
+      ctx.lineTo(x + w, y + h);
+      ctx.moveTo(x + w, y);
+      ctx.lineTo(x, y + h);
+      ctx.stroke();
+      
+      ctx.restore();
   }
 
   // 新增: 绘制地图边界框
@@ -2719,7 +3433,8 @@ export class Renderer {
     isLocalPlayerInBush: boolean = false, // 新增: 本地玩家是否在草丛内
     ais: any[] = [], // 新增: AI实体列表
     decoys: DECOY_STATE[] = [], // 新增: 诱饵列表
-    turrets: TURRET_STATE[] = [] // 新增: 炮台列表
+    turrets: TURRET_STATE[] = [], // 新增: 炮台列表
+    zones: Zone[] = [] // 新增: 地图区域列表
   ): void {
     const t0 = performance.now();
     
@@ -2753,7 +3468,7 @@ export class Renderer {
 
     // 新增: 绘制地图背景和地板
     const a0 = performance.now();
-    this.drawFloor();
+    this.drawFloor(zones);
     const a1 = performance.now();
 
     // 新增: 绘制地图边界框（背景层之一）
