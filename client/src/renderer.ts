@@ -254,7 +254,7 @@ export class Renderer {
       this.smoothedAimAngles.set(player.id, aimRad);
     }
 
-    this.drawEyes(screenX, screenY, size, aimRad, isLocal ? 'local' : 'enemy');
+    this.drawEyes(screenX, screenY, size, aimRad, isLocal ? 'local' : 'enemy', player.id);
 
     this.ctx.restore();
 
@@ -423,43 +423,81 @@ export class Renderer {
   /**
    * 新增: 绘制可爱的眼睛，环绕在身体表面
    */
-  private drawEyes(x: number, y: number, bodySize: number, rotation: number, side: 'local' | 'enemy' | 'ai'): void {
+  private drawEyes(x: number, y: number, bodySize: number, rotation: number, side: 'local' | 'enemy' | 'ai', entityId?: string): void {
     this.ctx.save();
     this.ctx.translate(x, y); // still translate to center, but DO NOT rotate context
     
-    // 眼睛设置
-    const eyeRadius = 1.5; // 小黑点
-    const eyeSpacing = 5; // 两眼间距
-    // 计算"表面"距离：由于圆角矩形，我们假设在一个略小的方框上运动
-    // bodySize=20, half=10. "靠里一点" -> 比如 innerBoxRadius = 7
-    const innerBoxRadius = (bodySize / 2) - 3; 
+    // 🎨 灵动改进：根据角色类型和时间动态调整眼睛参数
+    const time = Date.now() / 1000; // 秒为单位
     
-    // 1. 计算朝向向量 (cos, sin)
+    // 为每个实体生成独立的眨眼偏移（基于ID的哈希值）
+    let blinkOffset = 0;
+    if (entityId) {
+      // 简单哈希：将ID字符串转换为0-1之间的数字
+      let hash = 0;
+      for (let i = 0; i < entityId.length; i++) {
+        hash = ((hash << 5) - hash) + entityId.charCodeAt(i);
+        hash = hash & hash; // Convert to 32bit integer
+      }
+      blinkOffset = Math.abs(hash % 1000) / 1000; // 0-1之间的偏移
+    }
+    
+    // 1. 动态眼间距：7px基础间距
+    let baseSpacing = 7;
+    if (side === 'ai') {
+      baseSpacing = 7.5; // AI眼睛稍宽
+    } else if (side === 'local') {
+      baseSpacing = 7.2; // 本地玩家稍宽
+    }
+    // 添加微小的呼吸效果（±0.3像素）
+    const eyeSpacing = baseSpacing + Math.sin(time * 2) * 0.3;
+    
+    // 2. 动态眼睛大小：根据角色类型和时间微调
+    let baseRadius = 1.5;
+    if (side === 'ai') {
+      baseRadius = 1.8; // AI眼睛稍大
+    } else if (side === 'local') {
+      baseRadius = 1.6; // 本地玩家稍大
+    }
+    // 添加眨眼效果（每30秒眨一次，每个实体独立）
+    const blinkCycle = ((time * 0.0333) + blinkOffset) % 1; // 0-1循环，0.0333 = 1/30秒
+    const isBlinking = blinkCycle > 0.98; // 最后2%时间眨眼（更短促）
+    const eyeRadius = isBlinking ? baseRadius * 0.2 : baseRadius;
+    
+    // 3. 动态表面距离：离边缘更远，更靠近正方形中心
+    let innerBoxRadius = (bodySize / 2) - 6; // 从-3改为-6，让眼睛更靠里
+    if (side === 'ai') {
+      innerBoxRadius = (bodySize / 2) - 5.5; // AI眼睛稍靠外一点
+    }
+    // 添加微小的前后移动（±0.5像素）
+    innerBoxRadius += Math.cos(time * 1.5) * 0.5;
+    
+    // 4. 计算朝向向量 (cos, sin)
     const dx = Math.cos(rotation);
     const dy = Math.sin(rotation);
     
-    // 2. 将圆形方向映射到方形边缘 (Ray-Box Intersection logic)
-    // 找到缩放因子 k，使得 (k*dx, k*dy) 落在 max(|x|,|y|) = innerBoxRadius 上
-    // k * max(|dx|, |dy|) = innerBoxRadius => k = innerBoxRadius / max(...)
+    // 5. 将圆形方向映射到方形边缘 (Ray-Box Intersection logic)
     const maxAbs = Math.max(Math.abs(dx), Math.abs(dy));
-    const scale = innerBoxRadius / (maxAbs > 0.001 ? maxAbs : 1); // 避免除以0
+    const scale = innerBoxRadius / (maxAbs > 0.001 ? maxAbs : 1);
     
     const faceX = dx * scale;
     const faceY = dy * scale;
     
-    // 3. 计算眼睛位置
-    // 眼睛也是"流体"的，永远垂直于视线方向排布
-    // 垂线向量: (-sin, cos)
+    // 6. 计算眼睛位置（垂直于视线方向排布）
     const perpX = -dy;
     const perpY = dx;
     
-    const eye1X = faceX - perpX * (eyeSpacing / 2);
-    const eye1Y = faceY - perpY * (eyeSpacing / 2);
+    // 添加微小的不对称效果（让两只眼睛略有差异）
+    const asymmetry = Math.sin(time * 0.5) * 0.2;
     
-    const eye2X = faceX + perpX * (eyeSpacing / 2);
-    const eye2Y = faceY + perpY * (eyeSpacing / 2);
+    const eye1X = faceX - perpX * (eyeSpacing / 2 + asymmetry);
+    const eye1Y = faceY - perpY * (eyeSpacing / 2 + asymmetry);
+    
+    const eye2X = faceX + perpX * (eyeSpacing / 2 - asymmetry);
+    const eye2Y = faceY + perpY * (eyeSpacing / 2 - asymmetry);
 
-    this.ctx.fillStyle = '#000'; // 黑色眼睛
+    // 7. 绘制眼睛（统一使用黑色）
+    this.ctx.fillStyle = '#000'; // 所有角色都用黑色眼睛
 
     // 绘制左眼
     this.ctx.beginPath();
@@ -587,7 +625,7 @@ export class Renderer {
     this.ctx.stroke();
 
     // 3. 绘制眼睛 (Eyes) - aimRad 已在上面计算
-    this.drawEyes(screenX, screenY, size, aimRad, 'ai');
+    this.drawEyes(screenX, screenY, size, aimRad, 'ai', player.id);
 
     this.ctx.restore();
 
@@ -856,7 +894,7 @@ export class Renderer {
 
     // 绘制眼睛（与玩家一致）
     const aimRad = (decoy as any).aimRad ?? 0;
-    this.drawEyes(drawX, drawY, size, aimRad, isOwner ? 'ai' : 'enemy');
+    this.drawEyes(drawX, drawY, size, aimRad, isOwner ? 'ai' : 'enemy', decoy.id);
     
     this.ctx.restore();
 
@@ -1196,7 +1234,7 @@ export class Renderer {
     this.ctx.stroke();
 
     // 3. 绘制眼睛 (Eyes) - aimRad 已在上面计算并平滑
-    this.drawEyes(screenX, screenY, size, aimRad, 'ai');
+    this.drawEyes(screenX, screenY, size, aimRad, 'ai', ai.id);
 
     this.ctx.restore();
 

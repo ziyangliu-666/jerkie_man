@@ -395,11 +395,18 @@ if (bgmToggleBtn && bgmVolumeSlider && bgmNextBtn && bgmTrackSelect && bgmPanelT
     const isMuted = audioManager.toggleMute();
     bgmToggleBtn.classList.toggle('muted', isMuted);
     bgmToggleBtn.textContent = isMuted ? '🔇' : '🔊';
+    // 立即失焦，避免干扰游戏输入
+    bgmToggleBtn.blur();
   });
 
   // 监听音量调节
   bgmVolumeSlider.addEventListener('input', () => {
     audioManager.setVolume(parseFloat(bgmVolumeSlider.value));
+  });
+
+  // 音量滑块失焦后立即释放焦点
+  bgmVolumeSlider.addEventListener('change', () => {
+    bgmVolumeSlider.blur();
   });
 
   // 监听音乐切换
@@ -410,11 +417,15 @@ if (bgmToggleBtn && bgmVolumeSlider && bgmNextBtn && bgmTrackSelect && bgmPanelT
     const next = current >= 10 ? 1 : current + 1;
     audioManager.setTrack(next);
     bgmTrackSelect.value = next.toString(); // 同步下拉框
+    // 立即失焦，避免干扰游戏输入
+    bgmNextBtn.blur();
   });
 
   // 监听下拉框可选择
   bgmTrackSelect.addEventListener('change', () => {
     audioManager.setTrack(parseInt(bgmTrackSelect.value));
+    // 立即失焦，避免干扰游戏输入
+    bgmTrackSelect.blur();
   });
 }
 
@@ -1466,6 +1477,8 @@ function updateEquipmentSlots(): void {
                 unequipBtn.classList.remove('loading');
                 addButtonFeedback(unequipBtn, true, '已卸下');
               }, 300);
+              // 立即失焦，避免干扰游戏输入
+              unequipBtn.blur();
             };
           }
           equipmentWeapon.appendChild(slotItem);
@@ -1510,6 +1523,8 @@ function updateEquipmentSlots(): void {
                 unequipBtn.classList.remove('loading');
                 addButtonFeedback(unequipBtn, true, '已卸下');
               }, 300);
+              // 立即失焦，避免干扰游戏输入
+              unequipBtn.blur();
             };
           }
           equipmentBag.appendChild(slotItem);
@@ -1554,6 +1569,8 @@ function updateEquipmentSlots(): void {
                 unequipBtn.classList.remove('loading');
                 addButtonFeedback(unequipBtn, true, '已卸下');
               }, 300);
+              // 立即失焦，避免干扰游戏输入
+              unequipBtn.blur();
             };
           }
           equipmentArmor.appendChild(slotItem);
@@ -2186,6 +2203,10 @@ function initShopTabs(): void {
           // 更新商店列表
           updateShopList();
         }
+        // 立即失焦，避免干扰游戏输入
+        if (btn instanceof HTMLElement) {
+          btn.blur();
+        }
       });
     });
   }
@@ -2347,6 +2368,10 @@ function initStashTabs(): void {
         currentStashCategory = category;
         // 更新仓库列表
         updateStashList();
+      }
+      // 立即失焦，避免干扰游戏输入
+      if (btn instanceof HTMLElement) {
+        btn.blur();
       }
     });
   });
@@ -3008,6 +3033,9 @@ function initHideoutUI(): void {
         });
         btn.classList.add('active');
         
+        // 立即失焦，避免干扰游戏输入
+        btn.blur();
+        
         // 更新面板显示
         if (hideoutEquipment) hideoutEquipment.classList.remove('active');
         if (hideoutShop) hideoutShop.classList.remove('active');
@@ -3320,6 +3348,10 @@ function initRaidUI(): void {
       const target = e.target as HTMLElement;
       if (!target.classList.contains('raid-bag-drop')) {
         return;
+      }
+      // 立即失焦，避免干扰游戏输入
+      if (target instanceof HTMLButtonElement) {
+        target.blur();
       }
       if (!raidLocalPlayer || raidLocalPlayer.status !== 'ALIVE') {
         hud.addEvent('当前无法丢弃物品');

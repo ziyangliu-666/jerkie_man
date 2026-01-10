@@ -1720,6 +1720,12 @@
       display: flex;
       align-items: center;
       gap: 12px;
+      outline: none; /* 移除焦点轮廓 */
+      user-select: none; /* 防止文本选择 */
+    }
+
+    .tab-btn:focus {
+      outline: none; /* 确保焦点时也没有轮廓 */
     }
 
     .tab-btn::before {
@@ -1986,6 +1992,12 @@
       font-size: 13px;
       transition: all 0.2s;
       border-radius: 4px;
+      outline: none; /* 移除焦点轮廓 */
+      user-select: none; /* 防止文本选择 */
+    }
+
+    .shop-tab-btn:focus {
+      outline: none; /* 确保焦点时也没有轮廓 */
     }
 
     .shop-tab-btn:hover {
@@ -2063,6 +2075,12 @@
       overflow: hidden;
       min-width: 80px;
       box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
+      outline: none; /* 移除焦点轮廓 */
+      user-select: none; /* 防止文本选择 */
+    }
+
+    .item-btn:focus {
+      outline: none; /* 确保焦点时也没有轮廓 */
     }
 
     .item-btn::before {
@@ -2103,6 +2121,10 @@
       box-shadow: 0 4px 12px rgba(0, 255, 255, 0.3);
     }
 
+    .item-btn.primary:focus {
+      outline: none; /* 确保焦点时也没有轮廓 */
+    }
+
     .item-btn.primary::after {
       content: '';
       position: absolute;
@@ -2135,6 +2157,10 @@
       border-color: #d4a017;
       font-weight: bold;
       box-shadow: 0 4px 12px rgba(212, 160, 23, 0.3);
+    }
+
+    .item-btn.secondary:focus {
+      outline: none; /* 确保焦点时也没有轮廓 */
     }
 
     .item-btn.secondary:hover:not(.loading):not(.success):not(.error) {
@@ -3218,6 +3244,7 @@
       max-width: 48px; /* 默认收起宽度 */
       overflow: hidden;
       white-space: nowrap;
+      user-select: none; /* 防止文本选择 */
     }
 
     #bgmControl.expanded {
@@ -3242,11 +3269,16 @@
       border-radius: 50%;
       flex-shrink: 0;
       transition: all 0.2s;
+      outline: none; /* 移除焦点轮廓 */
     }
 
     #bgmPanelToggle:hover {
       background: rgba(0, 255, 255, 0.1);
       text-shadow: 0 0 10px #0ff;
+    }
+
+    #bgmPanelToggle:focus {
+      outline: none; /* 确保焦点时也没有轮廓 */
     }
 
     #bgmPanelContent {
@@ -3275,11 +3307,16 @@
       display: flex;
       align-items: center;
       justify-content: center;
+      outline: none; /* 移除焦点轮廓 */
     }
 
     #bgmToggleBtn:hover {
       color: #fff;
       transform: scale(1.1);
+    }
+
+    #bgmToggleBtn:focus {
+      outline: none; /* 确保焦点时也没有轮廓 */
     }
 
     #bgmToggleBtn.muted {
@@ -3295,6 +3332,10 @@
       border-radius: 2px;
       outline: none;
       cursor: pointer;
+    }
+
+    #bgmVolumeSlider:focus {
+      outline: none; /* 移除焦点轮廓 */
     }
 
     #bgmVolumeSlider::-webkit-slider-thumb {
@@ -3325,11 +3366,16 @@
       width: 30px;
       height: 30px;
       transition: transform 0.2s ease;
+      outline: none; /* 移除焦点轮廓 */
     }
 
     #bgmNextBtn:hover {
       transform: scale(1.1);
       text-shadow: 0 0 8px rgba(0, 255, 255, 0.6);
+    }
+
+    #bgmNextBtn:focus {
+      outline: none; /* 确保焦点时也没有轮廓 */
     }
 
     /* 恢复下拉选择框样式，但更紧凑 */
@@ -3348,6 +3394,11 @@
 
     #bgmTrackSelect:hover {
       border-color: rgba(0, 255, 255, 0.4);
+    }
+
+    #bgmTrackSelect:focus {
+      outline: none; /* 移除焦点轮廓 */
+      border-color: rgba(0, 255, 255, 0.4); /* 保持hover效果 */
     }
 
     #bgmTrackSelect option {
@@ -3436,13 +3487,13 @@
     <!-- BGM 控制器 -->
     <div id="bgmControl">
       <!-- 收起时可见的 Toggle 按钮 -->
-      <button id="bgmPanelToggle" title="音乐控制">🎵</button>
+      <button id="bgmPanelToggle" title="音乐控制" tabindex="-1">🎵</button>
       
       <!-- 展开时可见的内容 -->
       <div id="bgmPanelContent">
-        <button id="bgmToggleBtn" title="切换音乐 (M)">🔊</button>
-        <button id="bgmNextBtn" title="下一首 (N)">⏭</button>
-        <select id="bgmTrackSelect" title="选择曲目">
+        <button id="bgmToggleBtn" title="切换音乐 (M)" tabindex="-1">🔊</button>
+        <button id="bgmNextBtn" title="下一首 (N)" tabindex="-1">⏭</button>
+        <select id="bgmTrackSelect" title="选择曲目" tabindex="-1">
           <option value="1">BGM 1</option>
           <option value="2">BGM 2</option>
           <option value="3">BGM 3</option>
@@ -3454,7 +3505,7 @@
           <option value="9">BGM 9</option>
           <option value="10">BGM 10</option>
         </select>
-        <input type="range" id="bgmVolumeSlider" min="0" max="1" step="0.01" value="0.05" title="调整音量">
+        <input type="range" id="bgmVolumeSlider" min="0" max="1" step="0.01" value="0.05" title="调整音量" tabindex="-1">
       </div>
     </div>
     <!-- Canvas 容器（左侧） -->
@@ -3484,14 +3535,14 @@
           <div class="raid-slot-name" id="raidWeaponName">拳头</div>
           <div class="raid-slot-meta" id="raidWeaponMeta">-</div>
           <div class="raid-slot-actions">
-            <button id="raidWeaponSwap" class="item-btn">交换</button>
-            <button id="raidWeaponUnequip" class="item-btn">卸下</button>
+            <button id="raidWeaponSwap" class="item-btn" tabindex="-1">交换</button>
+            <button id="raidWeaponUnequip" class="item-btn" tabindex="-1">卸下</button>
           </div>
         </div>
         <div class="raid-slot">
           <div class="raid-slot-header">
             <div class="raid-slot-label">背包</div>
-            <button id="raidBagToggle" class="item-btn">展开</button>
+            <button id="raidBagToggle" class="item-btn" tabindex="-1">展开</button>
           </div>
           <div class="raid-slot-name" id="raidBagName">-</div>
           <div class="raid-slot-meta" id="raidBagMeta">-</div>
@@ -3502,7 +3553,7 @@
           <div class="raid-slot-name" id="raidArmorName">-</div>
           <div class="raid-slot-meta" id="raidArmorMeta">-</div>
           <div class="raid-slot-actions">
-            <button id="raidArmorUnequip" class="item-btn">卸下</button>
+            <button id="raidArmorUnequip" class="item-btn" tabindex="-1">卸下</button>
           </div>
         </div>
       </div>
@@ -3891,11 +3942,11 @@
         <div id="hideoutContent">
           <!-- 左侧 Tab -->
           <div id="hideoutTabs">
-            <button class="tab-btn active" data-tab="equipment">
+            <button class="tab-btn active" data-tab="equipment" tabindex="-1">
               <span class="tab-icon">📦</span>
               <span>装备与仓库</span>
             </button>
-            <button class="tab-btn" data-tab="shop">
+            <button class="tab-btn" data-tab="shop" tabindex="-1">
               <span class="tab-icon">💳</span>
               <span>商店</span>
             </button>
@@ -3945,11 +3996,11 @@
                     <h3 style="color: #0ff; margin: 0; font-size: 16px;">仓库</h3>
                     <!-- 仓库分类内嵌到这一行 -->
                     <div id="stashTabs" class="shop-tabs" style="margin: 0; padding: 0; border: none; gap: 6px;">
-                      <button class="shop-tab-btn active" data-stash-category="weapon" style="padding: 6px 12px; font-size: 13px;">武器</button>
-                      <button class="shop-tab-btn" data-stash-category="armor" style="padding: 6px 12px; font-size: 13px;">防具</button>
-                      <button class="shop-tab-btn" data-stash-category="bag" style="padding: 6px 12px; font-size: 13px;">背包</button>
-                      <button class="shop-tab-btn" data-stash-category="consumable" style="padding: 6px 12px; font-size: 13px;">消耗</button>
-                      <button class="shop-tab-btn" data-stash-category="material" style="padding: 6px 12px; font-size: 13px;">材料</button>
+                      <button class="shop-tab-btn active" data-stash-category="weapon" style="padding: 6px 12px; font-size: 13px;" tabindex="-1">武器</button>
+                      <button class="shop-tab-btn" data-stash-category="armor" style="padding: 6px 12px; font-size: 13px;" tabindex="-1">防具</button>
+                      <button class="shop-tab-btn" data-stash-category="bag" style="padding: 6px 12px; font-size: 13px;" tabindex="-1">背包</button>
+                      <button class="shop-tab-btn" data-stash-category="consumable" style="padding: 6px 12px; font-size: 13px;" tabindex="-1">消耗</button>
+                      <button class="shop-tab-btn" data-stash-category="material" style="padding: 6px 12px; font-size: 13px;" tabindex="-1">材料</button>
                     </div>
                   </div>
                   <div id="stashList" class="shop-container"></div>
@@ -3963,11 +4014,11 @@
               <p class="panel-desc">购买物品（买到仓库）</p>
               <!-- 商店分类 Tab -->
               <div id="shopTabs" class="shop-tabs">
-                <button class="shop-tab-btn active" data-shop-category="weapon">武器</button>
-                <button class="shop-tab-btn" data-shop-category="armor">防具</button>
-                <button class="shop-tab-btn" data-shop-category="bag">背包</button>
-                <button class="shop-tab-btn" data-shop-category="consumable">消耗品</button>
-                <button class="shop-tab-btn" data-shop-category="material">材料</button>
+                <button class="shop-tab-btn active" data-shop-category="weapon" tabindex="-1">武器</button>
+                <button class="shop-tab-btn" data-shop-category="armor" tabindex="-1">防具</button>
+                <button class="shop-tab-btn" data-shop-category="bag" tabindex="-1">背包</button>
+                <button class="shop-tab-btn" data-shop-category="consumable" tabindex="-1">消耗品</button>
+                <button class="shop-tab-btn" data-shop-category="material" tabindex="-1">材料</button>
               </div>
               <div id="shopList" class="shop-container"></div>
             </div>
