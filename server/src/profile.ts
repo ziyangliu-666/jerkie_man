@@ -885,7 +885,8 @@ export class ProfileManager {
     log('BUY_ITEM', { accountId, typeId, qty, cost: totalCost, newMoney: profile.money, autoAction });
 
     // 处理自动操作
-    if (autoAction !== 'none') {
+    // ✅ 修复：只在 HIDEOUT 阶段执行 autoAction（避免在 RESULT 阶段尝试修改 prep）
+    if (autoAction !== 'none' && profile.phase === 'HIDEOUT') {
       // 找到刚刚购买的一个实例 iid
       // 如果是可堆叠物品，目前 autoAction 可能没意义（不能装备或单独带入）
       // 但我们还是尝试在 stash 中找一个对应的 typeId

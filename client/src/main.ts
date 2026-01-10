@@ -3906,9 +3906,14 @@ network = new Network(getWebSocketUrl(), 'local', {
     const oldPhase = currentPhase;
     let newPhase = profile.phase;
     
-    // ✅ 修复：如果收到 RESULT phase 但没有 raidResult 数据（刷新后重连），自动切换到 HIDEOUT
+    // ✅ 修复：如果收到 RESULT/RAID phase 但没有对应数据（刷新后重连），自动切换到 HIDEOUT
+    // 原因：刷新后玩家实体已被清理，无法继续战局，服务器应该已经重置为 HIDEOUT
     if (newPhase === 'RESULT' && !raidResult) {
       console.log('[onProfile] Received RESULT phase but no raidResult data, switching to HIDEOUT');
+      newPhase = 'HIDEOUT';
+    }
+    if (newPhase === 'RAID' && !localPlayerId) {
+      console.log('[onProfile] Received RAID phase but no localPlayerId, switching to HIDEOUT');
       newPhase = 'HIDEOUT';
     }
     

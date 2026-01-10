@@ -1425,16 +1425,8 @@ export class Room {
   public handleExitResult(playerId: string): void {
     const accountId = this.playerToAccount.get(playerId);
     if (accountId) {
-      this.profileManager.updateProfile(accountId, { phase: 'HIDEOUT' });
-      const profile = this.profileManager.getProfileData(accountId);
-      
-      // 推送最新的 profile 给客户端
-      const player = this.players.get(playerId);
-      // 注意：这里我们不需要立即 removePlayer，而是让客户端切回 HIDEOUT 界面
-      // 但为了省资源，我们可以把玩家从 players map 中移除（如果不移除，他会一直占着位置）
-      // 不过设计上 'HIDEOUT' 状态的玩家是否还在 room 里？
-      // 当前架构是 single room for everyone?
-      // 看起来 yes. 所以玩家还在 room 里，只是状态变了。
+      // ✅ 修复：使用 updatePhase 而不是 updateProfile 来更新 phase
+      this.profileManager.updatePhase(accountId, 'HIDEOUT');
       
       this.pushEvent(`${playerId} returned to lobby`);
       log('EXIT_RESULT', { playerId, accountId, phase: 'HIDEOUT' });

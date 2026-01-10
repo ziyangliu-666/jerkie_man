@@ -371,10 +371,11 @@ ws.on('message', (data: Buffer) => {
         );
         
         // P1-1 新增: 发送 Profile 消息（WELCOME 后立即发送一次）
-        // ✅ 修复：如果玩家 phase 是 RESULT（刷新后重连），自动重置为 HIDEOUT
+        // ✅ 修复：如果玩家 phase 是 RESULT 或 RAID（刷新后重连），自动重置为 HIDEOUT
+        // 原因：刷新后玩家实体已被清理，无法继续战局，应该返回藏身处
         const profile = room.profileManager.getProfileData(accountId);
-        if (profile.phase === 'RESULT') {
-          log('PHASE_RESET_ON_RECONNECT', { accountId, from: 'RESULT', to: 'HIDEOUT' });
+        if (profile.phase === 'RESULT' || profile.phase === 'RAID') {
+          log('PHASE_RESET_ON_RECONNECT', { accountId, from: profile.phase, to: 'HIDEOUT' });
           room.profileManager.updatePhase(accountId, 'HIDEOUT');
         }
         sendProfile(ws, accountId);
@@ -1461,6 +1462,48 @@ ws.on('message', (data: Buffer) => {
             admin.resetRoom();
           }, 100);
         }
+      } else if (parsed.type === 'C2S_EXIT_RESULT') {
+        // ✅ 新增: 处理退出结果页面（从 RESULT 阶段返回 HIDEOUT）
+        if (!playerId) {
+          ws.send(
+            JSON.stringify(
+              S2C_ERROR_SCHEMA.parse({
+                type: 'S2C_ERROR',
+                code: 'NOT_AUTHENTICATED',
+                message: 'Must send C2S_HELLO first',
+              })
+            )
+          );
+          return;
+        }
+        
+        const accountId = wsToAccountId.get(ws);
+        if (!accountId) {
+          ws.send(
+            JSON.stringify(
+              S2C_ERROR_SCHEMA.parse({
+                type: 'S2C_ERROR',
+                code: 'NO_ACCOUNT',
+                message: 'Account ID not found',
+              })
+            )
+          );
+          return;
+        }
+        
+        // ✅ 修复：直接使用 profileManager.updatePhase，不需要通过 room.handleExitResult
+        // 因为玩家死亡后 playerToAccount 映射已被清理
+        room.profileManager.updatePhase(accountId, 'HIDEOUT');
+        
+        // 发送更新的 Profile（phase=HIDEOUT）
+        sendProfile(ws, accountId);
+        
+        log('EXIT_RESULT_HANDLED', {
+          room: room.id,
+          player: playerId,
+          accountId: accountId,
+          tick: room.tick,
+        });
       } else if (parsed.type === 'C2S_INPUT') {
         if (!playerId) {
           ws.send(
