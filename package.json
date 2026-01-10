@@ -28,7 +28,7 @@
     "start:all": "node tools/select_map.mjs start:all:raw",
     "start:all:raw": "concurrently \"npm run start:server\" \"npm run start:client\"",
     "restart:server": "npm run build && npm run start:server",
-    "clean": "rimraf node_modules shared/node_modules server/node_modules client/node_modules shared/dist client/dist server/dist",
+    "clean": "npx rimraf node_modules shared/node_modules server/node_modules client/node_modules shared/dist client/dist server/dist",
     "check:ci": "npm run build --workspace=shared && npm run build --workspace=client",
     "test:smoke": "npm run build --workspace=shared && tsx server/src/smoke.ts",
     "dump:key": "node tools/dump_key_code.mjs",
