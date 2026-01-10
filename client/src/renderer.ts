@@ -2109,7 +2109,7 @@ export class Renderer {
       for (let i = 0; i < 4; i++) {
         const angle = ((seed + i * 97) % 360) * Math.PI / 180;
         const startDist = 2 + (seed % 5) + effect.age * 15;
-        const len = 4 * (1 - effect.age);
+        const len = Math.max(0, 4 * (1 - effect.age));
         
         const x1 = screenX + Math.cos(angle) * startDist;
         const y1 = screenY + Math.sin(angle) * startDist;
@@ -2146,7 +2146,7 @@ export class Renderer {
     this.ctx.arc(screenX, screenY, effect.radius, 0, Math.PI * 2);
     this.ctx.fill();
 
-    const coreRadius = Math.max(6, Math.min(18, effect.radius * 0.2)) * (1 - effect.age * 0.5);
+    const coreRadius = Math.max(0, Math.max(6, Math.min(18, effect.radius * 0.2)) * (1 - effect.age * 0.5));
     this.ctx.fillStyle = `rgba(255, 255, 255, ${alpha * 0.7})`;
     this.ctx.beginPath();
     this.ctx.arc(screenX, screenY, coreRadius, 0, Math.PI * 2);
