@@ -3307,19 +3307,24 @@ export class Room {
         }
 
         // 延迟补偿: 根据射击者延迟回溯目标位置
-        // 修复: 回溯时间 = RTT/2 + 客户端插值延迟（120ms）
-        // 这样才能回溯到"客户端看到的时间点"
+        // 只有人类玩家射击时才需要回溯（因为他们看到的是过去的状态）
+        // AI 和 炮台 在服务端即时运行，不需要回溯
+        const isHumanShooter = playerLatencies.has(bullet.ownerId);
         const shooterLatency = playerLatencies.get(bullet.ownerId) ?? 0;
-        const rewindTimeMs = Math.min(
-          Math.max(0, shooterLatency / 2 + CLIENT_INTERPOLATION_DELAY_MS),
-          MAX_REWIND_MS
-        );
+        
+        let rewindTimeMs = 0;
+        if (isHumanShooter) {
+          // 修复: 人类玩家射击回溯 = RTT/2 + 客户端插值延迟（120ms）
+          rewindTimeMs = Math.min(
+            Math.max(0, shooterLatency / 2 + CLIENT_INTERPOLATION_DELAY_MS),
+            MAX_REWIND_MS
+          );
+        }
 
-        // 改进: 多点采样检测，避免漏掉玩家在时间窗口内穿越子弹轨迹的情况
-        // 在回溯时间窗口内均匀采样 3 个点：当前位置、中间位置、回溯位置
+        // 改进: 多点采样检测
         const SAMPLE_COUNT = 3;
         let rewindHit = false;
-        let hitPosition = { x: player.x, y: player.y }; // 记录命中位置（用于日志）
+        let hitPosition = { x: player.x, y: player.y };
 
         for (let i = 0; i < SAMPLE_COUNT; i++) {
           const t = i / (SAMPLE_COUNT - 1); // 0, 0.5, 1
@@ -3437,12 +3442,17 @@ export class Room {
             continue;
           }
 
-          // 延迟补偿（对AI也使用延迟补偿，公平性）
+          // 延迟补偿: 只有人类玩家射击时才需要回溯
+          const isHumanShooter = playerLatencies.has(bullet.ownerId);
           const shooterLatency = playerLatencies.get(bullet.ownerId) ?? 0;
-          const rewindTimeMs = Math.min(
-            Math.max(0, shooterLatency / 2 + CLIENT_INTERPOLATION_DELAY_MS),
-            MAX_REWIND_MS
-          );
+          
+          let rewindTimeMs = 0;
+          if (isHumanShooter) {
+            rewindTimeMs = Math.min(
+              Math.max(0, shooterLatency / 2 + CLIENT_INTERPOLATION_DELAY_MS),
+              MAX_REWIND_MS
+            );
+          }
 
           const SAMPLE_COUNT = 3;
           let rewindHit = false;
@@ -4840,12 +4850,32 @@ export class Room {
   // 新增: 处理玩家死亡（生成掉落包）
   handlePlayerDeath(playerId: string): { success: boolean; accountId?: string; moneyLost?: number; killedBy?: string; killedByWeaponName?: string } {
     const player = this.players.get(playerId);
+    
+    // 调试日志：记录 handlePlayerDeath 被调用
+    log('HANDLE_PLAYER_DEATH_CALLED', {
+      room: this.id,
+      player: playerId,
+      playerExists: player ? 'yes' : 'no',
+      playerStatus: player?.status ?? 'N/A',
+      tick: this.tick,
+    });
+    
     if (!player || player.status !== 'DEAD') return { success: false };
 
     const accountId = this.playerToAccount.get(playerId) ?? playerId;
 
     // ✅ 关键：只有在玩家 phase 为 'RAID' 时才处理死亡（防止旧实体误触发）
     const profile = this.profileManager.getProfileData(accountId);
+    
+    // 调试日志：记录 phase 检查
+    log('HANDLE_PLAYER_DEATH_PHASE_CHECK', {
+      room: this.id,
+      player: playerId,
+      accountId,
+      phase: profile.phase,
+      tick: this.tick,
+    });
+    
     if (profile.phase !== 'RAID') {
       log('DEATH_SKIP_NOT_IN_RAID', {
         room: this.id,
@@ -4946,6 +4976,17 @@ export class Room {
       moneyLost,
       killedBy,
       killedByWeaponName,
+    });
+    
+    log('RAID_RESULT_SET_DIED', {
+      room: this.id,
+      player: playerId,
+      accountId,
+      moneyLost,
+      killedBy,
+      killedByWeaponName,
+      raidResultsSize: this.raidResults.size,
+      tick: this.tick,
     });
     
     // 击杀播报

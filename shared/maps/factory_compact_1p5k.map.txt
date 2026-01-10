@@ -1,0 +1,283 @@
+# MAPTEXT v1
+# Factory Compact（1500x1500）
+# - 中心：紧凑工厂建筑群（3x3网格，工业风格）
+# - 外围：密集资源点（4个角落箱群 + 4个边缘箱群 + 少量草丛 + 工业障碍物）
+# - 风格：紧凑、高密度、快节奏
+
+@meta id=factory_compact_1p5k name="Factory Compact (1.5K)" desc="1500x1500：紧凑工厂建筑群(3x3网格，工业风格) + 外围密集资源布局。快节奏战斗。"
+@map width=1500 height=1500 seed=20250115
+
+# === 撤离点：中心 + 四角（避开建筑和箱子）===
+@extract x=710 y=710 w=80 h=80
+@extract x=100 y=100 w=80 h=80
+@extract x=1320 y=100 w=80 h=80
+@extract x=100 y=1320 w=80 h=80
+@extract x=1320 y=1320 w=80 h=80
+
+# === 出生点（四角内缩）===
+@spawn x=150 y=150
+@spawn x=1350 y=150
+@spawn x=150 y=1350
+@spawn x=1350 y=1350
+
+# === POI（中心工厂 + 8个外围资源点）===
+@poi x=750 y=750 id=center_factory type=landmark name="Central Factory" desc="中央工厂：核心生产区，高价值物资"
+@poi x=300  y=300  id=nw_resource type=resource name="Northwest Resource" desc="西北资源点（箱群）"
+@poi x=1200 y=300  id=ne_resource type=resource name="Northeast Resource" desc="东北资源点（箱群）"
+@poi x=300  y=1200 id=sw_resource type=resource name="Southwest Resource" desc="西南资源点（箱群）"
+@poi x=1200 y=1200 id=se_resource type=resource name="Southeast Resource" desc="东南资源点（箱群）"
+@poi x=750  y=300  id=north_resource type=resource name="North Resource" desc="北部资源点（箱群）"
+@poi x=750  y=1200 id=south_resource type=resource name="South Resource" desc="南部资源点（箱群）"
+@poi x=300  y=750  id=west_resource  type=resource name="West Resource"  desc="西部资源点（箱群）"
+@poi x=1200 y=750  id=east_resource  type=resource name="East Resource"  desc="东部资源点（箱群）"
+
+# === 区域（用于刷新/强度分层）===
+@zone x=400 y=400 w=700 h=700 id=center_factory_zone type=danger name="Center Factory Zone" desc="中央高危险区：工厂建筑群"
+@zone x=500 y=500 w=500 h=500 id=center_core_rooms type=danger name="Center Core Rooms" desc="最中心房间：可能刷新传说物品"
+@zone x=0 y=0 w=750 h=750 id=northwest_zone type=loot name="Northwest Zone" desc="西北资源区"
+@zone x=750 y=0 w=750 h=750 id=northeast_zone type=loot name="Northeast Zone" desc="东北资源区"
+@zone x=0 y=750 w=750 h=750 id=southwest_zone type=loot name="Southwest Zone" desc="西南资源区"
+@zone x=750 y=750 w=750 h=750 id=southeast_zone type=loot name="Southeast Zone" desc="东南资源区"
+
+# ============================================================
+# 中央工厂（3x3网格，工业风格）
+# - 外围房间：concrete（工业仓储）
+# - 中心走廊：pave（过渡）
+# - 中心生产区：tile（核心区域）
+# ============================================================
+
+@roomgroup layout=grid x=400 y=400 cols=3 cellW=220 cellH=220 wallThickness=20 doorWidth=100 id=factory_main
+  warehouse_w:  w=220 h=220 doors=sew  floor=concrete
+  corridor_n:   w=220 h=220 doors=nsew floor=pave
+  warehouse_e:  w=220 h=220 doors=sew  floor=concrete
+
+  storage_w:    w=220 h=220 doors=nsew floor=concrete
+  production:   w=220 h=220 doors=nsew floor=tile
+  storage_e:    w=220 h=220 doors=nsew floor=concrete
+
+  workshop_w:   w=220 h=220 doors=nsew floor=concrete
+  control_room: w=220 h=220 doors=nsew floor=tile
+  workshop_e:   w=220 h=220 doors=nsew floor=concrete
+
+# ============================================================
+# 工厂：每个房间 1 个宝箱/箱子
+# 放置规则：房间中心偏内（+110,+110），避开门
+# - 中心房间：更好的 chestRarityWeights
+# ============================================================
+
+# Row0 y=400 -> chest y=510（避开门）
+@obstacle x=510 y=510 w=28 h=28 type=weapon_crate
+@obstacle x=620 y=510 w=28 h=28 type=chest_closed chestCapacity=2 chestRarityWeights=COMMON:75,RARE:20,EPIC:4,LEGENDARY:1
+@obstacle x=730 y=510 w=28 h=28 type=equipment_crate
+
+# Row1 y=620 -> chest y=730（中心层，避开门）
+@obstacle x=510 y=730 w=28 h=28 type=medical_crate
+@obstacle x=620 y=730 w=28 h=28 type=chest_closed chestCapacity=3 chestRarityWeights=COMMON:50,RARE:30,EPIC:15,LEGENDARY:5
+@obstacle x=730 y=730 w=28 h=28 type=throwable_crate
+
+# Row2 y=840 -> chest y=950（避开门）
+@obstacle x=510 y=950 w=28 h=28 type=equipment_crate
+@obstacle x=620 y=950 w=28 h=28 type=chest_closed chestCapacity=2 chestRarityWeights=COMMON:70,RARE:22,EPIC:6,LEGENDARY:2
+@obstacle x=730 y=950 w=28 h=28 type=weapon_crate
+
+# ============================================================
+# 室外布局（紧凑工业风格）
+# ============================================================
+
+# === 工厂外圈草丛（紧凑布局）===
+@obstacle x=360 y=360 w=80 h=40  type=bush
+@obstacle x=1060 y=360 w=80 h=40  type=bush
+@obstacle x=360 y=1100 w=80 h=40  type=bush
+@obstacle x=1060 y=1100 w=80 h=40  type=bush
+@obstacle x=320 y=500  w=40  h=80 type=bush
+@obstacle x=320 y=920  w=40  h=80 type=bush
+@obstacle x=1140 y=500  w=40  h=80 type=bush
+@obstacle x=1140 y=920  w=40  h=80 type=bush
+
+# === 工业障碍物（移除，避免堵住门）===
+# 注意：这些墙会堵住roomgroup自动生成的门，导致房间无法从外界进入，所以完全移除
+
+# === 箱子群：4个角落资源点（3x3 + 扩展，避开撤离点）===
+# 西北资源点（避开撤离点x=100-180, y=100-180）
+@obstacle x=220 y=220 w=30 h=30 type=crate
+@obstacle x=254 y=220 w=30 h=30 type=crate
+@obstacle x=288 y=220 w=30 h=30 type=crate
+@obstacle x=220 y=254 w=30 h=30 type=crate
+@obstacle x=254 y=254 w=30 h=30 type=crate
+@obstacle x=288 y=254 w=30 h=30 type=crate
+@obstacle x=220 y=288 w=30 h=30 type=crate
+@obstacle x=254 y=288 w=30 h=30 type=crate
+@obstacle x=288 y=288 w=30 h=30 type=crate
+@obstacle x=190 y=190 w=30 h=30 type=weapon_crate
+@obstacle x=318 y=190 w=30 h=30 type=medical_crate
+@obstacle x=190 y=254 w=30 h=30 type=equipment_crate
+@obstacle x=318 y=254 w=30 h=30 type=throwable_crate
+
+# 东北资源点（避开撤离点x=1320-1400, y=100-180，且不越界，地图尺寸1500x1500）
+@obstacle x=1410 y=220 w=30 h=30 type=crate
+@obstacle x=1444 y=220 w=30 h=30 type=crate
+@obstacle x=1470 y=220 w=30 h=30 type=crate
+@obstacle x=1410 y=254 w=30 h=30 type=crate
+@obstacle x=1444 y=254 w=30 h=30 type=crate
+@obstacle x=1470 y=254 w=30 h=30 type=crate
+@obstacle x=1410 y=288 w=30 h=30 type=crate
+@obstacle x=1444 y=288 w=30 h=30 type=crate
+@obstacle x=1470 y=288 w=30 h=30 type=crate
+@obstacle x=1290 y=190 w=30 h=30 type=weapon_crate
+@obstacle x=1470 y=190 w=30 h=30 type=medical_crate
+@obstacle x=1290 y=254 w=30 h=30 type=equipment_crate
+@obstacle x=1470 y=254 w=30 h=30 type=throwable_crate
+
+# 西南资源点（避开撤离点x=100-180, y=1320-1400）
+@obstacle x=220 y=1242 w=30 h=30 type=crate
+@obstacle x=254 y=1242 w=30 h=30 type=crate
+@obstacle x=288 y=1242 w=30 h=30 type=crate
+@obstacle x=220 y=1276 w=30 h=30 type=crate
+@obstacle x=254 y=1276 w=30 h=30 type=crate
+@obstacle x=288 y=1276 w=30 h=30 type=crate
+@obstacle x=220 y=1310 w=30 h=30 type=crate
+@obstacle x=254 y=1310 w=30 h=30 type=crate
+@obstacle x=288 y=1310 w=30 h=30 type=crate
+@obstacle x=190 y=1192 w=30 h=30 type=weapon_crate
+@obstacle x=318 y=1192 w=30 h=30 type=medical_crate
+@obstacle x=190 y=1276 w=30 h=30 type=equipment_crate
+@obstacle x=318 y=1276 w=30 h=30 type=throwable_crate
+
+# 东南资源点（避开撤离点x=1320-1400, y=1320-1400，且不越界，地图尺寸1500x1500）
+@obstacle x=1410 y=1242 w=30 h=30 type=crate
+@obstacle x=1444 y=1242 w=30 h=30 type=crate
+@obstacle x=1470 y=1242 w=30 h=30 type=crate
+@obstacle x=1410 y=1276 w=30 h=30 type=crate
+@obstacle x=1444 y=1276 w=30 h=30 type=crate
+@obstacle x=1470 y=1276 w=30 h=30 type=crate
+@obstacle x=1410 y=1310 w=30 h=30 type=crate
+@obstacle x=1444 y=1310 w=30 h=30 type=crate
+@obstacle x=1470 y=1310 w=30 h=30 type=crate
+@obstacle x=1290 y=1192 w=30 h=30 type=weapon_crate
+@obstacle x=1470 y=1192 w=30 h=30 type=medical_crate
+@obstacle x=1290 y=1276 w=30 h=30 type=equipment_crate
+@obstacle x=1470 y=1276 w=30 h=30 type=throwable_crate
+
+# === 边缘资源点（4个，2x3布局）===
+# 北部资源点
+@obstacle x=650 y=200 w=30 h=30 type=crate
+@obstacle x=684 y=200 w=30 h=30 type=crate
+@obstacle x=718 y=200 w=30 h=30 type=crate
+@obstacle x=752 y=200 w=30 h=30 type=crate
+@obstacle x=650 y=234 w=30 h=30 type=crate
+@obstacle x=684 y=234 w=30 h=30 type=crate
+@obstacle x=718 y=234 w=30 h=30 type=crate
+@obstacle x=752 y=234 w=30 h=30 type=crate
+@obstacle x=616 y=200 w=30 h=30 type=weapon_crate
+@obstacle x=786 y=200 w=30 h=30 type=medical_crate
+@obstacle x=616 y=234 w=30 h=30 type=equipment_crate
+@obstacle x=786 y=234 w=30 h=30 type=throwable_crate
+
+# 南部资源点
+@obstacle x=650 y=1266 w=30 h=30 type=crate
+@obstacle x=684 y=1266 w=30 h=30 type=crate
+@obstacle x=718 y=1266 w=30 h=30 type=crate
+@obstacle x=752 y=1266 w=30 h=30 type=crate
+@obstacle x=650 y=1300 w=30 h=30 type=crate
+@obstacle x=684 y=1300 w=30 h=30 type=crate
+@obstacle x=718 y=1300 w=30 h=30 type=crate
+@obstacle x=752 y=1300 w=30 h=30 type=crate
+@obstacle x=616 y=1266 w=30 h=30 type=weapon_crate
+@obstacle x=786 y=1266 w=30 h=30 type=medical_crate
+@obstacle x=616 y=1300 w=30 h=30 type=equipment_crate
+@obstacle x=786 y=1300 w=30 h=30 type=throwable_crate
+
+# 西部资源点
+@obstacle x=200 y=650 w=30 h=30 type=crate
+@obstacle x=234 y=650 w=30 h=30 type=crate
+@obstacle x=200 y=684 w=30 h=30 type=crate
+@obstacle x=234 y=684 w=30 h=30 type=crate
+@obstacle x=200 y=718 w=30 h=30 type=crate
+@obstacle x=234 y=718 w=30 h=30 type=crate
+@obstacle x=200 y=752 w=30 h=30 type=crate
+@obstacle x=234 y=752 w=30 h=30 type=crate
+@obstacle x=150 y=616 w=30 h=30 type=weapon_crate
+@obstacle x=150 y=786 w=30 h=30 type=medical_crate
+@obstacle x=268 y=616 w=30 h=30 type=equipment_crate
+@obstacle x=268 y=786 w=30 h=30 type=throwable_crate
+
+# 东部资源点
+@obstacle x=1266 y=650 w=30 h=30 type=crate
+@obstacle x=1300 y=650 w=30 h=30 type=crate
+@obstacle x=1266 y=684 w=30 h=30 type=crate
+@obstacle x=1300 y=684 w=30 h=30 type=crate
+@obstacle x=1266 y=718 w=30 h=30 type=crate
+@obstacle x=1300 y=718 w=30 h=30 type=crate
+@obstacle x=1266 y=752 w=30 h=30 type=crate
+@obstacle x=1300 y=752 w=30 h=30 type=crate
+@obstacle x=1232 y=616 w=30 h=30 type=weapon_crate
+@obstacle x=1232 y=786 w=30 h=30 type=medical_crate
+@obstacle x=1350 y=616 w=30 h=30 type=equipment_crate
+@obstacle x=1350 y=786 w=30 h=30 type=throwable_crate
+
+# === 地图边缘资源箱 ===
+@obstacle x=50 y=50 w=28 h=28 type=weapon_crate
+@obstacle x=300 y=50 w=28 h=28 type=medical_crate
+@obstacle x=750 y=50 w=28 h=28 type=equipment_crate
+@obstacle x=1200 y=50 w=28 h=28 type=throwable_crate
+@obstacle x=1450 y=50 w=28 h=28 type=weapon_crate
+@obstacle x=50 y=1450 w=28 h=28 type=weapon_crate
+@obstacle x=300 y=1450 w=28 h=28 type=medical_crate
+@obstacle x=750 y=1450 w=28 h=28 type=equipment_crate
+@obstacle x=1200 y=1450 w=28 h=28 type=throwable_crate
+@obstacle x=1450 y=1450 w=28 h=28 type=weapon_crate
+@obstacle x=50 y=300 w=28 h=28 type=weapon_crate
+@obstacle x=50 y=750 w=28 h=28 type=medical_crate
+@obstacle x=50 y=1200 w=28 h=28 type=equipment_crate
+@obstacle x=1450 y=300 w=28 h=28 type=weapon_crate
+@obstacle x=1450 y=750 w=28 h=28 type=medical_crate
+@obstacle x=1450 y=1200 w=28 h=28 type=equipment_crate
+
+# ============================================================
+# AI（守卫 + 巡逻）
+# ============================================================
+
+# 工厂内部守卫（关键房间：production, control_room）
+@aispawn x=510 y=730 type=guard role=heavy_gunner count=1 radius=100
+@aispawn x=730 y=730 type=guard role=basic count=1 radius=100
+@aispawn x=510 y=510 type=guard role=basic count=1 radius=100
+@aispawn x=730 y=510 type=guard role=basic count=1 radius=100
+
+# 工厂周边守卫（移到房间外，避开墙和门）
+@aispawn x=750 y=350 type=guard role=heavy_gunner count=1 radius=150
+@aispawn x=750 y=1150 type=guard role=heavy_gunner count=1 radius=150
+@aispawn x=350 y=750 type=guard role=basic count=1 radius=150
+@aispawn x=1150 y=750 type=guard role=basic count=1 radius=150
+
+# 四向巡逻（移到房间外，避开墙和箱子，放在完全安全的开放区域）
+@aispawn x=750 y=260 type=patrol role=scout count=1 patrol=north_resource,center_factory
+@aispawn x=750 y=1240 type=patrol role=basic count=1 patrol=south_resource,center_factory
+@aispawn x=260 y=750 type=patrol role=basic count=1 patrol=west_resource,center_factory
+@aispawn x=1240 y=750 type=patrol role=basic count=1 patrol=east_resource,center_factory
+
+# 四角狙击守卫（移到房间外，避开墙）
+@aispawn x=350 y=350 type=guard role=sniper count=1 radius=200
+@aispawn x=1150 y=350 type=guard role=sniper count=1 radius=200
+@aispawn x=350 y=1150 type=guard role=sniper count=1 radius=200
+@aispawn x=1150 y=1150 type=guard role=sniper count=1 radius=200
+
+@airespawn intervalTicks=1500 maxAIs=14
+
+# ============================================================
+# 刷新规则
+# ============================================================
+
+# 全局资源刷新
+@itemrespawn id=global_common mode=both intervalTicks=900 count=3 maxItems=15 rarityWeights=COMMON:85,RARE:12,EPIC:2,LEGENDARY:1
+@itemrespawn id=nw_common mode=both intervalTicks=900 count=1 maxItems=8 zoneId=northwest_zone rarityWeights=COMMON:85,RARE:12,EPIC:2,LEGENDARY:1
+@itemrespawn id=ne_common mode=both intervalTicks=900 count=1 maxItems=8 zoneId=northeast_zone rarityWeights=COMMON:85,RARE:12,EPIC:2,LEGENDARY:1
+@itemrespawn id=sw_common mode=both intervalTicks=900 count=1 maxItems=8 zoneId=southwest_zone rarityWeights=COMMON:85,RARE:12,EPIC:2,LEGENDARY:1
+@itemrespawn id=se_common mode=both intervalTicks=900 count=1 maxItems=8 zoneId=southeast_zone rarityWeights=COMMON:85,RARE:12,EPIC:2,LEGENDARY:1
+
+# 中央工厂：高价值物品
+@itemrespawn id=center_factory_high mode=both intervalTicks=900 count=2 maxItems=20 zoneId=center_factory_zone items=w_minigun,w_grenade_launcher,w_sniper,armor_heavy,bag_military rarityWeights=COMMON:20,RARE:35,EPIC:35,LEGENDARY:10
+
+# 最中心房间地面：可能刷新随机传说物品
+@itemrespawn id=center_core_legendary mode=both intervalTicks=1200 count=1 maxItems=3 zoneId=center_core_rooms rarityWeights=COMMON:25,RARE:30,EPIC:30,LEGENDARY:15
+
+@note "紧凑工厂风格：3x3网格建筑，高密度资源点，快节奏战斗。中心房间有更好的宝箱稀有度权重。"

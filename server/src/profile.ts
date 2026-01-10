@@ -70,10 +70,22 @@ export class ProfileManager {
         
         // 验证并加载数据
         if (typeof parsed === 'object' && parsed !== null) {
+          let resetCount = 0;
           for (const [accountId, profile] of Object.entries(parsed)) {
             if (this.isValidProfile(profile)) {
-              this.profiles.set(accountId, profile as PlayerProfile);
+              const p = profile as PlayerProfile;
+              // ✅ 服务器启动时重置 RAID/RESULT phase 为 HIDEOUT
+              // 原因：服务器重启后房间状态丢失，玩家不应该继续保持 RAID 状态
+              if (p.phase === 'RAID' || p.phase === 'RESULT') {
+                log('PROFILE_PHASE_RESET_ON_LOAD', { accountId, from: p.phase, to: 'HIDEOUT' });
+                p.phase = 'HIDEOUT';
+                resetCount++;
+              }
+              this.profiles.set(accountId, p);
             }
+          }
+          if (resetCount > 0) {
+            this.markDirty();
           }
         }
         
@@ -112,7 +124,8 @@ export class ProfileManager {
         (p.equipment as Record<string, unknown>).weaponIid !== undefined &&
         (p.equipment as Record<string, unknown>).bagIid !== undefined &&
         (p.equipment as Record<string, unknown>).armorIid !== undefined
-      ))
+      )) &&
+      (p.isAdmin === undefined || typeof p.isAdmin === 'boolean') // Allow optional isAdmin field
     );
   }
   
@@ -476,12 +489,9 @@ export class ProfileManager {
       (profile as any).phase = profile.displayName === null ? 'NAME' : 'HIDEOUT';
       this.markDirty();
     }
-    // ✅ 修复：如果 phase 是 RESULT（临时状态），刷新/重连时自动返回 HIDEOUT
-    if (profile.phase === 'RESULT') {
-      profile.phase = 'HIDEOUT';
-      this.markDirty();
-      log('PHASE_AUTO_RESET', { accountId, from: 'RESULT', to: 'HIDEOUT', reason: 'reconnect' });
-    }
+    // ❌ 移除：不再在 getProfileData 中自动重置 RAID/RESULT phase
+    // 原因：这会导致玩家在 RAID 中死亡时 phase 被错误地重置为 HIDEOUT
+    // 断线重连的 phase 重置应该在 handleDisconnectDeath 中处理
     if (profile.equipment === undefined) {
       profile.equipment = { ...this.DEFAULT_EQUIPMENT };
       this.markDirty();

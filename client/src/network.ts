@@ -70,7 +70,17 @@ export interface NetworkCallbacks {
   onWelcome?: (playerId: string, accountId: string, roomInfo?: RoomInfo) => void;
   onEvent?: (message: string) => void; // 游戏化增强: 服务端事件回调
   onWorldInit?: (world: S2C_WORLD_INIT) => void; // 新增: 世界初始化回调（使用协议类型）
-  onProfile?: (profile: { accountId: string; displayName: string | null; phase: 'NAME' | 'HIDEOUT' | 'RAID' | 'RESULT'; money: number; stash: any[]; prep?: any[]; bagCap: number; equipment: { weaponIid: string | null; bagIid: string | null; armorIid: string | null } }) => void; // P1-1: Profile 回调
+  onProfile?: (profile: { 
+    accountId: string; 
+    displayName: string | null; 
+    phase: 'NAME' | 'HIDEOUT' | 'RAID' | 'RESULT'; 
+    money: number; 
+    stash: any[]; 
+    prep?: any[]; 
+    bagCap: number; 
+    equipment: { weaponIid: string | null; bagIid: string | null; armorIid: string | null };
+    isAdmin?: boolean;
+  }) => void; // P1-1: Profile 回调
   onRaidResult?: (result: S2C_RAID_RESULT) => void; // 新增: 战局结果回调
   onCombatEvent?: (event: { kind: 'DRY_FIRE' | 'HIT' | 'DAMAGE_TAKEN'; direction?: number }) => void; // 新增: 战斗事件回调
   onMeleeSwing?: (event: S2C_MELEE_SWING) => void; // 新增: 近战挥击事件回调
@@ -219,6 +229,7 @@ export class Network {
                 prep: message.prep,
                 bagCap: message.bagCap,
                 equipment: message.equipment,
+                isAdmin: message.isAdmin,
               });
             }
           } else if (message.type === 'S2C_RAID_RESULT') {
@@ -505,6 +516,31 @@ export class Network {
       return true;
     } catch (error) {
       console.error('Failed to send set name:', error);
+      return false;
+    }
+  }
+
+  // 新增: 发送聊天消息
+  sendChat(content: string): boolean {
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+      return false;
+    }
+    try {
+      // Direct construction since schema is simple and we want to avoid extra imports if possible,
+      // but strictly we should use C2S_CHAT_SCHEMA if imported.
+      // Since C2S_CHAT_SCHEMA is likely not imported in this file yet (wait, I saw it in imports in step 64 output? No, wait.)
+      // Checking imports in Step 64... It IS imported?
+      // No, C2S_CHAT_SCHEMA is NOT in the import list in line 1-36 of Step 64 output.
+      // I need to add it to imports first.
+      
+      const message = {
+        type: 'C2S_CHAT',
+        content,
+      };
+      this.ws.send(JSON.stringify(message));
+      return true;
+    } catch (error) {
+      console.error('Failed to send chat:', error);
       return false;
     }
   }

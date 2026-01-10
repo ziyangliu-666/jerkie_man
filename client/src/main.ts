@@ -3764,6 +3764,81 @@ network = new Network(getWebSocketUrl(), 'local', {
   },
   // 游戏化增强: 接收服务端事件并显示在 HUD
   onEvent: (message: string) => {
+    // Check for special messages (MAP_LIST for autocomplete)
+    if (message.startsWith('MAP_LIST|')) {
+      const maps = message.substring(9).split('|').filter(m => m.length > 0);
+      console.log(`[onEvent] Received MAP_LIST with ${maps.length} maps`);
+      if ((window as any).updateAvailableMaps) {
+        (window as any).updateAvailableMaps(maps);
+      }
+      return; // Don't show this in chat
+    }
+    
+    // Check for PLAYER_LIST for autocomplete
+    if (message.startsWith('PLAYER_LIST|')) {
+      const names = message.substring(12).split('|').filter(n => n.length > 0);
+      console.log(`[onEvent] Received PLAYER_LIST with ${names.length} players`);
+      if ((window as any).updateOnlinePlayers) {
+        (window as any).updateOnlinePlayers(names.map(name => ({ name, status: 'ALIVE' })));
+      }
+      return; // Don't show this in chat
+    }
+    
+    // Parse player list from /players response for autocomplete
+    if (message.startsWith('在线玩家')) {
+      const lines = message.split('\n');
+      const playerNames = lines.slice(1)
+        .map(line => {
+          const match = line.match(/^[✅💀]\s+(.+?)\s+\(HP:/);
+          return match ? match[1] : null;
+        })
+        .filter(name => name !== null) as string[];
+      
+      if ((window as any).updateOnlinePlayers && playerNames.length > 0) {
+        (window as any).updateOnlinePlayers(playerNames.map(name => ({ name, status: 'ALIVE' })));
+      }
+    }
+    
+    // Detect admin authentication success
+    if (message.includes('管理员权限已激活')) {
+      if ((window as any).updateAdminStatus) {
+        (window as any).updateAdminStatus(true);
+      }
+    }
+
+    // Filter out internal messages that shouldn't be shown in chat
+    const shouldShowInChat = (msg: string): boolean => {
+      // Skip AUTO_EQUIP messages
+      if (msg.startsWith('AUTO_EQUIP|')) return false;
+      
+      // Skip player action logs (picked up, hit, etc.)
+      if (msg.includes('picked up')) return false;
+      if (msg.includes('hit AI')) return false;
+      if (msg.includes('hit player')) return false;
+      
+      // Show emoji messages (✅, ❌, etc.)
+      if (msg.startsWith('✅') || msg.startsWith('❌')) return true;
+      
+      // Show command responses and server messages
+      if (msg.startsWith('可用地图:')) return true;
+      if (msg.startsWith('地图未找到:')) return true;
+      if (msg.startsWith('用法:')) return true;
+      if (msg.startsWith('命令:')) return true;
+      if (msg.startsWith('未知命令:')) return true;
+      if (msg.includes('需要管理员权限')) return true;
+      if (msg.includes('管理员权限已激活')) return true;
+      if (msg.includes('密码错误')) return true;
+      if (msg === 'Pong!') return true;
+      
+      // Default: don't show in chat (it's probably a game log)
+      return false;
+    };
+
+    // Add to Chat Log (only user-facing messages)
+    if (shouldShowInChat(message) && (window as any).addChatMessage) {
+       (window as any).addChatMessage(message);
+    }
+
     if (message.startsWith('AUTO_EQUIP|')) {
       const parts = message.split('|');
       const targetId = parts[1] ?? '';
@@ -3811,9 +3886,28 @@ network = new Network(getWebSocketUrl(), 'local', {
       ...profile,
       prep: profile.prep ?? [],
     };
+    
+    // ✅ 同步管理员状态
+    const wasAdmin = isCurrentUserAdmin;
+    isCurrentUserAdmin = profile.isAdmin === true;
+    if (isCurrentUserAdmin && (!wasAdmin || availableMaps.length === 0)) {
+      console.log(`[onProfile] Admin status active (wasAdmin: ${wasAdmin}, maps count: ${availableMaps.length}), requesting maps and players...`);
+      if (network && network.sendChat) {
+        network.sendChat('/maplist');
+        network.sendChat('/playerlist'); // ✅ Also sync players
+      }
+    }
     // ✅ 更新 phase（服务端总是提供 phase，使用服务端的权威状态）
     const oldPhase = currentPhase;
-    currentPhase = profile.phase;
+    let newPhase = profile.phase;
+    
+    // ✅ 修复：如果收到 RESULT phase 但没有 raidResult 数据（刷新后重连），自动切换到 HIDEOUT
+    if (newPhase === 'RESULT' && !raidResult) {
+      console.log('[onProfile] Received RESULT phase but no raidResult data, switching to HIDEOUT');
+      newPhase = 'HIDEOUT';
+    }
+    
+    currentPhase = newPhase;
     console.log(`[onProfile] Phase changed: ${oldPhase} -> ${currentPhase}, displayName=${profile.displayName}, money=${profile.money}, stash=${profile.stash.length} items, prep=${profile.prep?.length ?? 0} items, bagCap=${profile.bagCap}`);
     
     // 更新 UI（显示/隐藏 NAME modal / Hideout UI）
@@ -5048,7 +5142,365 @@ rafId = requestAnimationFrame(renderLoop);
 console.log('Client initialized');
 console.log('Type __admin.help() in console for admin commands');
 
-// 新增: 渲染击杀播报
+
+// ===== Chat System Logic =====
+let chatInput: HTMLInputElement | null = null;
+let chatLog: HTMLElement | null = null;
+let chatSuggestions: HTMLElement | null = null;
+let isChatFocused = false;
+let selectedSuggestionIndex = -1;
+let currentSuggestions: Array<{ text: string; desc: string }> = [];
+
+// Available commands
+const COMMANDS = [
+  { cmd: '/admin ', desc: '激活管理员权限', adminOnly: false },
+  { cmd: '/help', desc: '显示所有命令', adminOnly: false },
+  { cmd: '/maps', desc: '查看所有可用地图', adminOnly: false },
+  { cmd: '/players', desc: '查看在线玩家列表', adminOnly: false },
+  { cmd: '/ping', desc: '测试连接延迟', adminOnly: false },
+  { cmd: '/map ', desc: '切换地图 (需要管理员)', adminOnly: true },
+  { cmd: '/reset', desc: '重置当前房间 (需要管理员)', adminOnly: true },
+  { cmd: '/give ', desc: '给玩家加钱 (需要管理员)', adminOnly: true },
+  { cmd: '/heal ', desc: '治疗玩家 (需要管理员)', adminOnly: true },
+  { cmd: '/kill ', desc: '击杀玩家 (需要管理员)', adminOnly: true },
+  { cmd: '/kick ', desc: '踢出玩家 (需要管理员)', adminOnly: true },
+];
+
+// Track admin status
+let isCurrentUserAdmin = false;
+
+// Update admin status (called when receiving admin auth response)
+function updateAdminStatus(isAdmin: boolean) {
+  isCurrentUserAdmin = isAdmin;
+}
+(window as any).updateAdminStatus = updateAdminStatus;
+
+// Map list will be populated from server
+let availableMaps: string[] = [];
+
+function initChatSystem(): void {
+  chatInput = document.getElementById('chatInput') as HTMLInputElement;
+  chatLog = document.getElementById('chatLog');
+  chatSuggestions = document.getElementById('chatSuggestions');
+  
+  if (!chatInput || !chatLog) {
+     console.warn('[Chat] Chat elements not found during init, retrying on DOMContentLoaded or next frame');
+     if (document.readyState === 'loading') {
+         document.addEventListener('DOMContentLoaded', initChatSystem);
+     }
+     return;
+  }
+  
+  // Input change handler for autocomplete
+  chatInput.addEventListener('input', () => {
+    if (!chatInput) return;
+    updateSuggestions(chatInput.value);
+  });
+  
+  // Enter key handling
+  window.addEventListener('keydown', (e) => {
+    if (!chatInput) return;
+
+    // Handle chat-specific keys when chat is focused
+    if (isChatFocused && document.activeElement === chatInput) {
+      if (e.key === 'Escape') {
+         // Close chat and suggestions
+         chatInput.blur();
+         chatInput.classList.remove('visible');
+         hideSuggestions();
+         isChatFocused = false;
+         worldCanvas.focus();
+         e.preventDefault();
+         return;
+      } else if (e.key === 'ArrowUp') {
+         // Navigate suggestions up (cycle to bottom if at top)
+         if (currentSuggestions.length > 0) {
+           if (selectedSuggestionIndex <= 0) {
+             selectedSuggestionIndex = currentSuggestions.length - 1;
+           } else {
+             selectedSuggestionIndex--;
+           }
+           updateSuggestionHighlight();
+           e.preventDefault();
+         }
+         return;
+      } else if (e.key === 'ArrowDown') {
+         // Navigate suggestions down (cycle to top if at bottom)
+         if (currentSuggestions.length > 0) {
+           if (selectedSuggestionIndex >= currentSuggestions.length - 1) {
+             selectedSuggestionIndex = 0;
+           } else {
+             selectedSuggestionIndex++;
+           }
+           updateSuggestionHighlight();
+           e.preventDefault();
+         }
+         return;
+      } else if (e.key === 'Tab') {
+         // Terminal-style Tab completion
+         if (currentSuggestions.length > 0) {
+           // If nothing selected, select first one
+           if (selectedSuggestionIndex < 0) {
+             selectedSuggestionIndex = 0;
+             updateSuggestionHighlight();
+           } else {
+             // Apply current selection
+             chatInput.value = currentSuggestions[selectedSuggestionIndex].text;
+             // Move to next suggestion for easy cycling
+             selectedSuggestionIndex = (selectedSuggestionIndex + 1) % currentSuggestions.length;
+             updateSuggestionHighlight();
+           }
+           e.preventDefault();
+         }
+         return;
+      } else if (e.key === 'Enter') {
+         // Apply suggestion or send message
+         if (selectedSuggestionIndex >= 0 && currentSuggestions[selectedSuggestionIndex]) {
+           chatInput.value = currentSuggestions[selectedSuggestionIndex].text;
+           hideSuggestions();
+           // Don't send, let user continue editing
+           e.preventDefault();
+           return;
+         }
+         
+         // Send message
+         const content = chatInput.value.trim();
+         if (content.length > 0) {
+           sendChatMessage(content);
+           chatInput.value = '';
+         }
+         chatInput.blur();
+         chatInput.classList.remove('visible');
+         hideSuggestions();
+         isChatFocused = false;
+         worldCanvas.focus();
+         e.preventDefault();
+         return;
+      }
+      // For other keys, let default input handling work
+      return;
+    }
+
+    // Open chat with / key (when not already focused)
+    if (e.key === '/' && !isChatFocused) {
+      chatInput.classList.add('visible');
+      chatInput.value = '/'; // Auto-fill with /
+      chatInput.focus();
+      isChatFocused = true;
+      e.preventDefault();
+      
+      // Auto-fetch fresh player list for autocomplete
+      if (network && network.sendChat && isCurrentUserAdmin) {
+        network.sendChat('/playerlist');
+      }
+    }
+  });
+
+  // Track focus state
+  chatInput.addEventListener('focus', () => {
+    isChatFocused = true;
+  });
+  
+  chatInput.addEventListener('blur', () => {
+    isChatFocused = false;
+    // Hide input and suggestions after small delay
+    setTimeout(() => {
+        if (chatInput && document.activeElement !== chatInput) {
+            chatInput.classList.remove('visible');
+            hideSuggestions();
+        }
+    }, 100);
+  });
+  
+  console.log('[Chat] System initialized with autocomplete');
+}
+
+// Track online players for autocomplete
+let onlinePlayers: string[] = [];
+
+function updateSuggestions(input: string): void {
+  if (!chatSuggestions || !chatInput) return;
+  
+  console.log(`[Chat] updateSuggestions input: "${input}", isCurrentUserAdmin: ${isCurrentUserAdmin}, availableMaps count: ${availableMaps.length}`);
+  
+  currentSuggestions = [];
+  selectedSuggestionIndex = -1;
+  
+  if (!input.startsWith('/')) {
+    hideSuggestions();
+    return;
+  }
+  
+  const spaceIndex = input.indexOf(' ');
+  
+  if (spaceIndex > 0) {
+    // User is typing parameters after command
+    const cmd = input.substring(1, spaceIndex);
+    const paramInput = input.substring(spaceIndex + 1).toLowerCase();
+    
+    console.log(`[Chat] Parameter mode - cmd: "${cmd}", paramInput: "${paramInput}"`);
+    
+    if (isCurrentUserAdmin) {
+      if (cmd === 'map') {
+        // Show map suggestions
+        currentSuggestions = availableMaps
+          .filter(m => m.toLowerCase().includes(paramInput))
+          .map(m => ({ text: `/map ${m}`, desc: `切换到地图: ${m}` }));
+        console.log(`[Chat] Map suggestions found: ${currentSuggestions.length}`);
+      } else if (cmd === 'give' || cmd === 'heal' || cmd === 'kill' || cmd === 'kick') {
+        // Show player suggestions
+        currentSuggestions = onlinePlayers
+          .filter(name => name.toLowerCase().includes(paramInput))
+          .map(name => {
+            if (cmd === 'give') {
+              return { text: `/give ${name} `, desc: `给 ${name} 加钱` };
+            } else if (cmd === 'heal') {
+              return { text: `/heal ${name}`, desc: `治疗 ${name}` };
+            } else if (cmd === 'kill') {
+              return { text: `/kill ${name}`, desc: `击杀 ${name}` };
+            } else {
+              return { text: `/kick ${name}`, desc: `踢出 ${name}` };
+            }
+          });
+        console.log(`[Chat] Player suggestions found: ${currentSuggestions.length}`);
+      }
+    } else {
+      console.log(`[Chat] Not an admin, skipping param suggestions for: ${cmd}`);
+    }
+  } else {
+    // User is typing command name
+    // Filter commands based on admin status
+    currentSuggestions = COMMANDS
+      .filter(c => !c.adminOnly || isCurrentUserAdmin) // Only show permitted commands
+      .filter(c => c.cmd.toLowerCase().startsWith(input.toLowerCase()))
+      .map(c => ({ text: c.cmd, desc: c.desc }));
+    console.log(`[Chat] Command suggestions found: ${currentSuggestions.length}`);
+  }
+  
+  if (currentSuggestions.length > 0) {
+    showSuggestions();
+  } else {
+    hideSuggestions();
+  }
+}
+
+function showSuggestions(): void {
+  if (!chatSuggestions) return;
+  
+  chatSuggestions.innerHTML = '';
+  chatSuggestions.classList.add('visible');
+  
+  // Store reference to avoid null checks in forEach
+  const suggestionsContainer = chatSuggestions;
+  
+  currentSuggestions.forEach((suggestion, index) => {
+    const item = document.createElement('div');
+    item.className = 'chat-suggestion-item';
+    if (index === selectedSuggestionIndex) {
+      item.classList.add('selected');
+    }
+    
+    const name = document.createElement('span');
+    name.className = 'suggestion-name';
+    name.textContent = suggestion.text;
+    
+    const desc = document.createElement('span');
+    desc.className = 'suggestion-desc';
+    desc.textContent = suggestion.desc;
+    
+    item.appendChild(name);
+    item.appendChild(desc);
+    
+    // Click to apply
+    item.addEventListener('mousedown', (e) => {
+      e.preventDefault(); // Prevent blur
+      if (chatInput) {
+        chatInput.value = suggestion.text;
+        chatInput.focus();
+        hideSuggestions();
+      }
+    });
+    
+    suggestionsContainer.appendChild(item);
+  });
+}
+
+function hideSuggestions(): void {
+  if (!chatSuggestions) return;
+  chatSuggestions.classList.remove('visible');
+  chatSuggestions.innerHTML = '';
+  currentSuggestions = [];
+  selectedSuggestionIndex = -1;
+}
+
+function updateSuggestionHighlight(): void {
+  if (!chatSuggestions) return;
+  
+  const items = chatSuggestions.querySelectorAll('.chat-suggestion-item');
+  items.forEach((item, index) => {
+    if (index === selectedSuggestionIndex) {
+      item.classList.add('selected');
+    } else {
+      item.classList.remove('selected');
+    }
+  });
+}
+
+// Function to update available maps from server
+function updateAvailableMaps(maps: string[]): void {
+  availableMaps = maps;
+  console.log('[Chat] Updated available maps:', maps);
+}
+
+function updateOnlinePlayers(players: Array<{ name: string; status: string }>): void {
+  onlinePlayers = players.map(p => p.name);
+  console.log('[Chat] Updated online players:', onlinePlayers);
+}
+(window as any).updateOnlinePlayers = updateOnlinePlayers;
+
+function sendChatMessage(content: string): void {
+  if (!content) return;
+  
+  if (network) {
+     network.sendChat(content);
+  }
+}
+
+function addChatMessage(message: string): void {
+  if (!chatLog) return;
+  
+  const div = document.createElement('div');
+  div.className = 'chat-message';
+  div.textContent = message;
+  
+  chatLog.appendChild(div);
+  
+  // Limit message count
+  while (chatLog.children.length > 10) {
+      chatLog.removeChild(chatLog.firstChild as Node);
+  }
+  
+  // Auto-scroll to bottom
+  chatLog.scrollTop = chatLog.scrollHeight;
+  
+  // Also show in HUD event log for redundancy or if chat is hidden?
+  // hud.addEvent(message); // Optional
+}
+
+// Hook into Network messages to capture S2C_EVENT for chat
+// We need to intercept the message handling.
+// Since `network` is an instance of `Network`, let's check if it has an event emitter or callback we can hook.
+// If `network` doesn't expose a way to 'listen', we might need to modify `Network` class or `client/src/main.ts` where it handles messages.
+// Looking at `client/src/main.ts`, it seems `network` encapsulates the socket.
+// Let's assume we can modify `client/src/network.ts` OR we can just piggyback on `S2C_EVENT` if it's handled globally.
+
+// Call init associated with DOM
+initChatSystem();
+
+(window as any).addChatMessage = addChatMessage;
+(window as any).updateAvailableMaps = updateAvailableMaps;
+
+// 新增: 渲染击杀播报 (Existing)
 function renderKillFeed(feed: S2C_KILL_FEED): void {
   const container = document.getElementById('killFeedContainer');
   if (!container) return;

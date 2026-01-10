@@ -135,6 +135,7 @@ export type PlayerProfile = {
   prep: ItemInstance[];    // 整备区（准备带入局内的物品）
   bagCap: number;          // 背包容量（从 profile 读取，用于初始化 Player，现在是动态计算的）
   equipment: PlayerEquipment; // 装备槽（weapon/bag/armor）
+  isAdmin?: boolean;       // 是否为管理员（可选，默认 false）
 };
 
 /**

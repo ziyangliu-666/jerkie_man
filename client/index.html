@@ -802,6 +802,166 @@
       pointer-events: none;
       box-shadow: 0 0 4px rgba(255, 255, 255, 0.8);
     }
+    
+    /* ===== Chat UI ===== */
+    #chatContainer {
+      position: absolute;
+      top: 20px;
+      left: 20px;
+      width: 400px;
+      max-height: 250px;
+      display: flex;
+      flex-direction: column;
+      justify-content: flex-start;
+      pointer-events: none; /* Let clicks pass through unless on input */
+      z-index: 100;
+    }
+
+    #chatLog {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      margin-bottom: 8px;
+      overflow-y: auto;
+      text-shadow: 1px 1px 2px #000;
+      max-height: 180px;
+    }
+
+    /* Custom scrollbar for chat log */
+    #chatLog::-webkit-scrollbar {
+      width: 6px;
+    }
+
+    #chatLog::-webkit-scrollbar-track {
+      background: rgba(0, 0, 0, 0.3);
+      border-radius: 3px;
+    }
+
+    #chatLog::-webkit-scrollbar-thumb {
+      background: rgba(0, 255, 255, 0.4);
+      border-radius: 3px;
+      transition: background 0.2s ease;
+    }
+
+    #chatLog::-webkit-scrollbar-thumb:hover {
+      background: rgba(0, 255, 255, 0.6);
+    }
+
+    /* Firefox scrollbar */
+    #chatLog {
+      scrollbar-width: thin;
+      scrollbar-color: rgba(0, 255, 255, 0.4) rgba(0, 0, 0, 0.3);
+    }
+
+    .chat-message {
+      font-size: 13px;
+      color: rgba(255, 255, 255, 0.95);
+      background: rgba(0, 0, 0, 0.5);
+      padding: 4px 8px;
+      border-radius: 4px;
+      border-left: 2px solid rgba(0, 255, 255, 0.5);
+      align-self: flex-start;
+      animation: fadeIn 0.15s ease-out;
+      max-width: 100%;
+      word-wrap: break-word;
+    }
+
+    #chatInput {
+      pointer-events: auto;
+      background: rgba(0, 0, 0, 0.7);
+      border: 1px solid rgba(0, 255, 255, 0.4);
+      color: #fff;
+      padding: 8px 12px;
+      border-radius: 4px;
+      font-family: 'Courier New', monospace;
+      font-size: 13px;
+      outline: none;
+      opacity: 0;
+      transition: opacity 0.15s ease, border-color 0.2s ease;
+    }
+
+    #chatInput.visible {
+      opacity: 1;
+    }
+    
+    #chatInput:focus {
+      border-color: rgba(0, 255, 255, 0.8);
+      box-shadow: 0 0 8px rgba(0, 255, 255, 0.3);
+    }
+    
+    /* Chat Suggestions */
+    .chat-suggestions {
+      display: none;
+      flex-direction: column;
+      background: rgba(10, 15, 25, 0.95);
+      border: 1px solid rgba(0, 255, 255, 0.5);
+      border-radius: 4px;
+      margin-bottom: 4px;
+      max-height: 200px;
+      overflow-y: auto;
+      pointer-events: auto;
+    }
+    
+    /* Custom scrollbar for suggestions */
+    .chat-suggestions::-webkit-scrollbar {
+      width: 6px;
+    }
+
+    .chat-suggestions::-webkit-scrollbar-track {
+      background: rgba(0, 0, 0, 0.3);
+      border-radius: 3px;
+    }
+
+    .chat-suggestions::-webkit-scrollbar-thumb {
+      background: rgba(0, 255, 255, 0.4);
+      border-radius: 3px;
+    }
+
+    .chat-suggestions::-webkit-scrollbar-thumb:hover {
+      background: rgba(0, 255, 255, 0.6);
+    }
+
+    .chat-suggestions {
+      scrollbar-width: thin;
+      scrollbar-color: rgba(0, 255, 255, 0.4) rgba(0, 0, 0, 0.3);
+    }
+    
+    .chat-suggestions.visible {
+      display: flex;
+    }
+    
+    .chat-suggestion-item {
+      padding: 6px 12px;
+      color: rgba(255, 255, 255, 0.8);
+      cursor: pointer;
+      transition: background 0.1s ease;
+      font-family: 'Courier New', monospace;
+      font-size: 12px;
+      border-left: 2px solid transparent;
+    }
+    
+    .chat-suggestion-item:hover,
+    .chat-suggestion-item.selected {
+      background: rgba(0, 255, 255, 0.15);
+      border-left-color: rgba(0, 255, 255, 0.8);
+      color: rgba(255, 255, 255, 1);
+    }
+    
+    .chat-suggestion-item .suggestion-name {
+      color: #0ff;
+      font-weight: bold;
+    }
+    
+    .chat-suggestion-item .suggestion-desc {
+      color: #888;
+      font-size: 11px;
+      margin-left: 8px;
+    }
+
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(-5px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
 
     /* 耐力条颜色变化 */
     #staminaHud .stamina-hud-bar-fill.low {
@@ -3420,6 +3580,13 @@
           <div class="buff-hud-title">状态</div>
         </div>
         <div class="buff-hud-list" id="buffHudList"></div>
+      </div>
+
+      <!-- Chat UI (左上角聊天框) -->
+      <div id="chatContainer">
+        <div id="chatLog"></div>
+        <div id="chatSuggestions" class="chat-suggestions"></div>
+        <input type="text" id="chatInput" placeholder="按 / 键输入命令" autocomplete="off" spellcheck="false" />
       </div>
 
       <!-- NAME Phase: 昵称输入 Modal -->

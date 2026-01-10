@@ -1,0 +1,325 @@
+# MAPTEXT v1
+# Arena Circular（环形竞技场）
+# - 布局：圆形/环形（1800x1800），中心圆形竞技场
+# - 中心：圆形竞技场（多层环形结构）
+# - 外围：8个扇形资源区围绕中心
+# - 风格：竞技场、环形战斗、向心推进
+
+@meta id=arena_circular name="Circular Arena" desc="1800x1800：环形竞技场，中心圆形结构，8个扇形资源区围绕。向心推进战斗。"
+@map width=1800 height=1800 seed=20250203
+
+# === 撤离点：中心 + 四角 + 四边中点（环形分布）===
+@extract x=860 y=860 w=80 h=80
+@extract x=200 y=200 w=80 h=80
+@extract x=1520 y=200 w=80 h=80
+@extract x=200 y=1520 w=80 h=80
+@extract x=1520 y=1520 w=80 h=80
+@extract x=860 y=200 w=80 h=80
+@extract x=860 y=1520 w=80 h=80
+@extract x=200 y=860 w=80 h=80
+@extract x=1520 y=860 w=80 h=80
+
+# === 出生点（8个方向，围绕中心）===
+@spawn x=200 y=200
+@spawn x=900 y=200
+@spawn x=1600 y=200
+@spawn x=200 y=900
+@spawn x=1600 y=900
+@spawn x=200 y=1600
+@spawn x=900 y=1600
+@spawn x=1600 y=1600
+
+# === POI（中心竞技场 + 8个扇形资源区）===
+@poi x=900 y=900 id=center_arena type=landmark name="Central Arena" desc="中央竞技场：核心战斗区"
+@poi x=450 y=450 id=nw_resource type=resource name="Northwest Resource" desc="西北资源点"
+@poi x=1350 y=450 id=ne_resource type=resource name="Northeast Resource" desc="东北资源点"
+@poi x=450 y=1350 id=sw_resource type=resource name="Southwest Resource" desc="西南资源点"
+@poi x=1350 y=1350 id=se_resource type=resource name="Southeast Resource" desc="东南资源点"
+@poi x=900 y=450 id=north_resource type=resource name="North Resource" desc="北部资源点"
+@poi x=900 y=1350 id=south_resource type=resource name="South Resource" desc="南部资源点"
+@poi x=450 y=900 id=west_resource type=resource name="West Resource" desc="西部资源点"
+@poi x=1350 y=900 id=east_resource type=resource name="East Resource" desc="东部资源点"
+
+# === 区域（用于刷新/强度分层）===
+@zone x=600 y=600 w=600 h=600 id=center_arena_zone type=danger name="Arena Zone" desc="中央竞技场高危险区"
+@zone x=700 y=700 w=400 h=400 id=center_core_rooms type=danger name="Center Core Rooms" desc="最中心区域：可能刷新传说物品"
+@zone x=0 y=0 w=900 h=900 id=northwest_zone type=loot name="Northwest Zone" desc="西北扇形资源区"
+@zone x=900 y=0 w=900 h=900 id=northeast_zone type=loot name="Northeast Zone" desc="东北扇形资源区"
+@zone x=0 y=900 w=900 h=900 id=southwest_zone type=loot name="Southwest Zone" desc="西南扇形资源区"
+@zone x=900 y=900 w=900 h=900 id=southeast_zone type=loot name="Southeast Zone" desc="东南扇形资源区"
+
+# ============================================================
+# 环形竞技场（中心圆形结构）
+# ============================================================
+
+# 中心圆形竞技场（使用4个房间形成环形）
+@roomgroup layout=grid x=700 y=700 cols=2 cellW=200 cellH=200 wallThickness=20 doorWidth=100 id=center_arena_rooms
+  arena_nw: w=200 h=200 doors=nsew floor=tile
+  arena_ne: w=200 h=200 doors=nsew floor=tile
+  arena_sw: w=200 h=200 doors=nsew floor=tile
+  arena_se: w=200 h=200 doors=nsew floor=tile
+
+# 外层环形房间（8个方向，围绕中心）
+# 北部房间
+@roomgroup layout=horizontal x=800 y=500 cellW=200 cellH=200 wallThickness=20 doorWidth=100 id=arena_north
+  room_north: w=200 h=200 doors=sew floor=concrete
+
+# 南部房间
+@roomgroup layout=horizontal x=800 y=1100 cellW=200 cellH=200 wallThickness=20 doorWidth=100 id=arena_south
+  room_south: w=200 h=200 doors=new floor=concrete
+
+# 西部房间
+@roomgroup layout=vertical x=500 y=800 cellW=200 cellH=200 wallThickness=20 doorWidth=100 id=arena_west
+  room_west: w=200 h=200 doors=esw floor=concrete
+
+# 东部房间
+@roomgroup layout=vertical x=1100 y=800 cellW=200 cellH=200 wallThickness=20 doorWidth=100 id=arena_east
+  room_east: w=200 h=200 doors=esw floor=concrete
+
+# 西北房间
+@roomgroup layout=horizontal x=600 y=600 cellW=150 cellH=150 wallThickness=20 doorWidth=80 id=arena_nw
+  room_nw: w=150 h=150 doors=se floor=concrete
+
+# 东北房间
+@roomgroup layout=horizontal x=1050 y=600 cellW=150 cellH=150 wallThickness=20 doorWidth=80 id=arena_ne
+  room_ne: w=150 h=150 doors=sw floor=concrete
+
+# 西南房间
+@roomgroup layout=horizontal x=600 y=1050 cellW=150 cellH=150 wallThickness=20 doorWidth=80 id=arena_sw
+  room_sw: w=150 h=150 doors=ne floor=concrete
+
+# 东南房间
+@roomgroup layout=horizontal x=1050 y=1050 cellW=150 cellH=150 wallThickness=20 doorWidth=80 id=arena_se
+  room_se: w=150 h=150 doors=nw floor=concrete
+
+# ============================================================
+# 竞技场内资源：每个房间 1 个宝箱/箱子
+# ============================================================
+
+# 中心竞技场（4个房间）
+@obstacle x=790 y=790 w=28 h=28 type=chest_closed chestCapacity=4 chestRarityWeights=COMMON:30,RARE:35,EPIC:28,LEGENDARY:7
+@obstacle x=990 y=790 w=28 h=28 type=chest_closed chestCapacity=4 chestRarityWeights=COMMON:30,RARE:35,EPIC:28,LEGENDARY:7
+@obstacle x=790 y=990 w=28 h=28 type=chest_closed chestCapacity=4 chestRarityWeights=COMMON:30,RARE:35,EPIC:28,LEGENDARY:7
+@obstacle x=990 y=990 w=28 h=28 type=chest_closed chestCapacity=4 chestRarityWeights=COMMON:30,RARE:35,EPIC:28,LEGENDARY:7
+
+# 外层房间（避开门和墙）
+@obstacle x=890 y=540 w=28 h=28 type=weapon_crate
+@obstacle x=890 y=1240 w=28 h=28 type=medical_crate
+@obstacle x=540 y=890 w=28 h=28 type=equipment_crate
+@obstacle x=1240 y=890 w=28 h=28 type=throwable_crate
+@obstacle x=670 y=640 w=28 h=28 type=weapon_crate
+@obstacle x=1102 y=640 w=28 h=28 type=medical_crate
+@obstacle x=640 y=1102 w=28 h=28 type=equipment_crate
+@obstacle x=1102 y=1140 w=28 h=28 type=throwable_crate
+
+# ============================================================
+# 室外布局（环形竞技场风格）
+# ============================================================
+
+# === 环形墙壁（形成竞技场感，避开房间门）===
+# 注意：这些墙会被roomgroup自动生成的墙覆盖，所以这里不需要手动放置
+
+# === 8个扇形资源区（围绕中心）===
+# 西北资源点（3x3）
+@obstacle x=350 y=350 w=30 h=30 type=crate
+@obstacle x=384 y=350 w=30 h=30 type=crate
+@obstacle x=418 y=350 w=30 h=30 type=crate
+@obstacle x=350 y=384 w=30 h=30 type=crate
+@obstacle x=384 y=384 w=30 h=30 type=crate
+@obstacle x=418 y=384 w=30 h=30 type=crate
+@obstacle x=350 y=418 w=30 h=30 type=crate
+@obstacle x=384 y=418 w=30 h=30 type=crate
+@obstacle x=418 y=418 w=30 h=30 type=crate
+@obstacle x=300 y=300 w=30 h=30 type=weapon_crate
+@obstacle x=468 y=300 w=30 h=30 type=medical_crate
+@obstacle x=300 y=384 w=30 h=30 type=equipment_crate
+@obstacle x=468 y=384 w=30 h=30 type=throwable_crate
+
+# 东北资源点（3x3）
+@obstacle x=1382 y=350 w=30 h=30 type=crate
+@obstacle x=1416 y=350 w=30 h=30 type=crate
+@obstacle x=1450 y=350 w=30 h=30 type=crate
+@obstacle x=1382 y=384 w=30 h=30 type=crate
+@obstacle x=1416 y=384 w=30 h=30 type=crate
+@obstacle x=1450 y=384 w=30 h=30 type=crate
+@obstacle x=1382 y=418 w=30 h=30 type=crate
+@obstacle x=1416 y=418 w=30 h=30 type=crate
+@obstacle x=1450 y=418 w=30 h=30 type=crate
+@obstacle x=1332 y=300 w=30 h=30 type=weapon_crate
+@obstacle x=1500 y=300 w=30 h=30 type=medical_crate
+@obstacle x=1332 y=384 w=30 h=30 type=equipment_crate
+@obstacle x=1500 y=384 w=30 h=30 type=throwable_crate
+
+# 西南资源点（3x3）
+@obstacle x=350 y=1382 w=30 h=30 type=crate
+@obstacle x=384 y=1382 w=30 h=30 type=crate
+@obstacle x=418 y=1382 w=30 h=30 type=crate
+@obstacle x=350 y=1416 w=30 h=30 type=crate
+@obstacle x=384 y=1416 w=30 h=30 type=crate
+@obstacle x=418 y=1416 w=30 h=30 type=crate
+@obstacle x=350 y=1450 w=30 h=30 type=crate
+@obstacle x=384 y=1450 w=30 h=30 type=crate
+@obstacle x=418 y=1450 w=30 h=30 type=crate
+@obstacle x=300 y=1332 w=30 h=30 type=weapon_crate
+@obstacle x=468 y=1332 w=30 h=30 type=medical_crate
+@obstacle x=300 y=1416 w=30 h=30 type=equipment_crate
+@obstacle x=468 y=1416 w=30 h=30 type=throwable_crate
+
+# 东南资源点（3x3）
+@obstacle x=1382 y=1382 w=30 h=30 type=crate
+@obstacle x=1416 y=1382 w=30 h=30 type=crate
+@obstacle x=1450 y=1382 w=30 h=30 type=crate
+@obstacle x=1382 y=1416 w=30 h=30 type=crate
+@obstacle x=1416 y=1416 w=30 h=30 type=crate
+@obstacle x=1450 y=1416 w=30 h=30 type=crate
+@obstacle x=1382 y=1450 w=30 h=30 type=crate
+@obstacle x=1416 y=1450 w=30 h=30 type=crate
+@obstacle x=1450 y=1450 w=30 h=30 type=crate
+@obstacle x=1332 y=1332 w=30 h=30 type=weapon_crate
+@obstacle x=1500 y=1332 w=30 h=30 type=medical_crate
+@obstacle x=1332 y=1416 w=30 h=30 type=equipment_crate
+@obstacle x=1500 y=1416 w=30 h=30 type=throwable_crate
+
+# 北部资源点（4x2）
+@obstacle x=850 y=350 w=30 h=30 type=crate
+@obstacle x=884 y=350 w=30 h=30 type=crate
+@obstacle x=918 y=350 w=30 h=30 type=crate
+@obstacle x=952 y=350 w=30 h=30 type=crate
+@obstacle x=850 y=384 w=30 h=30 type=crate
+@obstacle x=884 y=384 w=30 h=30 type=crate
+@obstacle x=918 y=384 w=30 h=30 type=crate
+@obstacle x=952 y=384 w=30 h=30 type=crate
+@obstacle x=816 y=300 w=30 h=30 type=weapon_crate
+@obstacle x=986 y=300 w=30 h=30 type=medical_crate
+@obstacle x=816 y=384 w=30 h=30 type=equipment_crate
+@obstacle x=986 y=384 w=30 h=30 type=throwable_crate
+
+# 南部资源点（4x2）
+@obstacle x=850 y=1416 w=30 h=30 type=crate
+@obstacle x=884 y=1416 w=30 h=30 type=crate
+@obstacle x=918 y=1416 w=30 h=30 type=crate
+@obstacle x=952 y=1416 w=30 h=30 type=crate
+@obstacle x=850 y=1450 w=30 h=30 type=crate
+@obstacle x=884 y=1450 w=30 h=30 type=crate
+@obstacle x=918 y=1450 w=30 h=30 type=crate
+@obstacle x=952 y=1450 w=30 h=30 type=crate
+@obstacle x=816 y=1332 w=30 h=30 type=weapon_crate
+@obstacle x=986 y=1332 w=30 h=30 type=medical_crate
+@obstacle x=816 y=1450 w=30 h=30 type=equipment_crate
+@obstacle x=986 y=1450 w=30 h=30 type=throwable_crate
+
+# 西部资源点（2x4）
+@obstacle x=350 y=850 w=30 h=30 type=crate
+@obstacle x=384 y=850 w=30 h=30 type=crate
+@obstacle x=350 y=884 w=30 h=30 type=crate
+@obstacle x=384 y=884 w=30 h=30 type=crate
+@obstacle x=350 y=918 w=30 h=30 type=crate
+@obstacle x=384 y=918 w=30 h=30 type=crate
+@obstacle x=350 y=952 w=30 h=30 type=crate
+@obstacle x=384 y=952 w=30 h=30 type=crate
+@obstacle x=300 y=816 w=30 h=30 type=weapon_crate
+@obstacle x=300 y=986 w=30 h=30 type=medical_crate
+@obstacle x=418 y=816 w=30 h=30 type=equipment_crate
+@obstacle x=418 y=986 w=30 h=30 type=throwable_crate
+
+# 东部资源点（2x4）
+@obstacle x=1416 y=850 w=30 h=30 type=crate
+@obstacle x=1450 y=850 w=30 h=30 type=crate
+@obstacle x=1416 y=884 w=30 h=30 type=crate
+@obstacle x=1450 y=884 w=30 h=30 type=crate
+@obstacle x=1416 y=918 w=30 h=30 type=crate
+@obstacle x=1450 y=918 w=30 h=30 type=crate
+@obstacle x=1416 y=952 w=30 h=30 type=crate
+@obstacle x=1450 y=952 w=30 h=30 type=crate
+@obstacle x=1332 y=816 w=30 h=30 type=weapon_crate
+@obstacle x=1332 y=986 w=30 h=30 type=medical_crate
+@obstacle x=1500 y=816 w=30 h=30 type=equipment_crate
+@obstacle x=1500 y=986 w=30 h=30 type=throwable_crate
+
+# === 环形通道（移除，避免与roomgroup生成的墙和门冲突）===
+# 注意：这些墙会堵住门，导致房间无法从外界进入，所以完全移除
+
+# === 草丛（8个方向，避开资源箱）===
+@obstacle x=250 y=250 w=50 h=50 type=bush
+@obstacle x=1500 y=250 w=50 h=50 type=bush
+@obstacle x=250 y=1500 w=50 h=50 type=bush
+@obstacle x=1500 y=1500 w=50 h=50 type=bush
+@obstacle x=800 y=150 w=100 h=50 type=bush
+@obstacle x=800 y=1600 w=100 h=50 type=bush
+@obstacle x=150 y=800 w=50 h=100 type=bush
+@obstacle x=1600 y=800 w=50 h=100 type=bush
+
+# === 地图边缘资源箱 ===
+@obstacle x=50 y=50 w=28 h=28 type=weapon_crate
+@obstacle x=450 y=50 w=28 h=28 type=medical_crate
+@obstacle x=900 y=50 w=28 h=28 type=equipment_crate
+@obstacle x=1350 y=50 w=28 h=28 type=throwable_crate
+@obstacle x=1750 y=50 w=28 h=28 type=weapon_crate
+@obstacle x=50 y=1750 w=28 h=28 type=weapon_crate
+@obstacle x=450 y=1750 w=28 h=28 type=medical_crate
+@obstacle x=900 y=1750 w=28 h=28 type=equipment_crate
+@obstacle x=1350 y=1750 w=28 h=28 type=throwable_crate
+@obstacle x=1750 y=1750 w=28 h=28 type=weapon_crate
+@obstacle x=50 y=450 w=28 h=28 type=weapon_crate
+@obstacle x=50 y=900 w=28 h=28 type=medical_crate
+@obstacle x=50 y=1350 w=28 h=28 type=equipment_crate
+@obstacle x=1750 y=450 w=28 h=28 type=weapon_crate
+@obstacle x=1750 y=900 w=28 h=28 type=medical_crate
+@obstacle x=1750 y=1350 w=28 h=28 type=equipment_crate
+
+# ============================================================
+# AI（守卫 + 巡逻）
+# ============================================================
+
+# 中心竞技场守卫（4个方向）
+@aispawn x=800 y=800 type=guard role=heavy_gunner count=1 radius=150
+@aispawn x=1000 y=800 type=guard role=heavy_gunner count=1 radius=150
+@aispawn x=800 y=1000 type=guard role=heavy_gunner count=1 radius=150
+@aispawn x=1000 y=1000 type=guard role=heavy_gunner count=1 radius=150
+
+# 外层房间守卫（移到房间外，避开墙、门和箱子，放在完全安全的开放区域）
+@aispawn x=1000 y=500 type=guard role=basic count=1 radius=120
+@aispawn x=1000 y=1300 type=guard role=basic count=1 radius=120
+@aispawn x=500 y=1000 type=guard role=basic count=1 radius=120
+@aispawn x=1300 y=1000 type=guard role=basic count=1 radius=120
+
+# 8方向巡逻（向心推进，移到箱子区域外更远的位置，完全避开箱子）
+@aispawn x=260 y=260 type=patrol role=scout count=1 patrol=nw_resource,center_arena
+@aispawn x=1540 y=260 type=patrol role=scout count=1 patrol=ne_resource,center_arena
+@aispawn x=260 y=1540 type=patrol role=scout count=1 patrol=sw_resource,center_arena
+@aispawn x=1540 y=1540 type=patrol role=scout count=1 patrol=se_resource,center_arena
+@aispawn x=820 y=260 type=patrol role=basic count=1 patrol=north_resource,center_arena
+@aispawn x=820 y=1540 type=patrol role=basic count=1 patrol=south_resource,center_arena
+@aispawn x=260 y=820 type=patrol role=basic count=1 patrol=west_resource,center_arena
+@aispawn x=1540 y=820 type=patrol role=basic count=1 patrol=east_resource,center_arena
+
+# 外围狙击守卫（8个方向，避开箱子和草丛，移到更安全的位置）
+@aispawn x=240 y=240 type=guard role=sniper count=1 radius=250
+@aispawn x=1560 y=240 type=guard role=sniper count=1 radius=250
+@aispawn x=240 y=1560 type=guard role=sniper count=1 radius=250
+@aispawn x=1560 y=1560 type=guard role=sniper count=1 radius=250
+@aispawn x=820 y=240 type=guard role=sniper count=1 radius=250
+@aispawn x=820 y=1560 type=guard role=sniper count=1 radius=250
+@aispawn x=240 y=820 type=guard role=sniper count=1 radius=250
+@aispawn x=1560 y=820 type=guard role=sniper count=1 radius=250
+
+@airespawn intervalTicks=1800 maxAIs=18
+
+# ============================================================
+# 刷新规则
+# ============================================================
+
+# 全局资源刷新
+@itemrespawn id=global_common mode=both intervalTicks=900 count=4 maxItems=25 rarityWeights=COMMON:85,RARE:12,EPIC:2,LEGENDARY:1
+@itemrespawn id=nw_common mode=both intervalTicks=900 count=2 maxItems=12 zoneId=northwest_zone rarityWeights=COMMON:85,RARE:12,EPIC:2,LEGENDARY:1
+@itemrespawn id=ne_common mode=both intervalTicks=900 count=2 maxItems=12 zoneId=northeast_zone rarityWeights=COMMON:85,RARE:12,EPIC:2,LEGENDARY:1
+@itemrespawn id=sw_common mode=both intervalTicks=900 count=2 maxItems=12 zoneId=southwest_zone rarityWeights=COMMON:85,RARE:12,EPIC:2,LEGENDARY:1
+@itemrespawn id=se_common mode=both intervalTicks=900 count=2 maxItems=12 zoneId=southeast_zone rarityWeights=COMMON:85,RARE:12,EPIC:2,LEGENDARY:1
+
+# 中央竞技场：高价值物品
+@itemrespawn id=center_arena_high mode=both intervalTicks=900 count=3 maxItems=30 zoneId=center_arena_zone items=w_minigun,w_grenade_launcher,w_sniper,armor_heavy,bag_military rarityWeights=COMMON:15,RARE:40,EPIC:35,LEGENDARY:10
+
+# 最中心区域：可能刷新随机传说物品
+@itemrespawn id=center_core_legendary mode=both intervalTicks=1200 count=1 maxItems=4 zoneId=center_core_rooms rarityWeights=COMMON:20,RARE:30,EPIC:30,LEGENDARY:20
+
+@note "环形竞技场：1800x1800圆形布局，中心圆形竞技场，8个扇形资源区围绕，向心推进战斗体验。"

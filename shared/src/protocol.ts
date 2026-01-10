@@ -13,6 +13,11 @@ export const C2S_HELLO_SCHEMA = z.object({
   accountId: z.string(), // 账号身份：客户端生成 UUID，用于持久化 Profile
 });
 
+export const C2S_CHAT_SCHEMA = z.object({
+  type: z.literal('C2S_CHAT'),
+  content: z.string().min(1).max(256),
+});
+
 export const C2S_INPUT_SCHEMA = z.object({
   type: z.literal('C2S_INPUT'),
   seq: z.number().int().positive(),
@@ -168,6 +173,7 @@ export const C2S_MESSAGE_SCHEMA = z.discriminatedUnion('type', [
   C2S_HELLO_SCHEMA,
   C2S_INPUT_SCHEMA,
   C2S_PING_SCHEMA, // Day5: Ping 消息
+  C2S_CHAT_SCHEMA, // 新增: 聊天消息（支持 admin 命令）
   C2S_PICKUP_WORLD_ITEM_SCHEMA, // 保留兼容（deprecated）
   C2S_PICKUP_LOOT_BAG_SCHEMA, // 保留兼容（deprecated）
   C2S_SELL_FROM_STASH_SCHEMA, // 新增: 从仓库卖出
@@ -443,6 +449,7 @@ export const S2C_PROFILE_SCHEMA = z.object({
   prep: z.array(ITEM_INSTANCE_SCHEMA).optional(), // 新增: 整备区（准备带入局内的物品）
   bagCap: z.number().int().positive(),
   equipment: PLAYER_EQUIPMENT_SCHEMA, // 新增: 装备槽
+  isAdmin: z.boolean().optional(),     // 新增: 是否为管理员
 });
 
 // 新增: 战局结果消息（撤离/死亡后发送）
@@ -527,6 +534,7 @@ export const S2C_MESSAGE_SCHEMA = z.discriminatedUnion('type', [
 
 // TypeScript 类型推导
 export type C2S_HELLO = z.infer<typeof C2S_HELLO_SCHEMA>;
+export type C2S_CHAT = z.infer<typeof C2S_CHAT_SCHEMA>;
 export type C2S_INPUT = z.infer<typeof C2S_INPUT_SCHEMA>;
 export type C2S_PING = z.infer<typeof C2S_PING_SCHEMA>; // Day5: Ping 类型
 export type C2S_MESSAGE = z.infer<typeof C2S_MESSAGE_SCHEMA>;

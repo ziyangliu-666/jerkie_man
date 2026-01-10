@@ -2,6 +2,7 @@ import { WebSocketServer, WebSocket } from 'ws';
 import { Room } from './room.js';
 import { getMapTemplate, listMapTemplateIds, loadMapTemplates, resolveMapTemplateDir } from './mapTemplates.js';
 import { log } from './logger.js';
+import crypto from 'crypto';
 import {
   C2S_MESSAGE_SCHEMA,
   S2C_SNAPSHOT_SCHEMA,
@@ -27,6 +28,9 @@ const PORT = Number(process.env.PORT) || 18723;
 const HOST = process.env.HOST || '0.0.0.0'; // 默认监听所有网络接口
 const TICK_INTERVAL_MS = 50; // 20Hz
 const SNAPSHOT_INTERVAL_MS = 100; // 10Hz
+
+// Admin password hash (SHA-256 of "[REDACTED-CREDENTIAL]")
+const ADMIN_PASSWORD_HASH = crypto.createHash('sha256').update('[REDACTED-CREDENTIAL]').digest('hex');
 
 const wss = new WebSocketServer({ host: HOST, port: PORT });
 
@@ -56,7 +60,7 @@ function createRoom(): Room {
   });
 }
 
-const room = createRoom();
+let room = createRoom();
 
 // 处理server级别的错误
 wss.on('error', (error: Error) => {
@@ -129,6 +133,7 @@ function sendProfile(ws: WebSocket, accountId: string, phase?: 'NAME' | 'HIDEOUT
         prep: profile.prep,
         bagCap: profile.bagCap,
         equipment: profile.equipment,
+        isAdmin: profile.isAdmin === true,
       })
     )
   );
@@ -156,9 +161,8 @@ const admin = {
     lastProfileSentTick.clear();
     lastExtractedInventoryCount.clear();
 
-    // 重新创建房间（会生成新的 seed）
-    const newRoom = createRoom();
-    Object.assign(room, newRoom);
+    // 重新创建房间（产生新的世界 identity）
+    room = createRoom();
     
     console.log('[ADMIN] Room reset complete. New seed:', room.seed);
   },
@@ -365,7 +369,246 @@ ws.on('message', (data: Buffer) => {
         );
         
         // P1-1 新增: 发送 Profile 消息（WELCOME 后立即发送一次）
+        // ✅ 修复：如果玩家 phase 是 RESULT（刷新后重连），自动重置为 HIDEOUT
+        const profile = room.profileManager.getProfileData(accountId);
+        if (profile.phase === 'RESULT') {
+          log('PHASE_RESET_ON_RECONNECT', { accountId, from: 'RESULT', to: 'HIDEOUT' });
+          room.profileManager.updatePhase(accountId, 'HIDEOUT');
+        }
         sendProfile(ws, accountId);
+       } else if (parsed.type === 'C2S_CHAT') {
+          // Chat/Command handling
+          if (!playerId) return;
+          
+          // Get accountId from player
+          const accountId = playerIdToAccountId.get(playerId);
+          if (!accountId) return;
+          
+          const content = parsed.content.trim();
+          if (content.startsWith('/')) {
+            // Command handling
+            const [cmd, ...args] = content.substring(1).split(' ');
+            
+            // Get profile to check admin status
+            const profile = room.profileManager.getProfileData(accountId);
+            const isAdmin = profile.isAdmin === true;
+            
+            if (cmd === 'admin') {
+              // Admin authentication command
+              const password = args.join(' ');
+              const passwordHash = crypto.createHash('sha256').update(password).digest('hex');
+              
+              if (passwordHash === ADMIN_PASSWORD_HASH) {
+                profile.isAdmin = true;
+                room.profileManager.updateProfile(accountId, { isAdmin: true });
+                ws.send(JSON.stringify(S2C_EVENT_SCHEMA.parse({ type: 'S2C_EVENT', tick: room.tick, timestamp: Date.now(), message: '✅ 管理员权限已激活' })));
+                sendProfile(ws, accountId); // ✅ Sync updated profile (including isAdmin) to client
+                log('ADMIN_AUTH_SUCCESS', { accountId });
+              } else {
+                ws.send(JSON.stringify(S2C_EVENT_SCHEMA.parse({ type: 'S2C_EVENT', tick: room.tick, timestamp: Date.now(), message: '❌ 密码错误' })));
+                log('ADMIN_AUTH_FAILED', { accountId });
+              }
+            } else if (cmd === 'map') {
+              // Check admin permission
+              if (!isAdmin) {
+                ws.send(JSON.stringify(S2C_EVENT_SCHEMA.parse({ type: 'S2C_EVENT', tick: room.tick, timestamp: Date.now(), message: '❌ 需要管理员权限' })));
+                return;
+              }
+              
+              const mapId = args.join(' ');
+              if (!mapId) {
+                ws.send(JSON.stringify(S2C_EVENT_SCHEMA.parse({ type: 'S2C_EVENT', tick: room.tick, timestamp: Date.now(), message: '用法: /map <地图ID>' })));
+              } else {
+                const next = getMapTemplate(mapTemplateCatalog, mapId);
+                if (!next) {
+                  ws.send(JSON.stringify(S2C_EVENT_SCHEMA.parse({ type: 'S2C_EVENT', tick: room.tick, timestamp: Date.now(), message: `地图未找到: ${mapId}` })));
+                } else {
+                  activeMapTemplateId = mapId;
+                  activeMapTemplate = next;
+                  admin.resetRoom();
+                  // 所有连接已断开，这里的 ws 可能已失效，甚至不需要回执
+                }
+              }
+            } else if (cmd === 'maps') {
+              const ids = listMapTemplateIds(mapTemplateCatalog);
+              // Send both human-readable message and machine-readable list
+              ws.send(JSON.stringify(S2C_EVENT_SCHEMA.parse({ type: 'S2C_EVENT', tick: room.tick, timestamp: Date.now(), message: `可用地图: ${ids.join(', ')}` })));
+              // Also send list for autocomplete (prepend special marker)
+              ws.send(JSON.stringify(S2C_EVENT_SCHEMA.parse({ type: 'S2C_EVENT', tick: room.tick, timestamp: Date.now(), message: `MAP_LIST|${ids.join('|')}` })));
+            } else if (cmd === 'maplist') {
+              // Silent version for autocomplete sync
+              const ids = listMapTemplateIds(mapTemplateCatalog);
+              ws.send(JSON.stringify(S2C_EVENT_SCHEMA.parse({ type: 'S2C_EVENT', tick: room.tick, timestamp: Date.now(), message: `MAP_LIST|${ids.join('|')}` })));
+            } else if (cmd === 'reset') {
+              // Check admin permission
+              if (!isAdmin) {
+                ws.send(JSON.stringify(S2C_EVENT_SCHEMA.parse({ type: 'S2C_EVENT', tick: room.tick, timestamp: Date.now(), message: '❌ 需要管理员权限' })));
+                return;
+              }
+              admin.resetRoom();
+            } else if (cmd === 'players') {
+              // List online players
+              const playerList: string[] = [];
+              room.players.forEach((player, pid) => {
+                const status = player.status === 'ALIVE' ? '✅' : '💀';
+                playerList.push(`${status} ${player.name} (HP: ${player.hp})`);
+              });
+              const message = playerList.length > 0 
+                ? `在线玩家 (${playerList.length}):\n${playerList.join('\n')}`
+                : '当前无在线玩家';
+              ws.send(JSON.stringify(S2C_EVENT_SCHEMA.parse({ type: 'S2C_EVENT', tick: room.tick, timestamp: Date.now(), message })));
+            } else if (cmd === 'give') {
+              // Give money to player
+              if (!isAdmin) {
+                ws.send(JSON.stringify(S2C_EVENT_SCHEMA.parse({ type: 'S2C_EVENT', tick: room.tick, timestamp: Date.now(), message: '❌ 需要管理员权限' })));
+                return;
+              }
+              
+              const targetName = args[0];
+              const amount = parseInt(args[1], 10);
+              
+              if (!targetName || isNaN(amount)) {
+                ws.send(JSON.stringify(S2C_EVENT_SCHEMA.parse({ type: 'S2C_EVENT', tick: room.tick, timestamp: Date.now(), message: '用法: /give <玩家名> <金额>' })));
+                return;
+              }
+              
+              // Find player by name
+              let targetPlayerId: string | null = null;
+              let targetAccountId: string | null = null;
+              
+              room.players.forEach((player, pid) => {
+                if (player.name === targetName) {
+                  const accId = playerIdToAccountId.get(pid);
+                  if (accId) {
+                    targetPlayerId = pid;
+                    targetAccountId = accId;
+                  }
+                }
+              });
+              
+              if (!targetAccountId) {
+                ws.send(JSON.stringify(S2C_EVENT_SCHEMA.parse({ type: 'S2C_EVENT', tick: room.tick, timestamp: Date.now(), message: `❌ 未找到玩家: ${targetName}` })));
+                return;
+              }
+              
+              // Add money
+              const targetProfile = room.profileManager.getProfileData(targetAccountId);
+              targetProfile.money += amount;
+              room.profileManager.updateProfile(targetAccountId, { money: targetProfile.money });
+              
+              ws.send(JSON.stringify(S2C_EVENT_SCHEMA.parse({ type: 'S2C_EVENT', tick: room.tick, timestamp: Date.now(), message: `✅ 已给 ${targetName} 增加 ${amount} 金钱` })));
+              log('ADMIN_GIVE_MONEY', { admin: accountId, target: targetName, amount });
+            } else if (cmd === 'heal') {
+              // Heal player
+              if (!isAdmin) {
+                ws.send(JSON.stringify(S2C_EVENT_SCHEMA.parse({ type: 'S2C_EVENT', tick: room.tick, timestamp: Date.now(), message: '❌ 需要管理员权限' })));
+                return;
+              }
+              
+              const targetName = args[0];
+              if (!targetName) {
+                ws.send(JSON.stringify(S2C_EVENT_SCHEMA.parse({ type: 'S2C_EVENT', tick: room.tick, timestamp: Date.now(), message: '用法: /heal <玩家名>' })));
+                return;
+              }
+              
+              let healed = false;
+              room.players.forEach((player) => {
+                if (player.name === targetName) {
+                  player.hp = 100; // Max HP is always 100
+                  healed = true;
+                }
+              });
+              
+              if (healed) {
+                ws.send(JSON.stringify(S2C_EVENT_SCHEMA.parse({ type: 'S2C_EVENT', tick: room.tick, timestamp: Date.now(), message: `✅ 已治疗 ${targetName}` })));
+                log('ADMIN_HEAL', { admin: accountId, target: targetName });
+              } else {
+                ws.send(JSON.stringify(S2C_EVENT_SCHEMA.parse({ type: 'S2C_EVENT', tick: room.tick, timestamp: Date.now(), message: `❌ 未找到玩家: ${targetName}` })));
+              }
+            } else if (cmd === 'kill') {
+              // Kill player
+              if (!isAdmin) {
+                ws.send(JSON.stringify(S2C_EVENT_SCHEMA.parse({ type: 'S2C_EVENT', tick: room.tick, timestamp: Date.now(), message: '❌ 需要管理员权限' })));
+                return;
+              }
+              
+              const targetName = args[0];
+              if (!targetName) {
+                ws.send(JSON.stringify(S2C_EVENT_SCHEMA.parse({ type: 'S2C_EVENT', tick: room.tick, timestamp: Date.now(), message: '用法: /kill <玩家名>' })));
+                return;
+              }
+              
+              let killed = false;
+              room.players.forEach((player, pid) => {
+                if (player.name === targetName && player.status === 'ALIVE') {
+                  player.hp = 0;
+                  player.killedBy = 'Admin';
+                  player.killedByWeaponName = 'Console';
+                  room.handlePlayerDeath(pid);
+                  killed = true;
+                }
+              });
+              
+              if (killed) {
+                ws.send(JSON.stringify(S2C_EVENT_SCHEMA.parse({ type: 'S2C_EVENT', tick: room.tick, timestamp: Date.now(), message: `✅ 已击杀 ${targetName}` })));
+                log('ADMIN_KILL', { admin: accountId, target: targetName });
+              } else {
+                ws.send(JSON.stringify(S2C_EVENT_SCHEMA.parse({ type: 'S2C_EVENT', tick: room.tick, timestamp: Date.now(), message: `❌ 未找到存活玩家: ${targetName}` })));
+              }
+            } else if (cmd === 'kick') {
+              // Kick player
+              if (!isAdmin) {
+                ws.send(JSON.stringify(S2C_EVENT_SCHEMA.parse({ type: 'S2C_EVENT', tick: room.tick, timestamp: Date.now(), message: '❌ 需要管理员权限' })));
+                return;
+              }
+              
+              const targetName = args[0];
+              if (!targetName) {
+                ws.send(JSON.stringify(S2C_EVENT_SCHEMA.parse({ type: 'S2C_EVENT', tick: room.tick, timestamp: Date.now(), message: '用法: /kick <玩家名>' })));
+                return;
+              }
+              
+              let kicked = false;
+              for (const [targetWs, targetPid] of connections.entries()) {
+                const player = room.players.get(targetPid);
+                if (player && player.name === targetName) {
+                  targetWs.close();
+                  kicked = true;
+                  break;
+                }
+              }
+              
+              if (kicked) {
+                ws.send(JSON.stringify(S2C_EVENT_SCHEMA.parse({ type: 'S2C_EVENT', tick: room.tick, timestamp: Date.now(), message: `✅ 已踢出 ${targetName}` })));
+                log('ADMIN_KICK', { admin: accountId, target: targetName });
+              } else {
+                ws.send(JSON.stringify(S2C_EVENT_SCHEMA.parse({ type: 'S2C_EVENT', tick: room.tick, timestamp: Date.now(), message: `❌ 未找到玩家: ${targetName}` })));
+              }
+            } else if (cmd === 'playerlist') {
+              // Silent version for autocomplete sync
+              const playerNames: string[] = [];
+              room.players.forEach(player => {
+                if (player.status === 'ALIVE' && player.name) {
+                  playerNames.push(player.name);
+                }
+              });
+              ws.send(JSON.stringify(S2C_EVENT_SCHEMA.parse({ type: 'S2C_EVENT', tick: room.tick, timestamp: Date.now(), message: `PLAYER_LIST|${playerNames.join('|')}` })));
+            } else if (cmd === 'help') {
+              const helpText = isAdmin 
+                ? '命令: /admin <密码>, /map <id>, /maps, /reset, /players, /give <玩家> <金额>, /heal <玩家>, /kill <玩家>, /kick <玩家>, /ping'
+                : '命令: /admin <密码>, /maps, /players, /ping, /help';
+              ws.send(JSON.stringify(S2C_EVENT_SCHEMA.parse({ type: 'S2C_EVENT', tick: room.tick, timestamp: Date.now(), message: helpText })));
+            } else if (cmd === 'ping') {
+              ws.send(JSON.stringify(S2C_EVENT_SCHEMA.parse({ type: 'S2C_EVENT', tick: room.tick, timestamp: Date.now(), message: 'Pong!' })));
+            } else {
+              ws.send(JSON.stringify(S2C_EVENT_SCHEMA.parse({ type: 'S2C_EVENT', tick: room.tick, timestamp: Date.now(), message: `未知命令: ${cmd}` })));
+            }
+          } else {
+          // 普通聊天（简单广播给所有人，或者仅回显）
+          // 暂时作为 System Event 回显给自己
+          ws.send(JSON.stringify(S2C_EVENT_SCHEMA.parse({ type: 'S2C_EVENT', tick: room.tick, timestamp: Date.now(), message: `[你]: ${content}` })));
+        }
+
       } else if (parsed.type === 'C2S_PING') {
         // Day5: 处理 Ping 消息，立即回复 Pong
         const serverTimestamp = Date.now();
@@ -1558,6 +1801,18 @@ setInterval(() => {
       tick: room.tick,
     });
     const ws = Array.from(connections.entries()).find(([, pid]) => pid === playerId)?.[0];
+    
+    // 调试日志：检查 WebSocket 连接状态
+    log('RAID_RESULT_WS_CHECK', {
+      room: room.id,
+      player: playerId,
+      wsFound: ws ? 'yes' : 'no',
+      wsReadyState: ws?.readyState ?? 'N/A',
+      wsOpen: ws?.readyState === WebSocket.OPEN ? 'yes' : 'no',
+      connectionsCount: connections.size,
+      tick: room.tick,
+    });
+    
     if (ws && ws.readyState === WebSocket.OPEN) {
       // ✅ 关键：raid 结束时更新 phase 为 'RESULT'（持久化）
       room.profileManager.updatePhase(result.accountId, 'RESULT', () => {

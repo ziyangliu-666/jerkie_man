@@ -23,6 +23,12 @@ export class InputManager {
 
   constructor(canvas: HTMLCanvasElement) {
     window.addEventListener('keydown', (e) => {
+      // 忽略输入框内的按键
+      const target = e.target as HTMLElement;
+      if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') {
+        return;
+      }
+
       const key = e.key.toLowerCase();
       
       // 性能优化: 如果是重复按键（长按），且不是需要特殊处理的键，直接返回
@@ -50,6 +56,7 @@ export class InputManager {
               this.staminaShakeCallback();
             }
             e.preventDefault();
+            e.stopPropagation();
             return; // 不设置空格键状态
           }
           
@@ -67,12 +74,15 @@ export class InputManager {
       if (key === 'r') {
         this.reloadFlag = true;
         e.preventDefault();
+        e.stopPropagation();
       } else if (key === 'e') {
         this.interactFlag = true;
         e.preventDefault();
+        e.stopPropagation();
       } else if (key === 'f') {
         this.extractFlag = true;
         e.preventDefault();
+        e.stopPropagation();
       }
       
       // 新增: 数字键1-5使用物品
@@ -80,15 +90,23 @@ export class InputManager {
       if (numKey >= 1 && numKey <= 5) {
         this.useItemFlags[numKey - 1] = true;
         e.preventDefault();
+        e.stopPropagation();
       }
       
-      // 防止默认行为（如页面滚动）
+      // 防止默认行为（如页面滚动）及事件冒泡（防止由空格触发的按钮点击）
       if (['w', 'a', 's', 'd', ' ', 'r', 'e', 'f', '1', '2', '3', '4', '5'].includes(key)) {
         e.preventDefault();
+        e.stopPropagation();
       }
-    });
+    }, { capture: true });
 
     window.addEventListener('keyup', (e) => {
+      // 忽略输入框内的按键
+      const target = e.target as HTMLElement;
+      if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') {
+        return;
+      }
+
       const key = e.key.toLowerCase();
       this.keys.set(key, false);
       
@@ -100,8 +118,11 @@ export class InputManager {
             this.staminaWasExhausted = false;
           }
         }
+        // 同样阻止冒泡，防止 Space keyup 触发按钮点击
+        e.preventDefault();
+        e.stopPropagation();
       }
-    });
+    }, { capture: true });
 
     // 修复: 统一坐标更新函数
     const updatePointer = (clientX: number, clientY: number) => {
