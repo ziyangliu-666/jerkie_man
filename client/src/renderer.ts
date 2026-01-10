@@ -183,7 +183,7 @@ export class Renderer {
     localInBushOverride?: boolean
   ): void {
     // 🎭 伪装检测：如果该玩家伪装了，则渲染为AI（包括本地玩家自己）
-    const isDisguised = player.buffs?.some(b => b.kind === 'disguise');
+    const isDisguised = player.buffs?.some((b: any) => b.kind === 'disguise');
     const shouldRenderAsAi = isDisguised;
     
     if (shouldRenderAsAi) {
@@ -473,7 +473,7 @@ export class Renderer {
     
     // 7. 如果是本地玩家，在状态标签下方显示伪装进度条（与致盲进度条样式一致）
     if (isLocal) {
-      const disguiseBuff = player.buffs?.find(b => b.kind === 'disguise');
+      const disguiseBuff = player.buffs?.find((b: any) => b.kind === 'disguise');
       if (disguiseBuff) {
         const progress = Math.min(1, Math.max(0, (disguiseBuff.remainingMs ?? 0) / (disguiseBuff.totalMs ?? 1)));
         // 直接使用屏幕坐标绘制，避免 drawStatusIndicator 内部重新计算位置
@@ -2432,7 +2432,7 @@ export class Renderer {
 
         // 生成种子
         const seedStr = zone.id || `${zone.x}_${zone.y}`;
-        const seed = seedStr.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
+        const seed = seedStr.split('').reduce((acc: number, char: string) => acc + char.charCodeAt(0), 0);
 
         this.ctx.save();
         this.ctx.beginPath();
@@ -3574,7 +3574,7 @@ export class Renderer {
     const obsMaxHp = (obstacle as any).maxHp;
 
     const seedStr = obstacle.id || `${obstacle.x}_${obstacle.y}`;
-    const seed = seedStr.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
+    const seed = seedStr.split('').reduce((acc: number, char: string) => acc + char.charCodeAt(0), 0);
 
     let damageTier = 0;
     if (obsHp !== undefined && obsMaxHp !== undefined && obsMaxHp > 0) {
@@ -3923,7 +3923,7 @@ export class Renderer {
         const visualPlayer = isLocal && localPlayer ? localPlayer : player;
 
         const wasDisguised = this.disguisedPlayers.has(visualPlayer.id);
-        const isDisguised = visualPlayer.buffs?.some(b => b.kind === 'disguise') ?? false;
+        const isDisguised = visualPlayer.buffs?.some((b: any) => b.kind === 'disguise') ?? false;
         
         if (wasDisguised && !isDisguised) {
           this.fizzleEffects.push({

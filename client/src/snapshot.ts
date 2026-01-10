@@ -127,13 +127,13 @@ export class SnapshotBuffer {
 
     // 插值玩家位置
     const interpolatedPlayers: PLAYER_STATE[] = [];
-    const playerMap0 = new Map(t0.snapshot.players.map((p) => [p.id, p]));
-    const playerMap1 = new Map(t1.snapshot.players.map((p) => [p.id, p]));
+    const playerMap0 = new Map(t0.snapshot.players.map((p: PLAYER_STATE) => [p.id, p]));
+    const playerMap1 = new Map(t1.snapshot.players.map((p: PLAYER_STATE) => [p.id, p]));
 
     // 合并所有玩家ID
     const allPlayerIds = new Set([
-      ...t0.snapshot.players.map((p) => p.id),
-      ...t1.snapshot.players.map((p) => p.id),
+      ...t0.snapshot.players.map((p: PLAYER_STATE) => p.id),
+      ...t1.snapshot.players.map((p: PLAYER_STATE) => p.id),
     ]);
 
     for (const id of allPlayerIds) {
@@ -178,8 +178,8 @@ export class SnapshotBuffer {
       if (a0 && a1) {
         interpolatedAIs.push({
           ...a1,
-          x: lerp(a0.x, a1.x, clampedAlphaPlayers),
-          y: lerp(a0.y, a1.y, clampedAlphaPlayers),
+          x: lerp(a0.x as number, a1.x as number, clampedAlphaPlayers),
+          y: lerp(a0.y as number, a1.y as number, clampedAlphaPlayers),
         });
       } else if (a1) {
         interpolatedAIs.push(a1);
@@ -188,12 +188,12 @@ export class SnapshotBuffer {
 
     // Decoy插值 (类似AI插值)
     const interpolatedDecoys: DECOY_STATE[] = [];
-    const decoyMap0 = new Map((t0.snapshot.decoys ?? []).map((d) => [d.id, d]));
-    const decoyMap1 = new Map((t1.snapshot.decoys ?? []).map((d) => [d.id, d]));
+    const decoyMap0 = new Map((t0.snapshot.decoys ?? []).map((d: DECOY_STATE) => [d.id, d]));
+    const decoyMap1 = new Map((t1.snapshot.decoys ?? []).map((d: DECOY_STATE) => [d.id, d]));
     
     const allDecoyIds = new Set([
-      ...(t0.snapshot.decoys ?? []).map((d) => d.id),
-      ...(t1.snapshot.decoys ?? []).map((d) => d.id),
+      ...(t0.snapshot.decoys ?? []).map((d: DECOY_STATE) => d.id),
+      ...(t1.snapshot.decoys ?? []).map((d: DECOY_STATE) => d.id),
     ]);
 
     for (const id of allDecoyIds) {
@@ -203,8 +203,8 @@ export class SnapshotBuffer {
         if (d0 && d1) {
             interpolatedDecoys.push({
                 ...d1,
-                x: lerp(d0.x, d1.x, clampedAlphaPlayers),
-                y: lerp(d0.y, d1.y, clampedAlphaPlayers),
+                x: lerp(d0.x as number, d1.x as number, clampedAlphaPlayers),
+                y: lerp(d0.y as number, d1.y as number, clampedAlphaPlayers),
             })
         } else if (d1) {
             interpolatedDecoys.push(d1);

@@ -1299,8 +1299,8 @@ function showRaidWeaponSelectModal(): void {
   const inventoryItems = localPlayer?.inventory?.items ?? [];
   const currentWeaponTypeId = localPlayer?.weaponRuntime?.weaponTypeId ?? 'w_fists';
 
-  const weaponItems = inventoryItems.filter(item => isWeaponTypeId(item.typeId));
-  const availableItems = weaponItems.filter(item => currentWeaponTypeId === 'w_fists' || item.typeId !== currentWeaponTypeId);
+  const weaponItems = inventoryItems.filter((item: ItemInstance) => isWeaponTypeId(item.typeId));
+  const availableItems = weaponItems.filter((item: ItemInstance) => currentWeaponTypeId === 'w_fists' || item.typeId !== currentWeaponTypeId);
 
   if (availableItems.length === 0) {
     equipSelectList.innerHTML = '<div style="color: #666; padding: 20px; text-align: center;">背包里没有可切换的武器</div>';
@@ -1542,7 +1542,7 @@ function updateHotbarHud(localPlayer: PLAYER_STATE | null): void {
   
   // 获取可使用的物品（使用统一的定义）
   const usableItemTypeIds = getUsableItemTypeIds();
-  const usableItems = localPlayer.inventory?.items?.filter(item => {
+  const usableItems = localPlayer.inventory?.items?.filter((item: ItemInstance) => {
     return isUsableItem(item.typeId);
   }) || [];
   
@@ -1660,7 +1660,7 @@ function updateRaidEquipmentUI(localPlayer: PLAYER_STATE | null): void {
   const inventoryItems = localPlayer.inventory?.items ?? [];
   const bagCap = localPlayer.inventory?.bagCap ?? 0;
   const bagUsed = inventoryItems.length;
-  const totalQty = inventoryItems.reduce((sum, entry) => sum + entry.qty, 0);
+  const totalQty = inventoryItems.reduce((sum: number, entry: ItemInstance) => sum + entry.qty, 0);
   const equippedWeaponIid = localPlayer.raidEquipment?.weaponIid ?? null;
   const equippedBagIid = localPlayer.raidEquipment?.bagIid ?? null;
   const equippedArmorIid = localPlayer.raidEquipment?.armorIid ?? null;
@@ -1687,11 +1687,11 @@ function updateRaidEquipmentUI(localPlayer: PLAYER_STATE | null): void {
   if (raidArmorName) raidArmorName.textContent = armorName;
   if (raidArmorMeta) raidArmorMeta.textContent = armorMeta;
 
-  const weaponItems = inventoryItems.filter(item => isWeaponTypeId(item.typeId));
+  const weaponItems = inventoryItems.filter((item: ItemInstance) => isWeaponTypeId(item.typeId));
   const canSwap =
     weaponTypeId === 'w_fists'
       ? weaponItems.length > 0
-      : weaponItems.some(item => item.typeId !== weaponTypeId);
+      : weaponItems.some((item: ItemInstance) => item.typeId !== weaponTypeId);
 
   if (raidWeaponSwap) raidWeaponSwap.disabled = !canSwap;
   if (raidWeaponUnequip) {
@@ -1719,7 +1719,7 @@ function updateRaidEquipmentUI(localPlayer: PLAYER_STATE | null): void {
         equippedWeaponIid ?? '',
         equippedBagIid ?? '',
         equippedArmorIid ?? '',
-        inventoryItems.map((item) => `${item.iid}:${item.typeId}:${item.qty}`).join(','),
+        inventoryItems.map((item: ItemInstance) => `${item.iid}:${item.typeId}:${item.qty}`).join(','),
       ].join('|');
       const needsRebuild = !lastRaidBagExpanded || bagSignature !== lastRaidBagSignature;
       if (needsRebuild) {
@@ -2018,7 +2018,7 @@ function updateItemLists(): void {
   // 更新整备区列表（过滤已装备的物品）
       // 更新整备区列表（过滤已装备的物品）
     if (prepList && playerProfile.prep) {
-      const availablePrepItems = playerProfile.prep.filter(item => !isItemEquipped(item));
+      const availablePrepItems = playerProfile.prep.filter((item: ItemInstance) => !isItemEquipped(item));
       
       if (availablePrepItems.length === 0) {
         if (prepList.innerHTML.indexOf('整备区为空') === -1) {

@@ -265,7 +265,7 @@ export class HUD {
     if (inventoryEl) {
       const inventorySignature = data.inventory
         ? `${data.inventory.bagCap}|${data.inventory.items
-            .map((item) => `${item.iid}:${item.typeId}:${item.qty}`)
+            .map((item: ItemInstance) => `${item.iid}:${item.typeId}:${item.qty}`)
             .join(',')}`
         : 'none';
 
@@ -318,7 +318,7 @@ export class HUD {
                 </tr>
               `;
             }
-            const totalQty = items.reduce((sum, entry) => sum + entry.qty, 0);
+            const totalQty = items.reduce((sum: number, entry: ItemInstance) => sum + entry.qty, 0);
             let html = `
               <div><strong>容量：</strong> ${escapeHtml(items.length)}/${escapeHtml(data.inventory.bagCap)} <span style="color: #666;">| 总数 ${escapeHtml(totalQty)}</span></div>
               <div><strong>总价值：</strong> <span style="color: #ffd700; font-weight: bold;">$${escapeHtml(totalValue)}</span></div>
