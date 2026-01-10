@@ -6,14 +6,9 @@
     "module": "ESNext",
     "moduleResolution": "bundler",
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
-    "baseUrl": ".",
-    "paths": {
-      "@jerkie-man/shared": ["../shared/src/index.ts"]
-    }
+    "baseUrl": "."
   },
   "include": ["src/**/*"],
-  "references": [
-    { "path": "../shared" }
-  ]
+
 }
 

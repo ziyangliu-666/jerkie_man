@@ -8,8 +8,6 @@
     "types": ["node"]
   },
   "include": ["src/**/*"],
-  "references": [
-    { "path": "../shared" }
-  ]
+
 }
 
