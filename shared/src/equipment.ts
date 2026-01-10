@@ -165,19 +165,17 @@ export const WEAPONS: Record<string, WeaponDef> = {
   },
   w_burst_grenade_launcher: {
     typeId: 'w_burst_grenade_launcher',
-    name: '多联榴弹炮',
+    name: '多连榴弹炮',
     weaponKind: 'launcher',
     magSize: 6,          // 6发弹匣
     reloadMs: 3000,      // 换弹较慢（4秒）
-    fireIntervalMs: 800, // 射击间隔
-    spreadDeg: 4,        // 散布稍大
+    fireIntervalMs: 450, // 连发间隔（缩短以体现全自动感）
+    spreadDeg: 5,        // 散布略微增加
     bulletSpeed: 520,
-    damage: 8,           // 直接伤害更低
+    damage: 8,           // 直接伤害
     bulletLifeMs: 3000,  // 3秒后爆炸
-    explosionRadius: 100, // 爆炸半径稍小
-    explosionDamage: 180, // 爆炸伤害降低（原来300，现在180）
-    burstCount: 3,       // 三连发
-    burstIntervalMs: 150, // 连发间隔150ms
+    explosionRadius: 100, // 爆炸半径
+    explosionDamage: 180, // 爆炸伤害
   },
   w_minigun: {
     typeId: 'w_minigun',
@@ -230,12 +228,12 @@ export const WEAPONS: Record<string, WeaponDef> = {
   w_crossbow: {
     typeId: 'w_crossbow',
     name: '弩',
-    magSize: 1,          // 单发装填
+    magSize: 5,          // 单发装填
     reloadMs: 3000,      // 装填慢
-    fireIntervalMs: 100, // 装填后可以快速射击
+    fireIntervalMs: 300, // 装填后可以快速射击
     spreadDeg: 0.5,      // 高精度
     bulletSpeed: 800,    // 中等速度
-    damage: 200,          // 高伤害
+    damage: 60,          // 高伤害
     bulletLifeMs: 2000,  // 中等射程
   },
   w_auto_shotgun: {

@@ -285,10 +285,10 @@ export const ITEM_CATALOG: Record<string, ItemType> = {
   w_burst_grenade_launcher: {
     id: 'w_burst_grenade_launcher',
     category: 'weapon',
-    name: '连发榴弹炮',
+    name: '多连榴弹炮',
     rarity: 'EPIC',
     value: 2800,
-    description: '改进型榴弹发射器，能够快速连续发射三发榴弹，适合区域压制。',
+    description: '改进型全自动榴弹发射器，能够连续不断地倾泻榴弹火力，适合大范围区域压制。',
     stackMax: 1,
   },
   w_katana: {
@@ -314,7 +314,7 @@ export const ITEM_CATALOG: Record<string, ItemType> = {
     category: 'weapon',
     name: '鞭子',
     rarity: 'LEGENDARY',
-    value: 6000,
+    value: 4000,
     description: '传说级的远程近战武器，超长攻击距离可以隔山打牛，让敌人防不胜防。',
     stackMax: 1,
   },

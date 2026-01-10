@@ -113,7 +113,7 @@ export class ThrowingAim {
     const distance = Math.sqrt(dx * dx + dy * dy);
     
     // 抛物线高度基于距离
-    const maxHeight = Math.min(distance * 0.3, 100);
+    const maxHeight = Math.min(distance * 0.4, 120);
     
     for (let i = 0; i <= steps; i++) {
       const t = i / steps;

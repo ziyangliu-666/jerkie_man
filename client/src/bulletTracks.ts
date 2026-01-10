@@ -104,6 +104,8 @@ export class BulletTrackManager {
   private obstacles: OBSTACLE_STATE[] = [];
   private players: PLAYER_STATE[] = [];
   private ais: any[] = []; // 新增: AI列表
+  private turrets: any[] = []; // 新增: 炮塔列表
+  private decoys: any[] = []; // 新增: 诱饵列表
 
   setLocalPlayerId(id: string | null): void {
     this.localPlayerId = id;
@@ -149,8 +151,10 @@ export class BulletTrackManager {
     const nowMs = performance.now();
     const tempId = `local_grenade_${this.tempIdCounter++}`;
 
-    // 计算飞行速度（速度3倍）
-    const flightTime = 1.0 / 3; // 飞行时间缩短为1/3，速度提升3倍
+    const isSmoke = weaponTypeId === 'smoke_grenade';
+    const isMolotov = weaponTypeId === 'molotov';
+    const bulletLifeMs = (isSmoke || isMolotov) ? 1000 : 750;
+    const flightTime = bulletLifeMs / 1000; 
     const dx = targetX - playerX;
     const dy = targetY - playerY;
     const vx = dx / flightTime;
@@ -165,7 +169,7 @@ export class BulletTrackManager {
       vy,
       spawnTimeMs: nowMs,
       isLocalPrediction: true,
-      bulletLifeMs: 750, // 0.75秒引信
+      bulletLifeMs, 
       weaponTypeId,
       isGrenade: true,
       targetX,
@@ -304,6 +308,8 @@ export class BulletTrackManager {
     const nowMs = performance.now();
     this.players = players;
     this.ais = snapshot.ais ?? []; // 新增: 更新AI列表
+    this.turrets = snapshot.turrets ?? []; // 新增: 更新炮塔列表
+    this.decoys = snapshot.decoys ?? []; // 新增: 更新诱饵列表
 
     // 清理过期的"本地销毁"记录（500ms 后允许服务端重新添加同 ID 子弹）
     for (const [id, destroyTime] of this.destroyedCleanupTime) {
@@ -465,9 +471,9 @@ export class BulletTrackManager {
         isGrenade,
         targetX: b.targetX,
         targetY: b.targetY,
-        keepClientTrajectory: true, // 所有子弹都保持客户端轨迹（避免服务端同步卡顿）
-        spawnX: b.x,
-        spawnY: b.y,
+        keepClientTrajectory: true, // 所有子弹都保持客户端轨迹
+        spawnX: b.spawnX ?? b.x,
+        spawnY: b.spawnY ?? b.y,
         localHitReported: false,
       });
 
@@ -633,6 +639,39 @@ export class BulletTrackManager {
       }
       if (hitAI) {
         toRemove.push({ id, reason: 'player' }); // 使用'player'类型的特效
+        continue;
+      }
+
+      // 新增: 检查炮塔碰撞
+      let hitTurret = false;
+      for (const turret of this.turrets) {
+        if (turret.hp <= 0) continue;
+        if (pointVsCircle(bullet.x, bullet.y, turret.x, turret.y, 20)) { // 20 为炮塔碰撞半径
+          hitTurret = true;
+          // 炮塔命中反馈：构造临时对象
+          const turretAsTarget: PLAYER_STATE = { id: turret.id, x: turret.x, y: turret.y, status: 'ALIVE' } as any;
+          this.emitLocalHit(bullet, turretAsTarget);
+          break;
+        }
+      }
+      if (hitTurret) {
+        toRemove.push({ id, reason: 'obstacle' }); // 机械单位使用火花特效
+        continue;
+      }
+
+      // 新增: 检查诱饵碰撞
+      let hitDecoy = false;
+      for (const decoy of this.decoys) {
+        if (decoy.hp <= 0) continue;
+        if (pointVsCircle(bullet.x, bullet.y, decoy.x, decoy.y, 16)) {
+          hitDecoy = true;
+          const decoyAsTarget: PLAYER_STATE = { id: decoy.id, x: decoy.x, y: decoy.y, status: 'ALIVE' } as any;
+          this.emitLocalHit(bullet, decoyAsTarget);
+          break;
+        }
+      }
+      if (hitDecoy) {
+        toRemove.push({ id, reason: 'player' }); // 诱饵通常长得像人，用出血特效
         continue;
       }
     }

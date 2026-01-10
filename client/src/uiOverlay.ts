@@ -267,22 +267,35 @@ export class UIOverlay {
    * 绘制命中标记（X 形状）
    */
   private drawHitMarker(ctx: CanvasRenderingContext2D, cx: number, cy: number, alpha: number): void {
-    const size = 10;
+    // 增加动感：命中瞬间大一点，然后缩小
+    const size = 12 + (alpha * 4); 
+    const innerGap = 5;
 
+    ctx.save();
     ctx.strokeStyle = `rgba(255, 255, 255, ${alpha})`;
-    ctx.lineWidth = 2;
+    ctx.lineWidth = 3;
     ctx.lineCap = 'round';
+    
+    // 添加外发光
+    ctx.shadowColor = `rgba(255, 255, 255, ${alpha * 0.5})`;
+    ctx.shadowBlur = 4;
 
     ctx.beginPath();
+    // 左上
     ctx.moveTo(cx - size, cy - size);
-    ctx.lineTo(cx - size / 2, cy - size / 2);
+    ctx.lineTo(cx - innerGap, cy - innerGap);
+    // 右上
     ctx.moveTo(cx + size, cy - size);
-    ctx.lineTo(cx + size / 2, cy - size / 2);
+    ctx.lineTo(cx + innerGap, cy - innerGap);
+    // 左下
     ctx.moveTo(cx - size, cy + size);
-    ctx.lineTo(cx - size / 2, cy + size / 2);
+    ctx.lineTo(cx - innerGap, cy + innerGap);
+    // 右下
     ctx.moveTo(cx + size, cy + size);
-    ctx.lineTo(cx + size / 2, cy + size / 2);
+    ctx.lineTo(cx + innerGap, cy + innerGap);
     ctx.stroke();
+    
+    ctx.restore();
   }
 
   /**

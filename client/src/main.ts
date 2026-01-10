@@ -272,6 +272,10 @@ let throwingItemType: string | null = null;
 
 // 初始化子弹轨迹管理器（dead-reckoning，解决子弹"忽快忽慢"）
 const bulletTracks = new BulletTrackManager();
+// 新增: 监听本地子弹命中，立即触发命中反馈
+bulletTracks.onLocalHit(() => {
+  uiOverlay.triggerHitMarker();
+});
 
 // ===== Canvas 尺寸计算（考虑 HUD 宽度，与 HUD 并列显示）=====
 // 修复: 添加阈值，避免频繁 resize 导致卡顿/重影
@@ -4529,6 +4533,11 @@ function renderLoop(): void {
               }
               
               resetLocalBurst(); // 清空旧的连发状态
+
+              // 触发屏幕抖动
+              const shakeIntensity = 0.08;
+              const shakeDuration = 100;
+              renderer.triggerShake(shakeIntensity, shakeDuration);
             } else {
               // 单发模式
               localShotIdCounter++;
@@ -4556,6 +4565,30 @@ function renderLoop(): void {
                 shotOriginY = undefined;
               }
               resetLocalBurst();
+              
+              // 触发屏幕抖动 (根据武器类型调整强度)
+              let shakeIntensity = 0.05;
+              let shakeDuration = 80;
+              
+              if (weaponRuntime.weaponTypeId === 'w_sniper' || weaponRuntime.weaponTypeId === 'w_anti_material') {
+                shakeIntensity = 0.25;
+                shakeDuration = 200;
+              } else if (weaponRuntime.weaponTypeId === 'w_shotgun' || weaponRuntime.weaponTypeId === 'w_double_barrel' || weaponRuntime.weaponTypeId === 'w_auto_shotgun') {
+                shakeIntensity = 0.18;
+                shakeDuration = 150;
+              } else if (weaponRuntime.weaponTypeId === 'w_grenade_launcher' || weaponRuntime.weaponTypeId === 'w_burst_grenade_launcher') {
+                shakeIntensity = 0.15;
+                shakeDuration = 120;
+              } else if (weaponRuntime.weaponTypeId === 'w_laser_rifle') {
+                shakeIntensity = 0; // 激光步枪无后坐力
+              } else if (weaponRuntime.weaponTypeId === 'w_minigun') {
+                shakeIntensity = 0.03; // 射速极快，抖动幅度减小
+                shakeDuration = 50;
+              }
+              
+              if (shakeIntensity > 0) {
+                renderer.triggerShake(shakeIntensity, shakeDuration);
+              }
             }
           } else if (!hasAmmo && weaponDef?.weaponKind !== 'melee') {
             uiOverlay.showText('NO AMMO');

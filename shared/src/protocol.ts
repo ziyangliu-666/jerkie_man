@@ -346,6 +346,8 @@ export const BULLET_STATE_SCHEMA = z.object({
   spawnTimeMs: z.number().optional(), // 新增: 生成时间戳（用于视觉效果计算，如轨迹消隐）
   targetX: z.number().optional(),
   targetY: z.number().optional(),
+  spawnX: z.number().optional(), // 新增: 起始位置X（用于抛物线计算）
+  spawnY: z.number().optional(), // 新增: 起始位置Y
   spreadSeed: z.number().optional(), // 新增: 散布种子（用于客户端重现散布，特别是炮台子弹）
 });
 

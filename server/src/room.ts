@@ -2061,6 +2061,14 @@ export class Room {
               const direction = Math.atan2(dy, dx);
               this.combatEvents.get(hitPlayer.id)!.push({ kind: 'DAMAGE_TAKEN', direction });
               
+              // 给攻击者发送命中事件
+              if (this.players.has(playerId)) {
+                if (!this.combatEvents.has(playerId)) {
+                  this.combatEvents.set(playerId, []);
+                }
+                this.combatEvents.get(playerId)!.push({ kind: 'HIT' });
+              }
+              
               // 推送命中事件
               this.pushEvent(`${playerId} melee hit ${hitPlayer.id} (-${damage})`);
             } else if (hitAI) {
@@ -2083,6 +2091,14 @@ export class Room {
                 aiHpRemaining: hitAI.hp,
                 tick: this.tick,
               });
+
+              // 给攻击者发送命中事件
+              if (this.players.has(playerId)) {
+                if (!this.combatEvents.has(playerId)) {
+                  this.combatEvents.set(playerId, []);
+                }
+                this.combatEvents.get(playerId)!.push({ kind: 'HIT' });
+              }
             } else if (hitTurret) {
               // 攻击炮塔
               hitTurret.takeDamage(damage);
@@ -2095,6 +2111,14 @@ export class Room {
                 damage,
                 tick: this.tick
               });
+
+              // 给攻击者发送命中事件
+              if (this.players.has(playerId)) {
+                if (!this.combatEvents.has(playerId)) {
+                  this.combatEvents.set(playerId, []);
+                }
+                this.combatEvents.get(playerId)!.push({ kind: 'HIT' });
+              }
 
             } else if (hitDecoy) {
               // 攻击诱饵
@@ -2115,6 +2139,14 @@ export class Room {
                 });
               }
               
+              // 给攻击者发送命中事件
+              if (this.players.has(playerId)) {
+                if (!this.combatEvents.has(playerId)) {
+                  this.combatEvents.set(playerId, []);
+                }
+                this.combatEvents.get(playerId)!.push({ kind: 'HIT' });
+              }
+
               // 推送命中事件
               this.pushEvent(`${playerId} melee hit decoy ${hitDecoy.id} (-${damage})`);
             }
@@ -2398,6 +2430,17 @@ export class Room {
       const oldHp = player.hp;
       player.takeDamage(finalDamage);
       const isDead = player.hp <= 0;
+
+      // 给被攻击者发送受伤事件
+      const attackerPos = this.getAttackerPosition(ownerId) || { x, y };
+      const hitDx = attackerPos.x - player.x;
+      const hitDy = attackerPos.y - player.y;
+      const direction = Math.atan2(hitDy, hitDx);
+      
+      if (!this.combatEvents.has(playerId)) {
+        this.combatEvents.set(playerId, []);
+      }
+      this.combatEvents.get(playerId)!.push({ kind: 'DAMAGE_TAKEN', direction });
 
       if (isDead) {
         const info = this.getAttackerInfo(ownerId);
@@ -2694,6 +2737,18 @@ export class Room {
             player.killedBy = info.name;
             player.killedByWeaponName = '燃烧弹';
             this.handlePlayerDeath(playerId);
+          }
+
+          // 每 10 tick (约 0.5s) 发送一次受伤事件，避免过度抖动
+          if (this.tick % 10 === 0) {
+            const hitDx = fire.x - player.x;
+            const hitDy = fire.y - player.y;
+            const direction = Math.atan2(hitDy, hitDx);
+
+            if (!this.combatEvents.has(playerId)) {
+              this.combatEvents.set(playerId, []);
+            }
+            this.combatEvents.get(playerId)!.push({ kind: 'DAMAGE_TAKEN', direction });
           }
           
           // 如果有所有者，记录战斗事件
@@ -3340,17 +3395,19 @@ export class Room {
           }
 
           // 新增: 发送战斗事件（命中反馈给攻击者，受伤反馈给被攻击者）
-          const attacker = this.players.get(bullet.ownerId);
+          const attacker = this.players.get(bullet.ownerId) || this.ais.get(bullet.ownerId) || this.turrets.get(bullet.ownerId);
           if (attacker) {
-            const dx = attacker.x - player.x;
-            const dy = attacker.y - player.y;
-            const direction = Math.atan2(dy, dx);
+            const hitDx = attacker.x - player.x;
+            const hitDy = attacker.y - player.y;
+            const direction = Math.atan2(hitDy, hitDx);
             
-            // 给攻击者发送命中事件
-            if (!this.combatEvents.has(bullet.ownerId)) {
-              this.combatEvents.set(bullet.ownerId, []);
+            // 仅当攻击者是玩家时才发送命中事件
+            if (this.players.has(bullet.ownerId)) {
+              if (!this.combatEvents.has(bullet.ownerId)) {
+                this.combatEvents.set(bullet.ownerId, []);
+              }
+              this.combatEvents.get(bullet.ownerId)!.push({ kind: 'HIT' });
             }
-            this.combatEvents.get(bullet.ownerId)!.push({ kind: 'HIT' });
             
             // 给被攻击者发送受伤事件
             if (!this.combatEvents.has(playerId)) {
@@ -4949,6 +5006,18 @@ export class Room {
     return { name: ownerId, weaponName: '未知' };
   }
 
+  // 新增: 获取攻击者当前位置（用于受伤方向计算）
+  private getAttackerPosition(ownerId: string | undefined): { x: number, y: number } | null {
+    if (!ownerId) return null;
+    const player = this.players.get(ownerId);
+    if (player) return { x: player.x, y: player.y };
+    const ai = this.ais.get(ownerId);
+    if (ai) return { x: ai.x, y: ai.y };
+    const turret = this.turrets.get(ownerId);
+    if (turret) return { x: turret.x, y: turret.y };
+    return null;
+  }
+
   // 新增: 处理玩家撤离（inventory -> stash）
   // 返回结果信息，用于发送 S2C_RAID_RESULT
   handlePlayerExtract(playerId: string): { success: boolean; accountId?: string; loot?: ItemInstance[]; moneyGained?: number } {
@@ -5601,15 +5670,15 @@ export class Room {
       });
     }
     
-    // 计算投掷速度（基于距离和重力，速度3倍）
-    const flightTime = isSmoke ? 1.0 : 1.0 / 3; // 烟雾弹飞行1秒，其他手雷0.75秒
+    // 计算投掷速度（基于距离和生命周期）
+    const bulletLifeMs = (isSmoke || isMolotov) ? 1000 : 750;
+    const flightTime = bulletLifeMs / 1000; 
     const vx = dx / flightTime;
     const vy = dy / flightTime;
     
     // 根据类型设置伤害和爆炸时间
-    const damage = isSmoke ? 0 : (isFlash ? 0 : 500); // 烟雾弹和闪光弹不造成直接伤害，燃烧弹由区域伤害处理
-    const bulletLifeMs = (isSmoke || isMolotov) ? 1000 : 750; // 烟雾弹和燃烧弹飞行1秒
-    const explodeTickOffset = (isSmoke || isMolotov) ? 1000 : 750;
+    const damage = isSmoke ? 0 : (isFlash ? 0 : 500); // 烟雾弹和闪光弹不造成直接伤害
+    const explodeTickOffset = bulletLifeMs;
     
     // 创建手雷子弹（使用特殊的手雷子弹类型）
     const grenadeBullet: Bullet = {
