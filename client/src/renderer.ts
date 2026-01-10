@@ -2073,7 +2073,7 @@ export class Renderer {
     if (effect.type === 'player') {
       // --- 玩家命中：喷血效果 ---
       // 1. 中央核心闪光
-      const coreSize = 6 * (1 - effect.age);
+      const coreSize = Math.max(0, 6 * (1 - effect.age));
       this.ctx.fillStyle = `rgba(255, 0, 0, ${alpha * 0.8})`;
       this.ctx.beginPath();
       this.ctx.arc(screenX, screenY, coreSize, 0, Math.PI * 2);
@@ -2086,7 +2086,7 @@ export class Renderer {
         const dist = (10 + ((seed + i * 23) % 15)) * effect.age * 1.5;
         const px = screenX + Math.cos(angle) * dist;
         const py = screenY + Math.sin(angle) * dist;
-        const pSize = 2.5 * (1 - effect.age);
+        const pSize = Math.max(0, 2.5 * (1 - effect.age));
         
         this.ctx.fillStyle = `rgba(200, 0, 0, ${alpha})`;
         this.ctx.beginPath();
