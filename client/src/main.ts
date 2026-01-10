@@ -1204,7 +1204,7 @@ function updateHideoutUI(): void {
     }
   }
   if (hideoutMoney) {
-    hideoutMoney.textContent = playerProfile.money.toString();
+    hideoutMoney.textContent = playerProfile.money.toLocaleString();
   }
   if (hideoutStatus) {
     const connState = network.getConnectionState();
@@ -2654,7 +2654,7 @@ function createItemCard(mergedItem: MergedItem, itemType: any, source: 'prep' | 
     statsEl.style.color = '#0ff';
     statsEl.style.fontSize = '11px';
     statsEl.style.fontWeight = 'bold';
-    statsEl.style.fontFamily = "'Courier New', monospace";
+    statsEl.style.fontFamily = "var(--font-mono)";
     statsEl.style.letterSpacing = '0.5px';
     statsEl.style.textShadow = '0 0 8px rgba(0, 255, 255, 0.3)';
     statsEl.textContent = statsText;
@@ -2884,42 +2884,54 @@ function getItemDescription(itemType: any): string {
 }
 
 // 新增: 创建商店物品行
+// 新增: 创建商店物品行 - Refactored to match Stash Card style
 function createShopRow(itemType: any): HTMLElement {
   const row = document.createElement('div');
-  row.className = 'item-row';
+  row.className = 'shop-card'; // Use new consolidated style
   
-  const info = document.createElement('div');
-  info.className = 'item-info';
+  // 1. Header (Title + Price)
+  const header = document.createElement('div');
+  header.className = 'shop-card-header';
   
-  // 价格显示在标题后面，带金币图标
-  const priceHtml = `<span style="color: #ffd700; margin-left: 8px;">💰 ${itemType.value}</span>`;
+  const title = document.createElement('div');
+  title.className = 'shop-card-title';
+  title.textContent = itemType.name;
+  
+  const price = document.createElement('div');
+  price.className = 'shop-card-price';
+  price.textContent = `💰 ${itemType.value.toLocaleString()}`; // Format price
+  
+  header.appendChild(title);
+  header.appendChild(price);
+  row.appendChild(header);
+
+  // 2. Meta Info (Description + Stats)
   const description = getItemDescription(itemType);
-  
-  // 分割描述和数值统计（通过换行符）
   const descParts = description.split('\n');
-  const descText = descParts[0] || ''; // 第一行是描述文本
-  const statsText = descParts[1] || ''; // 第二行是数值统计
+  const descText = descParts[0] || '';
+  const statsText = descParts[1] || '';
   
-  // 构建HTML
-  let descHtml = '';
+  const meta = document.createElement('div');
+  meta.className = 'shop-card-meta';
+  
+  let metaHtml = '';
   if (descText) {
-    descHtml += `<div class="item-desc" style="margin-top: 4px; color: #999; font-size: 11px; line-height: 1.4;">${descText}</div>`;
+    metaHtml += `<div style="margin-bottom: 4px; color: rgba(255,255,255,0.7);">${descText}</div>`;
   }
   if (statsText) {
-    descHtml += `<div class="item-stats" style="margin-top: 6px; color: #0ff; font-size: 12px; font-weight: bold; font-family: 'Courier New', monospace; letter-spacing: 0.5px; text-shadow: 0 0 8px rgba(0, 255, 255, 0.3);">${statsText}</div>`;
+    metaHtml += `<div style="color: #0ff; font-family: var(--font-mono); font-weight: bold; letter-spacing: 0.5px;">${statsText}</div>`;
   }
+  meta.innerHTML = metaHtml;
+  row.appendChild(meta);
   
-  info.innerHTML = `
-    <div class="item-name">${itemType.name}${priceHtml}</div>
-    ${descHtml}
-  `;
-  
+  // 3. Actions (Buttons)
   const actions = document.createElement('div');
-  actions.className = 'item-actions';
+  actions.className = 'shop-card-actions';
   
   const buyBtn = document.createElement('button');
   buyBtn.className = 'item-btn primary';
   buyBtn.style.flex = '1';
+  // buyBtn text set by updateButtonText below
 
   const buyEquipBtn = document.createElement('button');
   buyEquipBtn.className = 'item-btn secondary';
@@ -2940,74 +2952,96 @@ function createShopRow(itemType: any): HTMLElement {
       buyBtn.textContent = `已购买 ${count} 个`;
       buyBtn.classList.add('success');
       buyBtn.classList.remove('primary');
-      // 只有在需要时才播放动画
       if (animate) {
         buyBtn.style.animation = 'none';
         setTimeout(() => {
           buyBtn.style.animation = 'successPulse 0.4s ease-out';
         }, 10);
-      } else {
-        // 移除动画，保持静态样式
-        buyBtn.style.animation = 'none';
       }
     } else {
-      buyBtn.textContent = '购买'; // 不再包含金额
+      // 移除动画，保持静态样式
       buyBtn.classList.remove('success');
       buyBtn.classList.add('primary');
       buyBtn.style.animation = 'none';
+      buyBtn.textContent = `购买`;
     }
   };
-  
-  // 初始化按钮状态
+
+  // Initial text update
   updateButtonText(getBuyCount());
   
-  const handleBuy = (autoAction: 'none' | 'equip' | 'prep' = 'none') => {
-    const currentCount = getBuyCount();
-    const newCount = currentCount + 1;
-    const totalCost = itemType.value; // 单个价格
+  actions.appendChild(buyBtn);
+  
+  // Add secondary buttons based on item type...
+  const category = getItemCategory(itemType.id);
+  if (category === 'weapon' || category === 'armor' || category === 'bag') {
+      actions.appendChild(buyEquipBtn);
+  } else if (category === 'consumable' || category === 'material') {
+      actions.appendChild(buyPrepBtn);
+  }
 
-    if (playerProfile && playerProfile.money >= totalCost) {
-      console.log(`[DEBUG] Buy Item: ${itemType.name} (id: ${itemType.id}, action: ${autoAction})`);
-      network.sendBuy(itemType.id, 1, autoAction);
-      
-      let actionLabel = '';
-      if (autoAction === 'equip') actionLabel = '并装备';
-      else if (autoAction === 'prep') actionLabel = '并带入';
+  row.appendChild(actions);
 
-      hud.addEvent(`购买${actionLabel}: ${itemType.name}`);
-      
-      // 更新购买计数
-      shopBuyCounts.set(itemType.id, newCount);
-      
-      // 立即更新按钮状态
-      updateButtonText(newCount, true); // 播放成功动画
-
-      // 为快捷按钮提供反馈
-      if (autoAction === 'equip') addButtonFeedback(buyEquipBtn, true, '已装备');
-      else if (autoAction === 'prep') addButtonFeedback(buyPrepBtn, true, '已带入');
+  // New Event Handlers
+  buyBtn.onclick = () => {
+    if (!playerProfile) return;
+    if (playerProfile.money >= itemType.value) {
+       network.sendBuy(itemType.id, 1, 'none');
+       const count = getBuyCount() + 1;
+       shopBuyCounts.set(itemType.id, count);
+       updateButtonText(count, true);
+       playerProfile.money -= itemType.value;
+       const moneyEl = document.getElementById('hideoutMoney');
+       if (moneyEl) moneyEl.innerText = playerProfile.money.toLocaleString();
+       hud.addEvent(`购买成功: ${itemType.name}`);
     } else {
-      // 立即显示错误反馈
-      const targetBtn = autoAction === 'equip' ? buyEquipBtn : (autoAction === 'prep' ? buyPrepBtn : buyBtn);
-      addButtonFeedback(targetBtn, false, '金钱不足');
-      hud.addEvent(`金钱不足: 需要 ${totalCost}，当前 ${playerProfile?.money ?? 0}`);
+         buyBtn.classList.add('error');
+         const originalText = buyBtn.textContent;
+         buyBtn.textContent = '余额不足';
+         setTimeout(() => {
+             buyBtn.classList.remove('error');
+             buyBtn.textContent = originalText;
+         }, 1000);
+         hud.addEvent(`金钱不足: 需要 ${itemType.value}`);
     }
   };
 
-  buyBtn.onclick = () => handleBuy('none');
-  buyEquipBtn.onclick = () => handleBuy('equip');
-  buyPrepBtn.onclick = () => handleBuy('prep');
+  buyEquipBtn.onclick = () => {
+      if (!playerProfile) return;
+      if (playerProfile.money >= itemType.value) {
+          network.sendBuy(itemType.id, 1, 'equip');
+            const count = getBuyCount() + 1;
+            shopBuyCounts.set(itemType.id, count);
+            updateButtonText(count, true);
+            playerProfile.money -= itemType.value;
+            const moneyEl = document.getElementById('hideoutMoney');
+            if (moneyEl) moneyEl.innerText = playerProfile.money.toLocaleString();
+            addButtonFeedback(buyEquipBtn, true, '已装备');
+            hud.addEvent(`购买并装备: ${itemType.name}`);
+      } else {
+           addButtonFeedback(buyEquipBtn, false, '金钱不足');
+           hud.addEvent(`金钱不足: 需要 ${itemType.value}`);
+      }
+  };
 
-  actions.appendChild(buyBtn);
-  // 只有可装备物品（武器/背包/防具）显示"购买并装备"，其它显示"购买并带入"
-  const slot = getItemSlot(itemType.id);
-  if (slot) {
-    actions.appendChild(buyEquipBtn);
-  } else {
-    actions.appendChild(buyPrepBtn);
-  }
-  
-  row.appendChild(info);
-  row.appendChild(actions);
+  buyPrepBtn.onclick = () => {
+       if (!playerProfile) return;
+       if (playerProfile.money >= itemType.value) {
+          network.sendBuy(itemType.id, 1, 'prep');
+            const count = getBuyCount() + 1;
+            shopBuyCounts.set(itemType.id, count);
+            updateButtonText(count, true);
+            playerProfile.money -= itemType.value;
+            const moneyEl = document.getElementById('hideoutMoney');
+            if (moneyEl) moneyEl.innerText = playerProfile.money.toLocaleString();
+            addButtonFeedback(buyPrepBtn, true, '已带入');
+            hud.addEvent(`购买并带入: ${itemType.name}`);
+       } else {
+           addButtonFeedback(buyPrepBtn, false, '金钱不足');
+           hud.addEvent(`金钱不足: 需要 ${itemType.value}`);
+       }
+  };
+
   return row;
 }
 

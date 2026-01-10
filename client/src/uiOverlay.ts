@@ -364,7 +364,7 @@ export class UIOverlay {
     
     // 绘制文字标签
     ctx.fillStyle = '#FFFFFF';
-    ctx.font = 'bold 16px "Segoe UI", Arial, sans-serif';
+    ctx.font = 'bold 16px Orbitron, sans-serif';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     
@@ -378,7 +378,7 @@ export class UIOverlay {
     ctx.fillText('正在撤离...', cx, barY - 20);
     
     // 绘制进度百分比
-    ctx.font = 'bold 14px "Segoe UI", Arial, sans-serif';
+    ctx.font = 'bold 14px Rajdhani, sans-serif';
     ctx.fillStyle = '#4CAF50';
     ctx.fillText(`${Math.floor(progress * 100)}%`, cx, barY + barHeight / 2);
     
@@ -413,7 +413,7 @@ export class UIOverlay {
     // 默认白色，如果指定了颜色则使用指定颜色
     const textColor = color || '255, 255, 255';
     ctx.fillStyle = `rgba(${textColor}, ${alpha})`;
-    ctx.font = 'bold 24px monospace';
+    ctx.font = 'bold 24px Orbitron, sans-serif';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     
@@ -442,7 +442,7 @@ export class UIOverlay {
     const y = h - bottomMargin;
     
     ctx.fillStyle = '#ffffff';
-    ctx.font = 'bold 16px monospace';
+    ctx.font = 'bold 16px "Share Tech Mono", monospace';
     ctx.textAlign = 'left';
     ctx.textBaseline = 'bottom';
     
@@ -452,7 +452,7 @@ export class UIOverlay {
     // 弹匣信息
     const ammoText = `${status.ammoInMag} / ${status.magSize}`;
     ctx.fillStyle = status.ammoInMag === 0 ? '#ff4444' : '#ffffff';
-    ctx.font = '14px monospace';
+    ctx.font = '14px "Share Tech Mono", monospace';
     ctx.fillText(ammoText, x, y - 10);
     
     // 换弹进度条
@@ -472,7 +472,7 @@ export class UIOverlay {
       
       // 文字提示
       ctx.fillStyle = '#ffffff';
-      ctx.font = '12px monospace';
+      ctx.font = '12px "Share Tech Mono", monospace';
       ctx.textAlign = 'left';
       ctx.fillText('RELOADING', x, barY - 5);
     }

@@ -298,7 +298,7 @@ export class Renderer {
         this.ctx.save();
         // 死亡玩家的名字颜色改为灰色
         this.ctx.fillStyle = player.status === 'DEAD' ? '#999' : '#fff';
-        this.ctx.font = 'bold 12px monospace';
+        this.ctx.font = 'bold 16px Orbitron, sans-serif';
         this.ctx.textAlign = 'center';
         this.ctx.textBaseline = 'bottom';
         // 文字描边（保证在复杂背景上可读）
@@ -932,8 +932,8 @@ export class Renderer {
     // 如果Glitch中，显示 "ERROR" 或 "FAIL" 文本
     if (isGlitching) {
       this.ctx.save();
-      this.ctx.fillStyle = '#f00';
-      this.ctx.font = 'bold 10px monospace';
+      this.ctx.fillStyle = '#fff';
+      this.ctx.font = 'bold 10px "Share Tech Mono", monospace';
       this.ctx.textAlign = 'center';
       this.ctx.fillText('! ERROR !', drawX, drawY - size / 2 - 14);
       this.ctx.restore();
@@ -1278,7 +1278,6 @@ export class Renderer {
     if (ai.weaponRuntime && ai.status === 'ALIVE' && currentServerTick !== undefined) {
       const wr = ai.weaponRuntime;
       if (wr.reloadingUntilTick > 0 && currentServerTick < wr.reloadingUntilTick) {
-        // 正在换弹，计算进度
         try {
           const weaponDef = getWeaponDef(wr.weaponTypeId);
           const reloadTicks = msToTicks(weaponDef.reloadMs);
@@ -2760,7 +2759,7 @@ export class Renderer {
 
     // 计算文本尺寸
     this.ctx.save();
-    this.ctx.font = '12px monospace';
+    this.ctx.font = '12px "Share Tech Mono", monospace';
     this.ctx.textAlign = 'left';
     this.ctx.textBaseline = 'top';
     
@@ -4547,7 +4546,7 @@ export class Renderer {
       const debugLocalPlayer = players.find((p) => p.id === localPlayerId);
       if (debugLocalPlayer) {
         this.ctx.fillStyle = '#fff';
-        this.ctx.font = '12px monospace';
+        this.ctx.font = '16px Rajdhani, sans-serif';
         // 使用屏幕坐标绘制，固定在左上角（10, 20）
         this.ctx.fillText(
           `Local: (${debugLocalPlayer.x.toFixed(1)}, ${debugLocalPlayer.y.toFixed(1)})`,
