@@ -130,6 +130,9 @@ type FireEffect = {
 };
 let fireEffects: FireEffect[] = [];
 
+// 全局网络实例，允许在UI事件中访问
+let network: Network;
+
 /**
  * 获取本地开火冷却时间（毫秒）
  * 优先使用局内武器运行时状态，回退到 playerProfile
@@ -454,6 +457,42 @@ if (startScreen && startGameBtn) {
   };
 
   window.addEventListener('mousemove', updatePerspective);
+  
+  // Initialize Server Input from storage or default
+  const serverInput = document.getElementById('serverUrlInput') as HTMLInputElement;
+  if (serverInput) {
+    const savedUrl = localStorage.getItem('jerkie_man_server_url');
+    const defaultUrl = getDefaultWebSocketUrl();
+    
+    // If user has manually set a URL, show it. Otherwise show placeholder.
+    if (savedUrl && savedUrl.trim().length > 0) {
+      serverInput.value = savedUrl;
+    } else {
+      serverInput.value = '';
+      serverInput.placeholder = `Default: ${defaultUrl}`;
+    }
+    
+    serverInput.addEventListener('input', () => {
+       const rawVal = serverInput.value.trim();
+       let targetUrl = rawVal;
+       
+       if (rawVal.length > 0) {
+         localStorage.setItem('jerkie_man_server_url', rawVal);
+       } else {
+         localStorage.removeItem('jerkie_man_server_url');
+         targetUrl = defaultUrl;
+       }
+       
+       // Update network connection in real-time
+       if (network) {
+          // Check if URL actually changed to avoid unnecessary reconnects
+          // (Requires tracking current url in network or comparing)
+          network.setUrl(targetUrl);
+          network.disconnect();
+          network.connect();
+       }
+    });
+  }
 
   // Start Game Button Logic
   startGameBtn.addEventListener('click', () => {
@@ -3503,7 +3542,7 @@ let selectedEntity: PLAYER_STATE | null = null;
 
 // 动态构建 WebSocket 服务器地址（支持内网穿透）
 // 根据当前访问的地址自动确定服务器地址
-function getWebSocketUrl(): string {
+function getDefaultWebSocketUrl(): string {
   // 1. 优先使用环境变量 (Build time injected)
   const envUrl = import.meta.env.VITE_SERVER_URL;
   if (envUrl) {
@@ -3518,7 +3557,21 @@ function getWebSocketUrl(): string {
   return `${protocol}//${hostname}:18723`;
 }
 
-const network = new Network(getWebSocketUrl(), 'local', {
+// 动态构建 WebSocket 服务器地址（支持内网穿透）
+// 根据当前访问的地址自动确定服务器地址
+function getWebSocketUrl(): string {
+  // 0. (New) Check localStorage for manual override
+  const savedUrl = localStorage.getItem('jerkie_man_server_url');
+  if (savedUrl && savedUrl.trim().length > 0) {
+     console.log('[Network] Using manual server URL:', savedUrl);
+     return savedUrl;
+  }
+
+  return getDefaultWebSocketUrl();
+}
+
+// 初始化网络实例 (赋值给全局 let network)
+network = new Network(getWebSocketUrl(), 'local', {
   onConnect: () => {
     console.log('Connected to server');
     hud.addEvent('已连接到服务器');

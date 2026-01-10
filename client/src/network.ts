@@ -118,12 +118,17 @@ export class Network {
     this.connect();
   }
   
+  // Set the server URL directly (used for manual override)
+  setUrl(url: string): void {
+    this.url = url;
+  }
+  
   // 暴露 accountId 给外部（用于 HUD debug 显示）
   getAccountId(): string {
     return this.accountId;
   }
 
-  private connect(): void {
+  public connect(): void {
     try {
       this.ws = new WebSocket(this.url);
 

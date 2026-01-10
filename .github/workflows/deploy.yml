@@ -1,22 +1,12 @@
-name: Deploy to GitHub Pages
+name: Deploy Client and Server
 
 on:
   push:
-    branches:
-      - main
+    branches: [ main ]
   workflow_dispatch:
 
-permissions:
-  contents: read
-  pages: write
-  id-token: write
-
-concurrency:
-  group: "pages"
-  cancel-in-progress: false
-
 jobs:
-  build:
+  deploy:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -31,30 +21,84 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Build shared package
+      - name: Build Shared
         run: npm run build --workspace=shared
 
-      - name: Build client
+      - name: Build Server
+        run: npm run build --workspace=server
+
+      - name: Build Client
         run: npm run build --workspace=client
-        env:
-          GITHUB_PAGES: 'true'
-          VITE_SERVER_URL: 'wss://jerkie-man-server.onrender.com'
 
-      - name: Setup Pages
-        uses: actions/configure-pages@v4
+      - name: Prepare Deployment Files
+        run: |
+          # Create strict directory structure for deployment
+          mkdir -p deployment/server
+          mkdir -p deployment/client
 
-      - name: Upload artifact
-        uses: actions/upload-pages-artifact@v3
+          # Prepare Server Artifacts
+          # We copy the root package files and the workspaces needed for the server
+          cp package.json deployment/server/
+          cp package-lock.json deployment/server/
+
+          # Copy Shared workspace (dist + package.json)
+          mkdir -p deployment/server/shared
+          cp shared/package.json deployment/server/shared/
+          cp -r shared/dist deployment/server/shared/
+
+          # Copy Server workspace (dist + package.json)
+          mkdir -p deployment/server/server
+          cp server/package.json deployment/server/server/
+          cp -r server/dist deployment/server/server/
+          
+          # Copy Client package.json just to satisfy npm workspaces during install
+          mkdir -p deployment/server/client
+          cp client/package.json deployment/server/client/
+
+          # Prepare Client Artifacts (Static Files)
+          cp -r client/dist/* deployment/client/
+
+      - name: Deploy to Server via SCP
+        uses: appleboy/scp-action@v0.1.7
         with:
-          path: './client/dist'
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_KEY }}
+          target: ${{ vars.DEPLOY_PATH }}
+          source: "deployment/*"
+          strip_components: 1
 
-  deploy:
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    runs-on: ubuntu-latest
-    needs: build
-    steps:
-      - name: Deploy to GitHub Pages
-        id: deployment
-        uses: actions/deploy-pages@v4
+      - name: Start Server via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_KEY }}
+          script: |
+            # Go to server directory
+            cd ${{ vars.DEPLOY_PATH }}/server
+            
+            echo "Installing dependencies..."
+            # Install production dependencies for all workspaces
+            # Using 'npm install' instead of 'ci' for better compatibility with older Node/NPM versions (e.g. Node 17)
+            npm install --no-save --omit=dev
+            
+            echo "Starting server..."
+            # Use PM2 if available, otherwise fallback to node
+            if command -v pm2 &> /dev/null; then
+              # Check if process exists and restart, else start
+              if pm2 list | grep -q "jerkie-server"; then
+                 pm2 restart jerkie-server
+              else
+                 pm2 start server/dist/main.js --name jerkie-server
+              fi
+              pm2 save
+            else
+              echo "PM2 not found. It is recommended to install PM2 (npm install -g pm2)."
+              echo "Attempting to start with node in background..."
+              # Simple kill for previous instance if running plainly
+              pkill -f "node server/dist/main.js" || true
+              nohup node server/dist/main.js > server.log 2>&1 &
+            fi
+            
+            echo "Deployment finished!"
