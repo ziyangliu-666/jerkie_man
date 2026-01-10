@@ -1,5 +1,5 @@
 import type { PLAYER_STATE, PlayerInventory, ItemInstance } from '@jerkie-man/shared';
-import { getItemType, getWeaponDef, ticksToMs } from '@jerkie-man/shared';
+import { getItemType, getWeaponDef, ticksToMs, EXTRACT_DURATION_MS } from '@jerkie-man/shared';
 
 /**
  * HTML 转义函数（防止 XSS）
@@ -25,7 +25,7 @@ export interface HUDData {
     lastServerTick: number;
     reconnectAttempts?: number; // P1-2 修复: 重连尝试次数
     nextReconnectInMs?: number | null; // P1-2 修复: 下次重连倒计时（毫秒）
-    extractProgress?: number; // 游戏化增强: 本地玩家撤离进度（0-10000ms，10秒）
+    extractProgress?: number; // 游戏化增强: 本地玩家撤离进度（0到EXTRACT_DURATION_MS）
     accountId?: string; // 新增: 账号 ID（用于调试）
   };
   players: PLAYER_STATE[];
@@ -117,9 +117,9 @@ export class HUD {
       }
       let extractProgressHtml = '';
       if (data.connection.extractProgress !== undefined && data.connection.extractProgress > 0) {
-        const progressPercent = Math.min(100, (data.connection.extractProgress / 10000) * 100);
+        const progressPercent = Math.min(100, (data.connection.extractProgress / EXTRACT_DURATION_MS) * 100);
         // 修复: 使用 escapeHtml 防止 XSS
-        extractProgressHtml = `<div><strong>撤离进度：</strong> ${escapeHtml(progressPercent.toFixed(1))}% (${escapeHtml(data.connection.extractProgress)}/10000ms)</div>`;
+        extractProgressHtml = `<div><strong>撤离进度：</strong> ${escapeHtml(progressPercent.toFixed(1))}% (${escapeHtml(data.connection.extractProgress)}/${EXTRACT_DURATION_MS}ms)</div>`;
       }
       // 修复: 使用 escapeHtml 防止 XSS（虽然 statusDisplay 是本地生成，但保持一致性）
       connectionEl.innerHTML = `

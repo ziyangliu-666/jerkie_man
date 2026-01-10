@@ -1,5 +1,5 @@
 import type { PLAYER_STATE, OBSTACLE_STATE, PlayerInventory, ItemInstance, WeaponRuntime, PLAYER_BUFF } from '@jerkie-man/shared';
-import { simulatePlayerMove, getItemType, getWeaponDef, getArmorDef, getBagDef, PositionHistory, calculateStaminaChange, canSprint, getSprintSpeedMultiplier, msToTicks, ticksToMs } from '@jerkie-man/shared';
+import { simulatePlayerMove, getItemType, getWeaponDef, getArmorDef, getBagDef, PositionHistory, calculateStaminaChange, canSprint, getSprintSpeedMultiplier, msToTicks, ticksToMs, EXTRACT_DURATION_MS } from '@jerkie-man/shared';
 
 // 内部 Buff 运行时类型（仅服务端使用）
 // 内部 Buff 运行时类型（仅服务端使用）
@@ -30,7 +30,7 @@ export class Player {
   public lastInputSeq: number;
   public lastInputTick: number;
   public lootCount: number; // Day3: 战利品计数（已废弃，保留兼容）
-  public extractProgress: number = 0; // 游戏化增强: 撤离进度（毫秒，0-10000，10秒）
+  public extractProgress: number = 0; // 游戏化增强: 撤离进度（毫秒，0到EXTRACT_DURATION_MS）
   public inventory: PlayerInventory; // 新增: 背包系统
   public name: string | undefined; // 新增: 玩家昵称（用于显示）
   public weaponRuntime: WeaponRuntime | undefined; // 新增: 武器运行时状态（局内状态）
@@ -66,8 +66,6 @@ export class Player {
 
   // 修复: 移动速度已移至 shared/sim.ts，这里不再需要（保留注释用于文档）
   // SPEED = 200 (在 shared/sim.ts 中定义)
-  
-  private readonly EXTRACT_DURATION_MS = 5000; // 游戏化增强: 撤离需要持续10秒
 
   constructor(id: string, x: number = 0, y: number = 0, bagCap: number = 4, name?: string, weaponRuntime?: WeaponRuntime) {
     this.id = id;

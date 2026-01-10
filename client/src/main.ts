@@ -43,6 +43,7 @@ import {
   isUsableItem,
   isThrowableItem,
   PLAYER_HIT_RADIUS,
+  EXTRACT_DURATION_MS,
 } from '@jerkie-man/shared';
 
 // 本地发射 ID 计数器（用于客户端预测子弹对齐）
@@ -4168,7 +4169,7 @@ function renderLoop(): void {
           uiOverlay.updateState({
             extractProgress: {
               enabled: true,
-              progress: (localPlayer.extractProgress as number) / 10000, // 10秒撤离时间
+              progress: (localPlayer.extractProgress as number) / EXTRACT_DURATION_MS,
             },
           });
         } else {

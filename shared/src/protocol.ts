@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { MAP_CONFIG_SCHEMA } from './content.js';
 import type { PlayerBuff } from './types.js';
+import { EXTRACT_DURATION_MS } from './constants.js';
 
 // 导入 Room schema 和 OBSTACLE_STATE_SCHEMA
 import { ROOM_SCHEMA, OBSTACLE_STATE_SCHEMA, OBSTACLE_TYPE, type ObstacleType } from './mapTemplate.js';
@@ -246,7 +247,7 @@ export const PLAYER_STATE_SCHEMA = z.object({
   lastInputSeq: z.number().int(),
   lastInputTick: z.number().int(),
   lootCount: z.number().int().min(0).default(0).optional(), // Day3: 战利品计数（已废弃，保留兼容）
-  extractProgress: z.number().int().min(0).max(10000).default(0), // 游戏化增强: 撤离进度（毫秒，0-10000，10秒）
+  extractProgress: z.number().int().min(0).max(EXTRACT_DURATION_MS).default(0), // 游戏化增强: 撤离进度（毫秒，0到EXTRACT_DURATION_MS）
   inventory: PLAYER_INVENTORY_SCHEMA.optional(), // 新增: 背包系统
   name: z.string().optional(), // 新增: 玩家昵称（用于显示）
   weaponRuntime: WEAPON_RUNTIME_SCHEMA.optional(), // 新增: 武器运行时状态（局内状态）

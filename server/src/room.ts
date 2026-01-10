@@ -2,7 +2,7 @@
 import { Player } from './player.js';
 import { ProfileManager } from './profile.js';
 import type { PLAYER_STATE, BULLET_STATE, ITEM_STATE, C2S_INPUT, MAP_CONFIG, OBSTACLE_STATE, WorldItem, LootBag, ItemInstance, WeaponRuntime, WeaponDef, MapTemplate, SpawnPoint, AI_STATE, AISpawn, DECOY_STATE, TURRET_STATE } from '@jerkie-man/shared';
-import { loadMapConfig, loadItemTypes, circleVsAABB, createRng, rectIntersects, segmentIntersectsCircle, getItemType, getAllItemTypes, getItemTypesByRarity, getWeaponDef, getArmorDef, getBagDef, applySpread, msToTicks, getFireSchedule, shouldStartBurst, canFireTick, advanceFireCooldown, PLAYER_HIT_RADIUS, getBulletPenetration, isObstacleDestructible, isUsableItem, doesObstacleBlockPlayer, AI_ROLE_PRESETS, ticksToMs, ItemType } from '@jerkie-man/shared';
+import { loadMapConfig, loadItemTypes, circleVsAABB, createRng, rectIntersects, segmentIntersectsCircle, getItemType, getAllItemTypes, getItemTypesByRarity, getWeaponDef, getArmorDef, getBagDef, applySpread, msToTicks, getFireSchedule, shouldStartBurst, canFireTick, advanceFireCooldown, PLAYER_HIT_RADIUS, getBulletPenetration, isObstacleDestructible, isUsableItem, doesObstacleBlockPlayer, AI_ROLE_PRESETS, ticksToMs, ItemType, EXTRACT_DURATION_MS } from '@jerkie-man/shared';
 import { log } from './logger.js';
 import { AI, type PatrolConfig, type GuardConfig } from './ai.js';
 import { NavigationGrid, Pathfinder } from './pathfinding.js';
@@ -1225,8 +1225,8 @@ export class Room {
         if (this.isInExtractZone(player.x, player.y)) {
           // 在撤离区内，自动增加进度（不需要按F）
           player.extractProgress += 50; // 每 tick 50ms（20Hz = 50ms/tick）
-          if (player.extractProgress >= 10000) {
-            // 进度满了，撤离成功（10秒）
+          if (player.extractProgress >= EXTRACT_DURATION_MS) {
+            // 进度满了，撤离成功
             const accountId = this.playerToAccount.get(playerId) ?? playerId;
             const profile = this.profileManager.getProfileData(accountId);
 
