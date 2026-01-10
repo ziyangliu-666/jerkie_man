@@ -498,16 +498,36 @@ export class Renderer {
 
     // 7. 绘制眼睛（统一使用黑色）
     this.ctx.fillStyle = '#000'; // 所有角色都用黑色眼睛
+    this.ctx.strokeStyle = '#000';
+    this.ctx.lineWidth = 1.5;
 
-    // 绘制左眼
-    this.ctx.beginPath();
-    this.ctx.arc(eye1X, eye1Y, eyeRadius, 0, Math.PI * 2);
-    this.ctx.fill();
+    if (isBlinking) {
+      // 眨眼时绘制横线
+      const lineLength = eyeSpacing * 0.4; // 横线长度约为眼间距的40%
+      
+      // 绘制左眼横线
+      this.ctx.beginPath();
+      this.ctx.moveTo(eye1X - lineLength / 2, eye1Y);
+      this.ctx.lineTo(eye1X + lineLength / 2, eye1Y);
+      this.ctx.stroke();
 
-    // 绘制右眼
-    this.ctx.beginPath();
-    this.ctx.arc(eye2X, eye2Y, eyeRadius, 0, Math.PI * 2);
-    this.ctx.fill();
+      // 绘制右眼横线
+      this.ctx.beginPath();
+      this.ctx.moveTo(eye2X - lineLength / 2, eye2Y);
+      this.ctx.lineTo(eye2X + lineLength / 2, eye2Y);
+      this.ctx.stroke();
+    } else {
+      // 正常时绘制圆形眼睛
+      // 绘制左眼
+      this.ctx.beginPath();
+      this.ctx.arc(eye1X, eye1Y, eyeRadius, 0, Math.PI * 2);
+      this.ctx.fill();
+
+      // 绘制右眼
+      this.ctx.beginPath();
+      this.ctx.arc(eye2X, eye2Y, eyeRadius, 0, Math.PI * 2);
+      this.ctx.fill();
+    }
 
     this.ctx.restore();
   }
