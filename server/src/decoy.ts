@@ -14,6 +14,7 @@ export class Decoy {
   public maxHp: number;
   public createdAt: number;
   public durationMs: number = 15000; // 15 seconds lifetime
+  public aimRad: number = 0; // 瞄准角度（用于眼睛渲染）
 
   constructor(
     id: string,
@@ -35,6 +36,7 @@ export class Decoy {
     this.hp = 50; // Low HP but enough to trick
     this.maxHp = 50;
     this.createdAt = Date.now();
+    this.aimRad = Math.random() * Math.PI * 2; // 随机瞄准角度
     
     // Run in the direction thrown/spawned at normal player speed
     const SPEED = 200; // Match player speed
@@ -78,6 +80,11 @@ export class Decoy {
     } else {
         this.x += this.vx * deltaTime;
         this.y += this.vy * deltaTime;
+    }
+    
+    // 随机改变瞄准角度（模拟假人随机看向不同方向）
+    if (Math.random() < 0.02) { // 2% 概率每帧改变方向
+      this.aimRad = Math.random() * Math.PI * 2;
     }
     
     // Check lifetime

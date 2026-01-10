@@ -53,6 +53,18 @@ export class Renderer {
   private disguisedPlayers: Set<string> = new Set();
   private fizzleEffects: Array<{ x: number; y: number; until: number; maxRadius: number }> = [];
 
+  // 新增: 玩家瞄准角度平滑插值
+  // key: entityId -> smoothedAimAngle (radians)
+  private smoothedAimAngles = new Map<string, number>();
+
+  // 辅助: 角度插值 (处理 -PI 到 PI 的 wrap)
+  private lerpAngle(current: number, target: number, t: number): number {
+    let diff = target - current;
+    // 规范化 diff 到 [-PI, PI]
+    diff = (diff + Math.PI * 3) % (Math.PI * 2) - Math.PI;
+    return current + diff * t;
+  }
+
   // 性能优化: 障碍物精灵缓存
   private obsSprite = new Map<string, HTMLCanvasElement>();
   // 性能优化: 文字宽度缓存
@@ -194,7 +206,7 @@ export class Renderer {
     }
     
     // 正常玩家渲染...
-    const size = 20; // 像素大小
+    const size = 26; // 像素大小（增大以匹配碰撞半径）
     const screenX = Math.round(player.x - this.camX);
     const screenY = Math.round(player.y - this.camY);
 
@@ -204,7 +216,7 @@ export class Renderer {
     // 注意：眼睛需要在身体上层（或者在身体绘制后再绘制），为了确保"环绕在表面"，可以先画身体再画眼睛
     
     // 2a. 绘制身体
-    const cornerRadius = 6;
+    const cornerRadius = 7;
     const bodyGradient = this.ctx.createLinearGradient(
       screenX - size/2, screenY - size/2, 
       screenX + size/2, screenY + size/2
@@ -214,12 +226,13 @@ export class Renderer {
       bodyGradient.addColorStop(0, '#00c3ff');
       bodyGradient.addColorStop(1, '#0062ff');
     } else {
-      bodyGradient.addColorStop(0, '#ff5f6d');
-      bodyGradient.addColorStop(1, '#ffc371');
+      // 更显眼的敌人颜色：鲜艳的红橙渐变
+      bodyGradient.addColorStop(0, '#ff2222');
+      bodyGradient.addColorStop(1, '#ff8800');
     }
 
     this.ctx.shadowBlur = 8;
-    this.ctx.shadowColor = isLocal ? 'rgba(0, 195, 255, 0.4)' : 'rgba(255, 95, 109, 0.4)';
+    this.ctx.shadowColor = isLocal ? 'rgba(0, 195, 255, 0.4)' : 'rgba(255, 34, 34, 0.6)';
     
     this.ctx.fillStyle = bodyGradient;
     this.drawRoundedRect(screenX - size / 2, screenY - size / 2, size, size, cornerRadius);
@@ -232,7 +245,15 @@ export class Renderer {
     this.ctx.stroke();
 
     // 3. 绘制眼睛 (Eyes)
-    const aimRad = aimOverride ?? player.aimRad ?? 0;
+    let aimRad = aimOverride ?? player.aimRad ?? 0;
+
+    // 平滑处理 (仅对非本地玩家)
+    if (!isLocal) {
+      const current = this.smoothedAimAngles.get(player.id) ?? aimRad;
+      aimRad = this.lerpAngle(current, aimRad, 0.25);
+      this.smoothedAimAngles.set(player.id, aimRad);
+    }
+
     this.drawEyes(screenX, screenY, size, aimRad, isLocal ? 'local' : 'enemy');
 
     this.ctx.restore();
@@ -459,35 +480,83 @@ export class Renderer {
    */
   private drawDisguisedPlayerAsAi(player: PLAYER_STATE, currentServerTick?: number, isLocal: boolean = false, aimOverride?: number): void {
     // 根据AI角色调整大小和颜色（与真实AI一致）
-    let size = 20;
+    let size = 26; // 基础尺寸与玩家一致
     let color = '#ff8800'; // 默认橙色
     const role = player.disguisedAsAiRole || 'basic';
 
     // 角色特定的视觉效果（与真实AI一致）
     switch (role) {
       case 'sniper':
-        size = 18; // 狙击手稍小
+        size = 24; // 狙击手稍小
         color = '#9966ff'; // 紫色
         break;
       case 'heavy_gunner':
-        size = 26; // 重机枪手更大
+        size = 32; // 重机枪手更大
         color = '#ff3333'; // 红色
         break;
       case 'scout':
-        size = 16; // 侦察兵最小
+        size = 22; // 侦察兵最小
         color = '#00ff99'; // 青色
         break;
       case 'basic':
       default:
-        size = 20;
+        size = 26;
         color = '#ff8800'; // 橙色
         break;
     }
 
     const screenX = Math.round(player.x - this.camX);
     const screenY = Math.round(player.y - this.camY);
+
+    // 移动 aimRad 计算到这里，以便用于绘制瞄准线
+    let aimRad = aimOverride ?? player.disguisedAimRad ?? 0;
+    // 平滑处理 (仅对非本地玩家)
+    if (!isLocal) {
+      const current = this.smoothedAimAngles.get(player.id) ?? aimRad;
+      aimRad = this.lerpAngle(current, aimRad, 0.25);
+      this.smoothedAimAngles.set(player.id, aimRad);
+    }
     
     this.ctx.save();
+
+    // 新增: 伪装玩家的瞄准线 (Laser Sight)
+    const behavior = player.disguisedAsAiBehavior || 'IDLE';
+    if (behavior === 'SPOTTING' || behavior === 'ATTACK') {
+      // 射线长度
+      const rayLen = 2000; 
+      const endX = screenX + Math.cos(aimRad) * rayLen;
+      const endY = screenY + Math.sin(aimRad) * rayLen;
+
+      this.ctx.save();
+      this.ctx.beginPath();
+      // 从身体边缘起始
+      const startX = screenX + Math.cos(aimRad) * (size * 0.6);
+      const startY = screenY + Math.sin(aimRad) * (size * 0.6);
+      this.ctx.moveTo(startX, startY);
+      this.ctx.lineTo(endX, endY);
+      
+      const gradient = this.ctx.createLinearGradient(startX, startY, endX, endY);
+
+      if (behavior === 'SPOTTING') {
+        gradient.addColorStop(0, 'rgba(255, 0, 0, 0.6)');
+        gradient.addColorStop(0.3, 'rgba(255, 0, 0, 0.3)');
+        gradient.addColorStop(1, 'rgba(255, 0, 0, 0)');
+        this.ctx.strokeStyle = gradient;
+        this.ctx.lineWidth = 1.5;
+        this.ctx.setLineDash([15, 10]); 
+        this.ctx.lineDashOffset = -(Date.now() / 20); 
+      } else {
+        gradient.addColorStop(0, 'rgba(255, 50, 50, 0.9)');
+        gradient.addColorStop(0.5, 'rgba(255, 0, 0, 0.5)');
+        gradient.addColorStop(1, 'rgba(255, 0, 0, 0)');
+        this.ctx.strokeStyle = gradient;
+        this.ctx.lineWidth = 2.5;
+        this.ctx.setLineDash([]); 
+      }
+      
+      this.ctx.stroke();
+      this.ctx.restore();
+    }
 
 
     // 2. 绘制身体 (Disguised Body)
@@ -517,8 +586,7 @@ export class Renderer {
     this.drawRoundedRect(screenX - size / 2, screenY - size / 2, size, size, cornerRadius);
     this.ctx.stroke();
 
-    // 3. 绘制眼睛 (Eyes)
-    const aimRad = aimOverride ?? player.disguisedAimRad ?? 0;
+    // 3. 绘制眼睛 (Eyes) - aimRad 已在上面计算
     this.drawEyes(screenX, screenY, size, aimRad, 'ai');
 
     this.ctx.restore();
@@ -566,7 +634,6 @@ export class Renderer {
     }
     
     // 6. 显示伪AI状态标签（与真实AI样式一致）
-    const behavior = player.disguisedAsAiBehavior || 'IDLE';
     const stateLabelY = this.drawDisguisedAiStateLabel(screenX, screenY, size, behavior);
     
     // 7. 如果是本地玩家，在状态标签下方显示伪装进度条（与致盲进度条样式一致）
@@ -717,18 +784,10 @@ export class Renderer {
 
   // 新增: 绘制诱饵（外观模仿玩家）
   drawDecoy(decoy: DECOY_STATE, isOwner: boolean = false): void {
-    const size = 20; // 像素大小
+    const size = 26; // 像素大小（与玩家一致）
     const screenX = Math.round(decoy.x - this.camX);
     const screenY = Math.round(decoy.y - this.camY);
 
-    // 诱饵颜色：如果是拥有者，显示为蓝色但半透明（区分）；敌人看到的是红色（完全模仿玩家）
-    // 为了达到迷惑效果，敌人看到的必须和普通玩家一模一样（红色）
-    this.ctx.fillStyle = isOwner ? 'rgba(0, 170, 255, 0.7)' : '#ff4444'; 
-    this.ctx.fillRect(screenX - size / 2, screenY - size / 2, size, size);
-
-    // 边框
-    this.ctx.strokeStyle = '#fff';
-    this.ctx.lineWidth = 2;
     // HP条
     const barWidth = size;
     const barHeight = 4;
@@ -749,10 +808,12 @@ export class Renderer {
       // 色差错位效果 (模拟全息投影不稳定) - 绘制青色和红色残影
       this.ctx.globalAlpha = 0.6;
       this.ctx.fillStyle = '#0ff'; // Cyan
-      this.ctx.fillRect(drawX - size / 2 - 2, drawY - size / 2, size, size);
+      this.drawRoundedRect(drawX - size / 2 - 2, drawY - size / 2, size, size, 7);
+      this.ctx.fill();
       
       this.ctx.fillStyle = '#f0f'; // Magenta
-      this.ctx.fillRect(drawX - size / 2 + 2, drawY - size / 2, size, size);
+      this.drawRoundedRect(drawX - size / 2 + 2, drawY - size / 2, size, size, 7);
+      this.ctx.fill();
       
       this.ctx.globalAlpha = 1.0;
       
@@ -762,22 +823,40 @@ export class Renderer {
       }
     }
 
-    // 🎭 核心改变：诱饵完全模仿真实玩家外观
-    // 对于拥有者：显示为略带蓝色的敌人（让你知道这是你的诱饵）
-    // 对于其他人：显示为完全的红色敌人（无法区分）
+    // 🎭 核心改变：诱饵完全模仿真实玩家外观（使用圆角矩形和渐变）
+    const cornerRadius = 7;
+    const bodyGradient = this.ctx.createLinearGradient(
+      drawX - size/2, drawY - size/2, 
+      drawX + size/2, drawY + size/2
+    );
+    
     if (isOwner) {
-      // 拥有者看到的：蓝紫色（介于蓝色和红色之间，暗示这是"假的敌人"）
-      this.ctx.fillStyle = 'rgba(138, 43, 226, 0.85)'; // BlueViolet with slight transparency
+      // 拥有者看到的：蓝紫色渐变（暗示这是"假的敌人"）
+      bodyGradient.addColorStop(0, 'rgba(138, 43, 226, 0.9)'); // BlueViolet
+      bodyGradient.addColorStop(1, 'rgba(75, 0, 130, 0.9)'); // Indigo
+      this.ctx.shadowBlur = 8;
+      this.ctx.shadowColor = 'rgba(138, 43, 226, 0.5)';
     } else {
-      // 其他人看到的：完全和真实敌方玩家一样的红色
-      this.ctx.fillStyle = '#ff4444';
+      // 其他人看到的：完全和真实敌方玩家一样的红橙渐变
+      bodyGradient.addColorStop(0, '#ff2222');
+      bodyGradient.addColorStop(1, '#ff8800');
+      this.ctx.shadowBlur = 8;
+      this.ctx.shadowColor = 'rgba(255, 34, 34, 0.6)';
     }
-    this.ctx.fillRect(drawX - size / 2, drawY - size / 2, size, size);
 
-    // 白色边框（与真实玩家完全一致）
-    this.ctx.strokeStyle = '#fff';
-    this.ctx.lineWidth = 2;
-    this.ctx.strokeRect(drawX - size / 2, drawY - size / 2, size, size);
+    this.ctx.fillStyle = bodyGradient;
+    this.drawRoundedRect(drawX - size / 2, drawY - size / 2, size, size, cornerRadius);
+    this.ctx.fill();
+
+    // 白色精细边框（与真实玩家完全一致）
+    this.ctx.strokeStyle = 'rgba(255, 255, 255, 0.8)';
+    this.ctx.lineWidth = 1.5;
+    this.drawRoundedRect(drawX - size / 2, drawY - size / 2, size, size, cornerRadius);
+    this.ctx.stroke();
+
+    // 绘制眼睛（与玩家一致）
+    const aimRad = (decoy as any).aimRad ?? 0;
+    this.drawEyes(drawX, drawY, size, aimRad, isOwner ? 'ai' : 'enemy');
     
     this.ctx.restore();
 
@@ -794,11 +873,14 @@ export class Renderer {
     
     // 如果Glitch中，显示 "ERROR" 或 "FAIL" 文本
     if (isGlitching) {
+      this.ctx.save();
       this.ctx.fillStyle = '#f00';
+      this.ctx.font = 'bold 10px monospace';
       this.ctx.textAlign = 'center';
-      this.ctx.fillText('! ERROR !', drawX, drawY - size / 2 - 5);
-      // 性能优化: 删除多余的 restore（没有对应的 save）
+      this.ctx.fillText('! ERROR !', drawX, drawY - size / 2 - 14);
+      this.ctx.restore();
     }
+    
     // 显示名字（模仿玩家）
     const displayName = decoy.name;
     if (displayName) {
@@ -954,42 +1036,136 @@ export class Renderer {
     this.ctx.restore();
   }
 
-  /**
-   * 新增: 绘制AI实体
-   */
-  drawAI(ai: any, debug: boolean = false, currentServerTick?: number): void {
+
+  // 新增: 绘制AI实体
+  drawAI(ai: any, debug: boolean = false, currentServerTick?: number, mousePos?: { x: number; y: number } | null, players?: PLAYER_STATE[]): void {
     // 根据AI角色调整大小和颜色
-    let size = 20;
+    let size = 26; // 基础尺寸与玩家一致
     let color = '#ff8800'; // 默认橙色
     const role = ai.role || 'basic';
-
+    
+    // 估算攻击距离（用于 hover 显示）
+    let aggroRange = 250; // basic
+    
     // 角色特定的视觉效果
     switch (role) {
       case 'sniper':
-        size = 18; // 狙击手稍小
+        size = 24; // 狙击手稍小
         color = '#9966ff'; // 紫色
+        aggroRange = 450;
         break;
       case 'heavy_gunner':
-        size = 26; // 重机枪手更大
+        size = 32; // 重机枪手更大
         color = '#ff3333'; // 红色
+        aggroRange = 350;
         break;
       case 'scout':
-        size = 16; // 侦察兵最小
+        size = 22; // 侦察兵最小
         color = '#00ff99'; // 青色
+        aggroRange = 250;
         break;
       case 'basic':
       default:
-        size = 20;
+        size = 26;
         color = '#ff8800'; // 橙色
+        aggroRange = 250;
         break;
     }
 
     const screenX = Math.round(ai.x - this.camX);
     const screenY = Math.round(ai.y - this.camY);
 
+    // 平滑处理 AI 瞄准角度
+    let aimRad = ai.aimRad ?? 0;
+    // 使用 AI ID 作为 key (确保 AI 对象有 id 属性)
+    if (ai.id) {
+      const current = this.smoothedAimAngles.get(ai.id) ?? aimRad;
+      aimRad = this.lerpAngle(current, aimRad, 0.25);
+      this.smoothedAimAngles.set(ai.id, aimRad);
+    }
+    
+    // 新增: 鼠标悬停显示攻击范围圈
+    if (mousePos) {
+      const dist = Math.hypot(ai.x - mousePos.x, ai.y - mousePos.y);
+      if (dist < 25) { // 悬停半径
+        this.ctx.save();
+        this.ctx.strokeStyle = 'rgba(255, 50, 0, 0.8)'; // 更明显的红圈
+        this.ctx.lineWidth = 1.5;
+        this.ctx.setLineDash([5, 5]); // 虚线
+        
+        // 绘制圆圈 (世界坐标 -> 屏幕坐标)
+        this.ctx.beginPath();
+        this.ctx.arc(screenX, screenY, aggroRange, 0, Math.PI * 2);
+        this.ctx.stroke();
+        
+        // 填充轻微背景
+        this.ctx.fillStyle = 'rgba(255, 50, 0, 0.05)';
+        this.ctx.fill();
+        
+        // 显示文字
+        this.ctx.fillStyle = '#FFFFFF';
+        this.ctx.font = 'bold 12px monospace';
+        this.ctx.textAlign = 'center';
+        this.ctx.fillText(`Range: ${aggroRange}`, screenX, screenY + aggroRange + 15);
+        
+        this.ctx.restore();
+      }
+    }
+
     // AI颜色（根据角色类型）
     this.ctx.save();
 
+    // 新增: 绘制瞄准线 (Laser Sight) - 在身体下方绘制
+    // 只有在 SPOTTING (瞄准中) 或 ATTACK (攻击中) 状态下显示
+    if (ai.behaviorState === 'SPOTTING' || ai.behaviorState === 'ATTACK') {
+      // 使用平滑后的 aimRad
+      // 计算到目标玩家的距离，如果有目标则只延伸到玩家位置
+      let rayLen = 2000; // 默认长度
+      if (ai.currentTargetId && players) {
+        const targetPlayer = players.find(p => p.id === ai.currentTargetId);
+        if (targetPlayer) {
+          // 计算AI到目标玩家的距离
+          rayLen = Math.hypot(targetPlayer.x - ai.x, targetPlayer.y - ai.y);
+        }
+      }
+      
+      const endX = screenX + Math.cos(aimRad) * rayLen;
+      const endY = screenY + Math.sin(aimRad) * rayLen;
+
+      this.ctx.save();
+      this.ctx.beginPath();
+      // 从身体边缘起始绘制，避免遮挡身体
+      const startX = screenX + Math.cos(aimRad) * (size * 0.6);
+      const startY = screenY + Math.sin(aimRad) * (size * 0.6);
+      this.ctx.moveTo(startX, startY);
+      this.ctx.lineTo(endX, endY);
+      
+      // 渐变效果：从不透明到透明
+      const gradient = this.ctx.createLinearGradient(startX, startY, endX, endY);
+
+      if (ai.behaviorState === 'SPOTTING') {
+        // 瞄准阶段：红色虚线
+        gradient.addColorStop(0, 'rgba(255, 0, 0, 0.4)');
+        gradient.addColorStop(0.3, 'rgba(255, 0, 0, 0.2)');
+        gradient.addColorStop(1, 'rgba(255, 0, 0, 0)');
+        this.ctx.strokeStyle = gradient;
+        this.ctx.lineWidth = 1.5; 
+        this.ctx.setLineDash([15, 15]); // 虚线间隔变大
+        // 动画偏移
+        this.ctx.lineDashOffset = -(Date.now() / 20); 
+      } else {
+        // 攻击阶段：红色实线
+        gradient.addColorStop(0, 'rgba(255, 50, 50, 0.7)');
+        gradient.addColorStop(0.5, 'rgba(255, 0, 0, 0.4)');
+        gradient.addColorStop(1, 'rgba(255, 0, 0, 0)');
+        this.ctx.strokeStyle = gradient;
+        this.ctx.lineWidth = 2.0; 
+        this.ctx.setLineDash([]); // 实线
+      }
+      
+      this.ctx.stroke();
+      this.ctx.restore();
+    }
 
     // 2. 绘制身体 (AI Body)
     const bodyGradient = this.ctx.createLinearGradient(
@@ -1019,8 +1195,7 @@ export class Renderer {
     this.drawRoundedRect(screenX - size / 2, screenY - size / 2, size, size, cornerRadius);
     this.ctx.stroke();
 
-    // 3. 绘制眼睛 (Eyes)
-    const aimRad = ai.aimRad ?? 0;
+    // 3. 绘制眼睛 (Eyes) - aimRad 已在上面计算并平滑
     this.drawEyes(screenX, screenY, size, aimRad, 'ai');
 
     this.ctx.restore();
@@ -1112,6 +1287,9 @@ export class Renderer {
           stateText = '↩ 返回';
           bgColor = 'rgba(50, 205, 50, 0.85)';
           borderColor = '#90EE90';
+          break;
+        default:
+          stateText = '';
           break;
       }
 
@@ -1573,6 +1751,12 @@ export class Renderer {
                      bullet.weaponTypeId === 'flash_grenade' ||
                      bullet.weaponTypeId === 'molotov';
 
+    // 检查是否是诱饵弹
+    if (bullet.weaponTypeId === 'w_decoy') {
+      this.drawDecoyProjectile(bullet, screenX, screenY);
+      return;
+    }
+
     if (isGrenade) {
       this.drawGrenadeProjectile(bullet, screenX, screenY);
       return;
@@ -1761,6 +1945,66 @@ export class Renderer {
         this.ctx.arc(screenX - (Math.random() * 8), visualY - (Math.random() * 8), 3, 0, Math.PI * 2);
         this.ctx.fill();
     }
+
+    this.ctx.restore();
+  }
+
+  /**
+   * 绘制诱饵弹投掷物（小型抛物线）
+   */
+  private drawDecoyProjectile(bullet: BULLET_STATE, screenX: number, screenY: number): void {
+    const now = performance.now();
+    const spawnTime = bullet.spawnTimeMs || (now - 100);
+    const life = bullet.bulletLifeMs || 750;
+    const age = now - spawnTime;
+    const t = Math.max(0, Math.min(1, age / life));
+
+    // 计算抛物线高度（比手雷低一些）
+    let maxHeight = 40; 
+    if (bullet.spawnX !== undefined && bullet.spawnY !== undefined && bullet.targetX !== undefined && bullet.targetY !== undefined) {
+      const dx = bullet.targetX - bullet.spawnX;
+      const dy = bullet.targetY - bullet.spawnY;
+      const distance = Math.sqrt(dx * dx + dy * dy);
+      maxHeight = Math.min(distance * 0.3, 80); // 比手雷低
+    }
+    
+    const parabola = 4 * maxHeight * t * (1 - t);
+    const visualY = screenY - parabola;
+    
+    // 1. 绘制阴影（小型）
+    this.ctx.save();
+    this.ctx.fillStyle = 'rgba(0, 0, 0, 0.2)';
+    this.ctx.beginPath();
+    const shadowScale = 1 - (parabola / maxHeight) * 0.3;
+    this.ctx.ellipse(screenX, screenY + 2, 4 * shadowScale, 2 * shadowScale, 0, 0, Math.PI * 2);
+    this.ctx.fill();
+    this.ctx.restore();
+
+    // 2. 绘制诱饵弹主体（小型圆形，带蓝色光效）
+    const decoyRadius = 5 * (1 + (parabola / maxHeight) * 0.15);
+    
+    this.ctx.save();
+    
+    // 发光效果
+    this.ctx.shadowBlur = 6;
+    this.ctx.shadowColor = 'rgba(0, 170, 255, 0.6)';
+    
+    // 主体（蓝色）
+    this.ctx.fillStyle = '#00aaff';
+    this.ctx.beginPath();
+    this.ctx.arc(screenX, visualY, decoyRadius, 0, Math.PI * 2);
+    this.ctx.fill();
+
+    // 边框
+    this.ctx.strokeStyle = '#fff';
+    this.ctx.lineWidth = 1.5;
+    this.ctx.stroke();
+    
+    // 中心高光
+    this.ctx.fillStyle = 'rgba(255, 255, 255, 0.6)';
+    this.ctx.beginPath();
+    this.ctx.arc(screenX - decoyRadius * 0.3, visualY - decoyRadius * 0.3, decoyRadius * 0.3, 0, Math.PI * 2);
+    this.ctx.fill();
 
     this.ctx.restore();
   }
@@ -3842,7 +4086,8 @@ export class Renderer {
     decoys: DECOY_STATE[] = [], // 新增: 诱饵列表
     turrets: TURRET_STATE[] = [], // 新增: 炮台列表
     zones: Zone[] = [], // 新增: 地图区域列表
-    localAimRad?: number // 新增: 本地平滑瞄准角度
+    localAimRad?: number, // 新增: 本地平滑瞄准角度
+    mouseWorldPos?: { x: number; y: number } | null // 新增: 鼠标世界坐标
   ): void {
     const t0 = performance.now();
     
@@ -4137,7 +4382,8 @@ export class Renderer {
       }
       
       // 绘制AI
-      this.drawAI(ai, debug, currentServerTick);
+      // 绘制AI
+      this.drawAI(ai, debug, currentServerTick, mouseWorldPos, players);
     }
 
     // 新增: 绘制炮台（添加草丛和烟雾隐藏逻辑）

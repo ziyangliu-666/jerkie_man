@@ -318,6 +318,7 @@ export const DECOY_STATE_SCHEMA = z.object({
   armorTypeId: z.string().optional(),
   hp: z.number(),
   maxHp: z.number(),
+  aimRad: z.number().optional().default(0), // 新增: 瞄准角度（用于眼睛渲染）
   // 新增: 草丛/烟雾可见性字段（与玩家/AI保持一致）
   inBush: z.boolean().optional().default(false),
   inBushId: z.string().nullable().optional().default(null),

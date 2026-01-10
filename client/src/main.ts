@@ -4316,7 +4316,9 @@ function renderLoop(): void {
                return inputManager.getAimAngleFromPoint(screenPos.x, screenPos.y);
             }
             return undefined;
-          })()
+          })(),
+          // 新增: 鼠标世界坐标
+          inputManager.getMouseWorldPos((x, y) => renderer.screenToWorld(x, y))
         );
       } else {
         // 非 RAID phase: 只清屏（显示暗背景）

@@ -4223,6 +4223,7 @@ export class Room {
             name: d.name,
             weaponTypeId: d.weaponTypeId,
             armorTypeId: d.armorTypeId,
+            aimRad: d.aimRad, // 新增: 瞄准角度
             inBush: !!bushId,
             inBushId: bushId,
             inSmoke: !!smokeId,
