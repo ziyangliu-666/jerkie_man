@@ -1,5 +1,5 @@
 import type { S2C_SNAPSHOT, PLAYER_STATE, BULLET_STATE, ITEM_STATE, WorldItem, LootBag, OBSTACLE_STATE, DECOY_STATE, TURRET_STATE } from '@jerkie-man/shared';
-import { lerp } from '@jerkie-man/shared';
+import { lerp, CLIENT_INTERPOLATION_DELAY_MS } from '@jerkie-man/shared';
 
 interface SnapshotEntry {
   snapshot: S2C_SNAPSHOT;
@@ -35,14 +35,14 @@ export class SnapshotBuffer {
     // Date.now()是客户端当前时间（client时间域）
     // offsetNow = serverNow - clientNow，即服务器时间比客户端快多少
     const offsetNow = snapshot.timestamp - Date.now();
-    // 使用指数移动平均（90%旧值 + 10%新值）平滑更新，避免网络抖动影响
-    this.serverOffsetMs = this.serverOffsetMs * 0.9 + offsetNow * 0.1;
+    // 使用指数移动平均（98%旧值 + 2%新值）平滑更新，避免网络抖动导致渲染时间跳变
+    this.serverOffsetMs = this.serverOffsetMs * 0.98 + offsetNow * 0.02;
 
 
   }
 
   // 获取插值后的状态
-  getInterpolatedState(renderDelay: number = 120): {
+  getInterpolatedState(renderDelay: number = CLIENT_INTERPOLATION_DELAY_MS): {
     players: PLAYER_STATE[];
     bullets: BULLET_STATE[];
     items: ITEM_STATE[];

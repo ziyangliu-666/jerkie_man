@@ -56,6 +56,7 @@ export class Player {
   public usingItemEndTick: number = 0;
   public usingItemTotalDurationTicks: number = 0;
   public lastMeleeSide: number = 1; // 新增: 记录最后一次近战挥击方向
+  public aimRad: number = 0; // 新增: 同步玩家的瞄准方向
 
   // 新增: 伪装AI行为状态（类似真实AI的字段）
   public disguisedAimRad: number = 0; // 伪装玩家的枪口角度
@@ -736,6 +737,7 @@ export class Player {
       disguisedAsAiBehavior, // 伪装玩家的伪AI行为
       disguisedAsAiRole, // 伪装玩家的伪AI角色
       disguisedAimRad, // 新增: 伪装玩家的枪口指向（基于移动方向）
+      aimRad: this.aimRad, // 新增: 同步所有玩家的瞄准方向
     };
   }
 

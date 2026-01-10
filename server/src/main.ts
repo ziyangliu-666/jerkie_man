@@ -20,14 +20,16 @@ import {
   S2C_FIRE_SCHEMA, // 新增: 燃烧事件
   S2C_KILL_FEED_SCHEMA, // 新增: 击杀播报
   getWeaponDef, // 新增: 用于重置武器运行时状态
+  TICK_MS,
+  SNAPSHOT_MS,
   type C2S_MESSAGE,
 } from '@jerkie-man/shared';
 
 // 支持从环境变量读取端口和主机地址（CI友好）
 const PORT = Number(process.env.PORT) || 18723;
 const HOST = process.env.HOST || '0.0.0.0'; // 默认监听所有网络接口
-const TICK_INTERVAL_MS = 50; // 20Hz
-const SNAPSHOT_INTERVAL_MS = 100; // 10Hz
+const TICK_INTERVAL_MS = TICK_MS; // 20Hz
+const SNAPSHOT_INTERVAL_MS = SNAPSHOT_MS; // 10Hz
 
 // Admin password hash (SHA-256 of "[REDACTED-CREDENTIAL]")
 const ADMIN_PASSWORD_HASH = crypto.createHash('sha256').update('[REDACTED-CREDENTIAL]').digest('hex');

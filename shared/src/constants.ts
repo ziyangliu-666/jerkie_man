@@ -5,7 +5,7 @@
 
 // Tick系统常量
 export const TICK_MS = 50; // 服务端tick间隔：50ms = 20Hz
-export const SNAPSHOT_MS = 100; // 快照广播间隔：100ms = 10Hz
+export const SNAPSHOT_MS = 50; // 快照广播间隔：50ms = 20Hz
 
 // Tick换算工具函数
 export function msToTicks(ms: number): number {
@@ -30,6 +30,7 @@ export const PLAYER_SPEED = 200; // 玩家移动速度（像素/秒）
 export const LAG_COMP_SAFETY_MARGIN_MS = 50; // 延迟补偿安全裕量
 export const LAG_COMP_MAX_REWIND_MS = 500; // 最大回溯时间
 export const POSITION_HISTORY_SIZE = 50; // 位置历史缓冲区大小（约2.5秒@20Hz）
+export const CLIENT_INTERPOLATION_DELAY_MS = 150; // 客户端插值延迟（150ms）
 
 // 提取区常量
 export const EXTRACT_DURATION_MS = 5000; // 撤离持续时间（10秒）

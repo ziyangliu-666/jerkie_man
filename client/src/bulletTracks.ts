@@ -631,6 +631,7 @@ export class BulletTrackManager {
               flashEndTime: 0,
               isStunned: false,
               stunnedEndTime: 0,
+              aimRad: ai.aimRad ?? 0,
             };
             this.emitLocalHit(bullet, aiAsTarget);
             break;

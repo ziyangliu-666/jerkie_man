@@ -277,6 +277,7 @@ export const PLAYER_STATE_SCHEMA = z.object({
   disguisedAsAiBehavior: z.enum(['IDLE', 'PATROL', 'SPOTTING', 'CHASE', 'ATTACK', 'SEARCH', 'RETURN']).optional(),
   disguisedAsAiRole: z.enum(['basic', 'sniper', 'heavy_gunner', 'scout']).optional(),
   disguisedAimRad: z.number().optional(), // 新增: 伪装玩家的枪口指向（基于移动方向）
+  aimRad: z.number().default(0), // 新增: 同步所有玩家的瞄准方向
 });
 
 // AI实体状态 schema（用于服务端AI系统）

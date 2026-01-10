@@ -2,7 +2,7 @@
 import { Player } from './player.js';
 import { ProfileManager } from './profile.js';
 import type { PLAYER_STATE, BULLET_STATE, ITEM_STATE, C2S_INPUT, MAP_CONFIG, OBSTACLE_STATE, WorldItem, LootBag, ItemInstance, WeaponRuntime, WeaponDef, MapTemplate, SpawnPoint, AI_STATE, AISpawn, DECOY_STATE, TURRET_STATE } from '@jerkie-man/shared';
-import { loadMapConfig, loadItemTypes, circleVsAABB, createRng, rectIntersects, segmentIntersectsCircle, getItemType, getAllItemTypes, getItemTypesByRarity, getWeaponDef, getArmorDef, getBagDef, applySpread, msToTicks, getFireSchedule, shouldStartBurst, canFireTick, advanceFireCooldown, PLAYER_HIT_RADIUS, getBulletPenetration, isObstacleDestructible, isUsableItem, doesObstacleBlockPlayer, AI_ROLE_PRESETS, ticksToMs, ItemType, EXTRACT_DURATION_MS } from '@jerkie-man/shared';
+import { loadMapConfig, loadItemTypes, circleVsAABB, createRng, rectIntersects, segmentIntersectsCircle, segmentPointDistanceSquared, getItemType, getAllItemTypes, getItemTypesByRarity, getWeaponDef, getArmorDef, getBagDef, applySpread, msToTicks, getFireSchedule, shouldStartBurst, canFireTick, advanceFireCooldown, PLAYER_HIT_RADIUS, getBulletPenetration, isObstacleDestructible, isUsableItem, doesObstacleBlockPlayer, AI_ROLE_PRESETS, ticksToMs, ItemType, EXTRACT_DURATION_MS, CLIENT_INTERPOLATION_DELAY_MS } from '@jerkie-man/shared';
 import { log } from './logger.js';
 import { AI, type PatrolConfig, type GuardConfig } from './ai.js';
 import { NavigationGrid, Pathfinder } from './pathfinding.js';
@@ -1421,6 +1421,26 @@ export class Room {
     }
   }
 
+  // 新增: 处理退出结果页面消息
+  public handleExitResult(playerId: string): void {
+    const accountId = this.playerToAccount.get(playerId);
+    if (accountId) {
+      this.profileManager.updateProfile(accountId, { phase: 'HIDEOUT' });
+      const profile = this.profileManager.getProfileData(accountId);
+      
+      // 推送最新的 profile 给客户端
+      const player = this.players.get(playerId);
+      // 注意：这里我们不需要立即 removePlayer，而是让客户端切回 HIDEOUT 界面
+      // 但为了省资源，我们可以把玩家从 players map 中移除（如果不移除，他会一直占着位置）
+      // 不过设计上 'HIDEOUT' 状态的玩家是否还在 room 里？
+      // 当前架构是 single room for everyone?
+      // 看起来 yes. 所以玩家还在 room 里，只是状态变了。
+      
+      this.pushEvent(`${playerId} returned to lobby`);
+      log('EXIT_RESULT', { playerId, accountId, phase: 'HIDEOUT' });
+    }
+  }
+
   // 新增: 局内装备切换（背包/护甲/武器）
   public handleRaidEquip(
     playerId: string,
@@ -1807,6 +1827,7 @@ export class Room {
 
     player.lastInputSeq = input.seq;
     player.lastInputTick = input.tick;
+    player.aimRad = input.aim; // 新增: 更新玩家瞄准角度以同步给其他玩家
     const shootNow = !!input.shoot;
     const wasShooting = player.lastShoot;
     player.lastShoot = shootNow;

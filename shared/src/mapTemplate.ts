@@ -115,13 +115,13 @@ export const AI_ROLE_PRESETS: Record<AIRole, AIRolePreset> = {
     hp: 80,
     maxHp: 80,
     armorReduction: 0,
-    visionRange: 600, // 视野远
+    visionRange: 500, // 视野远 (Reduced from 600)
     visionAngleDeg: 90, // 视野窄（聚焦）
     moveSpeed: 0.8, // 移动慢
     aimErrorDeg: 1, // 精准射击
-    fireRateMultiplier: 0.8, // 射速慢
-    aggroRange: 500, // 远距离攻击
-    chaseRange: 600,
+    fireRateMultiplier: 0.5, // 射速慢
+    aggroRange: 450, // 远距离攻击 (Reduced from 500)
+    chaseRange: 550, // (Reduced from 600)
   },
   // 重机枪手 - 高火力高防御
   heavy_gunner: {

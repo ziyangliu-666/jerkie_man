@@ -1062,6 +1062,11 @@ function updateResultUI(): void {
       const oldPhase = currentPhase;
       currentPhase = 'HIDEOUT';
       console.log(`[Result Continue] Phase changed: ${oldPhase} -> ${currentPhase}`);
+      
+      // Fix: Notify server to exit result phase
+      network.sendExitResult();
+      raidResult = null; // Clear local result to prevent re-open
+      
       updatePhaseUI();
     };
   }
@@ -4018,7 +4023,7 @@ network = new Network(getWebSocketUrl(), 'local', {
 worldCanvas.addEventListener('contextmenu', (e) => {
   e.preventDefault(); // 阻止右键菜单
   const world = renderer.screenToWorld(e.clientX, e.clientY);
-  const state = network.getSnapshotBuffer().getInterpolatedState(180);
+  const state = network.getSnapshotBuffer().getInterpolatedState();
   const hit = renderer.hitTest(world.x, world.y, state.players, 30);
 
   if (hit) {
@@ -4071,9 +4076,8 @@ function renderLoop(): void {
   lastRenderNow = nowPerf;
 
   // 获取插值后的状态（必须在子弹更新之前，确保碰撞检测使用正确的玩家位置）
-  // 获取插值后的状态（必须在子弹更新之前，确保碰撞检测使用正确的玩家位置）
   // 修复: 使用 120ms 渲染延迟以匹配服务端插值延迟 (CLIENT_INTERPOLATION_DELAY_MS = 120)
-  const state = network.getSnapshotBuffer().getInterpolatedState(120);
+  const state = network.getSnapshotBuffer().getInterpolatedState();
 
   // 修复: 只在 RAID 阶段更新子弹轨迹，传入插值后的玩家位置和AI位置
   if (currentPhase === 'RAID') {
@@ -4304,7 +4308,15 @@ function renderLoop(): void {
           state.decoys ?? [], // 新增: 诱饵列表
           state.turrets ?? [], // 新增: 炮台列表
           // 新增: 地图区域
-          mapConfig.zones || [] 
+          mapConfig.zones || [],
+          // 新增: 本地实时瞄准角度
+          (() => {
+            if (localPlayerId && renderLocalPlayerForTooltip) {
+               const screenPos = renderer.worldToScreen(renderLocalPlayerForTooltip.x, renderLocalPlayerForTooltip.y);
+               return inputManager.getAimAngleFromPoint(screenPos.x, screenPos.y);
+            }
+            return undefined;
+          })()
         );
       } else {
         // 非 RAID phase: 只清屏（显示暗背景）

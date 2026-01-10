@@ -37,7 +37,7 @@ export class Renderer {
 
   // 新增: 玩家拖影轨迹（世界坐标 + alpha）
   // key: playerId -> 最近若干帧的位置和透明度
-  private playerTrails: Map<string, Array<{ x: number; y: number; alpha: number }>> = new Map();
+  private playerTrails: Map<string, Array<{ x: number; y: number; alpha: number; aimRad?: number }>> = new Map();
   // 新增: 拖影强度（0-1，用于控制开启/结束的过渡）
   private playerTrailStrength: Map<string, number> = new Map();
   // 新增: 速度采样（基于世界位置 + 时间），用于判断当前“视觉速度”
@@ -180,7 +180,8 @@ export class Renderer {
     currentServerTick?: number,
     nowMs: number = Date.now(),
     flashTotalMs: number = 5000,
-    localInBushOverride?: boolean
+    localInBushOverride?: boolean,
+    aimOverride?: number // 新增: 瞄准角度覆盖
   ): void {
     // 🎭 伪装检测：如果该玩家伪装了，则渲染为AI（包括本地玩家自己）
     const isDisguised = player.buffs?.some((b: any) => b.kind === 'disguise');
@@ -188,25 +189,53 @@ export class Renderer {
     
     if (shouldRenderAsAi) {
       // 🤖 渲染为AI样式（如果是本地玩家，会额外显示伪装进度条）
-      this.drawDisguisedPlayerAsAi(player, currentServerTick, isLocal);
+      this.drawDisguisedPlayerAsAi(player, currentServerTick, isLocal, aimOverride);
       return;
     }
     
     // 正常玩家渲染...
     const size = 20; // 像素大小
-    // 将世界坐标转换为屏幕坐标（减去camera偏移）
-    // 修复: round 到整数像素，避免子像素抗锯齿导致的重影
     const screenX = Math.round(player.x - this.camX);
     const screenY = Math.round(player.y - this.camY);
 
-    // 玩家颜色（本地玩家蓝色，其他玩家红色）
-    this.ctx.fillStyle = isLocal ? '#00aaff' : '#ff4444';
-    this.ctx.fillRect(screenX - size / 2, screenY - size / 2, size, size);
+    this.ctx.save();
+    
+    // 2. 绘制身体 (Body) - 使用圆角矩形和渐变
+    // 注意：眼睛需要在身体上层（或者在身体绘制后再绘制），为了确保"环绕在表面"，可以先画身体再画眼睛
+    
+    // 2a. 绘制身体
+    const cornerRadius = 6;
+    const bodyGradient = this.ctx.createLinearGradient(
+      screenX - size/2, screenY - size/2, 
+      screenX + size/2, screenY + size/2
+    );
+    
+    if (isLocal) {
+      bodyGradient.addColorStop(0, '#00c3ff');
+      bodyGradient.addColorStop(1, '#0062ff');
+    } else {
+      bodyGradient.addColorStop(0, '#ff5f6d');
+      bodyGradient.addColorStop(1, '#ffc371');
+    }
 
-    // 白色边框（与AI统一）
-    this.ctx.strokeStyle = '#fff';
-    this.ctx.lineWidth = 2;
-    this.ctx.strokeRect(screenX - size / 2, screenY - size / 2, size, size);
+    this.ctx.shadowBlur = 8;
+    this.ctx.shadowColor = isLocal ? 'rgba(0, 195, 255, 0.4)' : 'rgba(255, 95, 109, 0.4)';
+    
+    this.ctx.fillStyle = bodyGradient;
+    this.drawRoundedRect(screenX - size / 2, screenY - size / 2, size, size, cornerRadius);
+    this.ctx.fill();
+
+    // 白色精细边框
+    this.ctx.strokeStyle = 'rgba(255, 255, 255, 0.8)';
+    this.ctx.lineWidth = 1.5;
+    this.drawRoundedRect(screenX - size / 2, screenY - size / 2, size, size, cornerRadius);
+    this.ctx.stroke();
+
+    // 3. 绘制眼睛 (Eyes)
+    const aimRad = aimOverride ?? player.aimRad ?? 0;
+    this.drawEyes(screenX, screenY, size, aimRad, isLocal ? 'local' : 'enemy');
+
+    this.ctx.restore();
 
     // HP条
     const barWidth = size;
@@ -371,10 +400,64 @@ export class Renderer {
   }
 
   /**
+   * 新增: 绘制可爱的眼睛，环绕在身体表面
+   */
+  private drawEyes(x: number, y: number, bodySize: number, rotation: number, side: 'local' | 'enemy' | 'ai'): void {
+    this.ctx.save();
+    this.ctx.translate(x, y); // still translate to center, but DO NOT rotate context
+    
+    // 眼睛设置
+    const eyeRadius = 1.5; // 小黑点
+    const eyeSpacing = 5; // 两眼间距
+    // 计算"表面"距离：由于圆角矩形，我们假设在一个略小的方框上运动
+    // bodySize=20, half=10. "靠里一点" -> 比如 innerBoxRadius = 7
+    const innerBoxRadius = (bodySize / 2) - 3; 
+    
+    // 1. 计算朝向向量 (cos, sin)
+    const dx = Math.cos(rotation);
+    const dy = Math.sin(rotation);
+    
+    // 2. 将圆形方向映射到方形边缘 (Ray-Box Intersection logic)
+    // 找到缩放因子 k，使得 (k*dx, k*dy) 落在 max(|x|,|y|) = innerBoxRadius 上
+    // k * max(|dx|, |dy|) = innerBoxRadius => k = innerBoxRadius / max(...)
+    const maxAbs = Math.max(Math.abs(dx), Math.abs(dy));
+    const scale = innerBoxRadius / (maxAbs > 0.001 ? maxAbs : 1); // 避免除以0
+    
+    const faceX = dx * scale;
+    const faceY = dy * scale;
+    
+    // 3. 计算眼睛位置
+    // 眼睛也是"流体"的，永远垂直于视线方向排布
+    // 垂线向量: (-sin, cos)
+    const perpX = -dy;
+    const perpY = dx;
+    
+    const eye1X = faceX - perpX * (eyeSpacing / 2);
+    const eye1Y = faceY - perpY * (eyeSpacing / 2);
+    
+    const eye2X = faceX + perpX * (eyeSpacing / 2);
+    const eye2Y = faceY + perpY * (eyeSpacing / 2);
+
+    this.ctx.fillStyle = '#000'; // 黑色眼睛
+
+    // 绘制左眼
+    this.ctx.beginPath();
+    this.ctx.arc(eye1X, eye1Y, eyeRadius, 0, Math.PI * 2);
+    this.ctx.fill();
+
+    // 绘制右眼
+    this.ctx.beginPath();
+    this.ctx.arc(eye2X, eye2Y, eyeRadius, 0, Math.PI * 2);
+    this.ctx.fill();
+
+    this.ctx.restore();
+  }
+
+  /**
    * 新增: 将伪装玩家渲染为AI样式（其他玩家看到的伪装玩家，或伪装者自己看到的自己）
    * @param isLocal 是否是本地玩家（本地玩家会显示伪装进度条）
    */
-  private drawDisguisedPlayerAsAi(player: PLAYER_STATE, currentServerTick?: number, isLocal: boolean = false): void {
+  private drawDisguisedPlayerAsAi(player: PLAYER_STATE, currentServerTick?: number, isLocal: boolean = false, aimOverride?: number): void {
     // 根据AI角色调整大小和颜色（与真实AI一致）
     let size = 20;
     let color = '#ff8800'; // 默认橙色
@@ -404,41 +487,56 @@ export class Renderer {
     const screenX = Math.round(player.x - this.camX);
     const screenY = Math.round(player.y - this.camY);
     
-    // 1. 绘制AI方块（根据角色调整颜色）
-    this.ctx.fillStyle = player.status === 'ALIVE' ? color : '#666666';
-    this.ctx.fillRect(screenX - size / 2, screenY - size / 2, size, size);
+    this.ctx.save();
+
+
+    // 2. 绘制身体 (Disguised Body)
+    const bodyGradient = this.ctx.createLinearGradient(
+      screenX - size/2, screenY - size/2, 
+      screenX + size/2, screenY + size/2
+    );
     
-    // 2. 白色边框
+    if (player.status === 'ALIVE') {
+      bodyGradient.addColorStop(0, color);
+      bodyGradient.addColorStop(1, this.adjustColor(color, -20));
+      this.ctx.shadowBlur = 6;
+      this.ctx.shadowColor = 'rgba(0, 0, 0, 0.3)';
+    } else {
+      bodyGradient.addColorStop(0, '#666');
+      bodyGradient.addColorStop(1, '#444');
+    }
+
+    this.ctx.fillStyle = bodyGradient;
+    const cornerRadius = 4;
+    this.drawRoundedRect(screenX - size / 2, screenY - size / 2, size, size, cornerRadius);
+    this.ctx.fill();
+
+    // 白色边框
     this.ctx.strokeStyle = '#fff';
-    this.ctx.lineWidth = 2;
-    this.ctx.strokeRect(screenX - size / 2, screenY - size / 2, size, size);
-    
-    // 3. HP条（与真实AI一致：宽度30px）
+    this.ctx.lineWidth = 1.5;
+    this.drawRoundedRect(screenX - size / 2, screenY - size / 2, size, size, cornerRadius);
+    this.ctx.stroke();
+
+    // 3. 绘制眼睛 (Eyes)
+    const aimRad = aimOverride ?? player.disguisedAimRad ?? 0;
+    this.drawEyes(screenX, screenY, size, aimRad, 'ai');
+
+    this.ctx.restore();
+
+    // 4. 绘制HP条 (与真实AI一致)
     if (player.status === 'ALIVE' && player.hp !== undefined) {
-      const hpBarWidth = 30; // 与真实AI一致
+      const hpBarWidth = 30;
       const hpBarHeight = 4;
       const hpBarY = screenY - size / 2 - 8;
 
+      // 背景
       this.ctx.fillStyle = '#333';
       this.ctx.fillRect(screenX - hpBarWidth / 2, hpBarY, hpBarWidth, hpBarHeight);
 
-      const hpRatio = player.hp / 100;
+      // 血量
+      const hpRatio = player.hp / 100; // 玩家最大血量通常是100
       this.ctx.fillStyle = hpRatio > 0.5 ? '#0f0' : hpRatio > 0.25 ? '#ff0' : '#f00';
       this.ctx.fillRect(screenX - hpBarWidth / 2, hpBarY, hpBarWidth * hpRatio, hpBarHeight);
-    }
-    
-    // 4. 绘制枪口指向（基于移动方向）
-    if (player.weaponRuntime && player.status === 'ALIVE' && player.disguisedAimRad !== undefined) {
-      const barrelLength = 15;
-      const barrelEndX = screenX + Math.cos(player.disguisedAimRad) * barrelLength;
-      const barrelEndY = screenY + Math.sin(player.disguisedAimRad) * barrelLength;
-
-      this.ctx.strokeStyle = '#fff';
-      this.ctx.lineWidth = 2;
-      this.ctx.beginPath();
-      this.ctx.moveTo(screenX, screenY);
-      this.ctx.lineTo(barrelEndX, barrelEndY);
-      this.ctx.stroke();
     }
 
     // 5. 新增: 绘制换弹进度条（与真实AI一致）
@@ -788,7 +886,7 @@ export class Renderer {
       // 即使 isFast 为 false，只要 strength > 0，也继续添加点（但 alpha 会很低）
       // 这样关闭时拖影会自然缩短，而不是突然消失
       const effectiveAlpha = isFast ? baseAlpha * strength : baseAlpha * strength * 0.3;
-      trail.push({ x: player.x, y: player.y, alpha: effectiveAlpha });
+      trail.push({ x: player.x, y: player.y, alpha: effectiveAlpha, aimRad: player.aimRad });
     }
 
     // 性能优化: in-place 衰减和过滤，避免 map/filter 产生的 GC 压力
@@ -829,15 +927,29 @@ export class Renderer {
     if (!trail || trail.length === 0) return;
 
     const size = 20;
-    const rgb = isLocal ? '0,170,255' : '255,68,68';
+    const cornerRadius = 6;
 
     this.ctx.save();
-    this.ctx.fillStyle = `rgb(${rgb})`;
     for (const p of trail) {
       const sx = Math.round(p.x - this.camX);
       const sy = Math.round(p.y - this.camY);
-      this.ctx.globalAlpha = p.alpha;
-      this.ctx.fillRect(sx - size / 2, sy - size / 2, size, size);
+      const aimRad = (p as any).aimRad ?? 0;
+      
+      this.ctx.globalAlpha = p.alpha * 0.5; // 整体降低拖影亮度
+      
+      // 绘制鬼影身体
+      this.ctx.fillStyle = isLocal ? '#00aaff' : '#ff4444';
+      this.drawRoundedRect(sx - size / 2, sy - size / 2, size, size, cornerRadius);
+      this.ctx.fill();
+
+      // 绘制鬼影面罩
+      this.ctx.save();
+      this.ctx.translate(sx, sy);
+      this.ctx.rotate(aimRad);
+      this.ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
+      this.drawRoundedRect(size / 4, -size / 3, size / 4, size / 1.5, 2);
+      this.ctx.fill();
+      this.ctx.restore();
     }
     this.ctx.restore();
   }
@@ -876,40 +988,57 @@ export class Renderer {
     const screenY = Math.round(ai.y - this.camY);
 
     // AI颜色（根据角色类型）
-    this.ctx.fillStyle = ai.status === 'ALIVE' ? color : '#666666';
-    this.ctx.fillRect(screenX - size / 2, screenY - size / 2, size, size);
+    this.ctx.save();
+
+
+    // 2. 绘制身体 (AI Body)
+    const bodyGradient = this.ctx.createLinearGradient(
+      screenX - size/2, screenY - size/2, 
+      screenX + size/2, screenY + size/2
+    );
+    
+    if (ai.status === 'ALIVE') {
+      bodyGradient.addColorStop(0, color);
+      // 稍微加深一点作为渐变
+      bodyGradient.addColorStop(1, this.adjustColor(color, -20));
+      this.ctx.shadowBlur = 6;
+      this.ctx.shadowColor = 'rgba(0, 0, 0, 0.3)';
+    } else {
+      bodyGradient.addColorStop(0, '#666');
+      bodyGradient.addColorStop(1, '#444');
+    }
+
+    this.ctx.fillStyle = bodyGradient;
+    const cornerRadius = 4;
+    this.drawRoundedRect(screenX - size / 2, screenY - size / 2, size, size, cornerRadius);
+    this.ctx.fill();
 
     // 白色边框
     this.ctx.strokeStyle = '#fff';
-    this.ctx.lineWidth = 2;
-    this.ctx.strokeRect(screenX - size / 2, screenY - size / 2, size, size);
+    this.ctx.lineWidth = 1.5;
+    this.drawRoundedRect(screenX - size / 2, screenY - size / 2, size, size, cornerRadius);
+    this.ctx.stroke();
 
-    // 血条
+    // 3. 绘制眼睛 (Eyes)
+    const aimRad = ai.aimRad ?? 0;
+    this.drawEyes(screenX, screenY, size, aimRad, 'ai');
+
+    this.ctx.restore();
+
+    // 4. 绘制HP条 (AI上方)
     if (ai.status === 'ALIVE' && ai.hp !== undefined && ai.maxHp !== undefined) {
       const hpBarWidth = 30;
       const hpBarHeight = 4;
       const hpBarY = screenY - size / 2 - 8;
 
+      // 背景
       this.ctx.fillStyle = '#333';
       this.ctx.fillRect(screenX - hpBarWidth / 2, hpBarY, hpBarWidth, hpBarHeight);
 
+      // 血量
       const hpRatio = ai.hp / ai.maxHp;
       this.ctx.fillStyle = hpRatio > 0.5 ? '#0f0' : hpRatio > 0.25 ? '#ff0' : '#f00';
       this.ctx.fillRect(screenX - hpBarWidth / 2, hpBarY, hpBarWidth * hpRatio, hpBarHeight);
-    }
-
-    // 瞄准方向
-    if (ai.weaponRuntime && ai.status === 'ALIVE' && ai.aimRad !== undefined) {
-      const barrelLength = 15;
-      const barrelEndX = screenX + Math.cos(ai.aimRad) * barrelLength;
-      const barrelEndY = screenY + Math.sin(ai.aimRad) * barrelLength;
-
-      this.ctx.strokeStyle = '#fff';
-      this.ctx.lineWidth = 2;
-      this.ctx.beginPath();
-      this.ctx.moveTo(screenX, screenY);
-      this.ctx.lineTo(barrelEndX, barrelEndY);
-      this.ctx.stroke();
     }
 
     // 新增: 绘制换弹进度条（AI下方，蓝色，与玩家一致）
@@ -3712,7 +3841,8 @@ export class Renderer {
     ais: any[] = [], // 新增: AI实体列表
     decoys: DECOY_STATE[] = [], // 新增: 诱饵列表
     turrets: TURRET_STATE[] = [], // 新增: 炮台列表
-    zones: Zone[] = [] // 新增: 地图区域列表
+    zones: Zone[] = [], // 新增: 地图区域列表
+    localAimRad?: number // 新增: 本地平滑瞄准角度
   ): void {
     const t0 = performance.now();
     
@@ -3943,7 +4073,9 @@ export class Renderer {
         const isFast = this.isPlayerFast(visualPlayer);
         this.updatePlayerTrail(visualPlayer, isFast);
         this.drawPlayerTrail(visualPlayer.id, isLocal);
-        this.drawPlayer(visualPlayer, isLocal, currentServerTick, now, flashGrenadeDurationMs, isLocal ? isLocalPlayerInBush : undefined);
+        // 如果是本地玩家且有 override aim，则使用它
+        const aimOverride = isLocal ? localAimRad : undefined;
+        this.drawPlayer(visualPlayer, isLocal, currentServerTick, now, flashGrenadeDurationMs, isLocal ? isLocalPlayerInBush : undefined, aimOverride);
       }
     }
     const c1 = performance.now();
@@ -4459,5 +4591,37 @@ export class Renderer {
     }
     this.leafParticles.length = write;
     ctx.restore();
+  }
+
+  // --- 视觉辅助工具方法 ---
+
+  /**
+   * 绘制圆角矩形路径
+   */
+  private drawRoundedRect(x: number, y: number, width: number, height: number, radius: number): void {
+    const ctx = this.ctx;
+    ctx.beginPath();
+    ctx.moveTo(x + radius, y);
+    ctx.lineTo(x + width - radius, y);
+    ctx.quadraticCurveTo(x + width, y, x + width, y + radius);
+    ctx.lineTo(x + width, y + height - radius);
+    ctx.quadraticCurveTo(x + width, y + height, x + width - radius, y + height);
+    ctx.lineTo(x + radius, y + height);
+    ctx.quadraticCurveTo(x, y + height, x, y + height - radius);
+    ctx.lineTo(x, y + radius);
+    ctx.quadraticCurveTo(x, y, x + radius, y);
+    ctx.closePath();
+  }
+
+  /**
+   * 调整颜色亮度 (百分比，建议 -20 到 20)
+   */
+  private adjustColor(color: string, percent: number): string {
+    const num = parseInt(color.replace('#', ''), 16);
+    const amt = Math.round(2.55 * percent);
+    const R = (num >> 16) + amt;
+    const G = (num >> 8 & 0x00FF) + amt;
+    const B = (num & 0x0000FF) + amt;
+    return '#' + (0x1000000 + (R < 255 ? R < 1 ? 0 : R : 255) * 0x10000 + (G < 255 ? G < 1 ? 0 : G : 255) * 0x100 + (B < 255 ? B < 1 ? 0 : B : 255)).toString(16).slice(1);
   }
 }
