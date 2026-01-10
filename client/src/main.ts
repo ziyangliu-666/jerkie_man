@@ -3540,20 +3540,15 @@ let localPlayerId: string | null = null;
 let inputSeq = 0;
 let selectedEntity: PLAYER_STATE | null = null;
 
-// 动态构建 WebSocket 服务器地址（支持内网穿透）
-// 根据当前访问的地址自动确定服务器地址
+// 动态构建 WebSocket 服务器地址
+// 总是根据当前页面访问的 Hostname 加上固定的 18723 端口
 function getDefaultWebSocketUrl(): string {
-  // 1. 优先使用环境变量 (Build time injected)
-  const envUrl = import.meta.env.VITE_SERVER_URL;
-  if (envUrl) {
-    console.log('[Network] Using configured server URL:', envUrl);
-    return envUrl;
-  }
-
-  // 2. 本地开发回退逻辑: 假设服务器在同一主机名下的 18723 端口
   const hostname = window.location.hostname;
+  // 如果是 HTTPS 页面则尝试 WSS（但在私有部署没有证书时可能需要回退到 WS，这里先保持协议跟随）
+  // 注意：如果页面是 HTTP，这里就是 ws://
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-  // 开发环境通常是 localhost 或 局域网IP
+  
+  // 假设服务器始终在同一主机名的 18723 端口运行
   return `${protocol}//${hostname}:18723`;
 }
 

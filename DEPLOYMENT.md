@@ -1,79 +1,96 @@
-# 部署指南
+# 私有服务器自动部署指南
 
-本项目采用前后端分离部署：
-- **Client（前端）**: GitHub Pages
-- **Server（后端）**: Render
+本项目采用 **GitHub Actions** 进行 CI/CD，自动构建并部署到私有服务器（CentOS/Ubuntu）。
 
-## 部署步骤
+## 架构说明
+- **前端 (Client)**: 纯静态文件，构建后推送至服务器，由 Nginx 托管。
+    - **部署路径**: `~/jerkie_man/client`
+    - **访问端口**: `5174` (Nginx)
+    - **后端连接**: 自动连接 `ws://<当前网页IP>:18723`，无需配置。
+- **后端 (Server)**: Node.js 应用，构建后推送至服务器，由 PM2 管理进程。
+    - **部署路径**: `~/jerkie_man/server`
+    - **运行端口**: `18723` (WebSocket)
 
-### 1. 部署 Server 到 Render
+## 1. 自动化部署流程
+每次向 `main` 分支推送代码时，GitHub Actions 会自动执行：
+1. **构建**: 在 CI 环境中打包 shared, server, client 代码。
+2. **传输**: 通过 SCP 将构建产物覆盖到服务器的 `~/jerkie_man` 目录。
+3. **重启**:
+    - 安装后端依赖 (`npm install --production`)
+    - 检查 PM2 进程：如果存在则 `restart`，不存在则 `start`。
 
-1. 访问 [Render](https://render.com) 并注册/登录
-2. 点击 "New +" → "Web Service"
-3. 连接你的 GitHub 仓库
-4. Render 会自动检测到 `render.yaml` 配置文件
-5. 点击 "Apply" 创建服务
-6. 等待部署完成，记下你的服务地址（例如：`https://jerkie-man-server.onrender.com`）
+## 2. 服务器环境准备 (只需一次)
 
-**注意事项：**
-- Render 免费套餐在 15 分钟无活动后会休眠，首次访问需要等待唤醒（约 30-60 秒）
-- 免费套餐每月有 750 小时的运行时间限制
-
-### 2. 配置 GitHub Actions
-
-1. 修改 `.github/workflows/deploy.yml` 中的 `VITE_SERVER_URL`：
-   ```yaml
-   VITE_SERVER_URL: 'wss://你的render服务地址.onrender.com'
-   ```
-
-2. 修改 `client/vite.config.ts` 中的 `base` 路径为你的仓库名：
-   ```typescript
-   base: process.env.GITHUB_PAGES === 'true' ? '/你的仓库名/' : '/',
-   ```
-
-### 3. 启用 GitHub Pages
-
-1. 将代码推送到 GitHub 的 main 分支
-2. 访问仓库设置：`https://github.com/你的用户名/你的仓库名/settings/pages`
-3. 在 "Build and deployment" 下，将 "Source" 设置为 "GitHub Actions"
-4. 等待 GitHub Actions 自动构建和部署
-
-### 4. 访问你的游戏
-
-部署完成后，访问：`https://你的用户名.github.io/你的仓库名/`
-
-## 本地开发
-
-本地开发时，client 会自动连接到 `localhost:18723`：
-
+### 安装 Node.js (v18+) & PM2
+因为项目使用了较新的语法，服务器必须安装 Node.js v18 或更高版本。
 ```bash
-# 启动 server 和 client
-npm run dev
+# 安装 Node.js 20 (推荐)
+curl -fsSL https://rpm.nodesource.com/setup_20.x | sudo bash -
+sudo yum install -y nodejs
 
-# 或分别启动
-npm run dev:server
-npm run dev:client
+# 安装 PM2 进程管理器
+npm install -g pm2
 ```
 
-## 环境变量说明
+### 安装与配置 Nginx
+前端页面需要 Web 服务器托管。
+```bash
+# 1. 安装 Nginx
+sudo yum install nginx
+sudo systemctl enable nginx
+sudo systemctl start nginx
 
-- `GITHUB_PAGES`: 设置为 'true' 时启用 GitHub Pages 路径配置
-- `VITE_SERVER_URL`: 生产环境的 WebSocket 服务器地址（例如：`wss://your-server.onrender.com`）
+# 2. 配置 Nginx
+# 创建配置文件: /etc/nginx/conf.d/jerkie_man.conf
+server {
+    listen 5174;
+    server_name _;
 
-## 故障排查
+    root /root/jerkie_man/client; # 注意：确保此目录有读取权限
+    index index.html;
+    
+    # 开启 Gzip
+    gzip on;
+    gzip_types text/plain text/css application/json application/javascript;
 
-### Client 无法连接到 Server
-1. 检查浏览器控制台的 WebSocket 连接错误
-2. 确认 Render 服务是否正常运行（访问 Render Dashboard）
-3. 确认 `VITE_SERVER_URL` 配置正确（注意使用 `wss://` 而不是 `https://`）
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+}
 
-### Render 服务休眠
-Render 免费套餐会在 15 分钟无活动后休眠。首次访问时：
-1. 打开游戏页面
-2. 等待 30-60 秒让 Render 服务唤醒
-3. 刷新页面重新连接
+# 3. 解决权限问题 (如果部署在 /root 下)
+# 必须赋予 Nginx 读取权限，否则报 403/502
+chmod o+x /root
+chmod o+x /root/jerkie_man
+chmod o+x /root/jerkie_man/client
 
-### GitHub Actions 构建失败
-1. 检查 Actions 日志：`https://github.com/你的用户名/你的仓库名/actions`
-2. 确认所有依赖都在 `package.json` 中正确声明
-3. 确认 Node.js 版本兼容（workflow 使用 Node 20）
+# 4. 重载配置
+sudo nginx -t
+sudo systemctl reload nginx
+```
+
+### 配置防火墙 (重要!)
+必须同时开放 **系统防火墙** 和 **云厂商安全组**。
+```bash
+# CentOS firewalld
+sudo firewall-cmd --permanent --add-port=5174/tcp   # 前端网页
+sudo firewall-cmd --permanent --add-port=18723/tcp  # 游戏连接
+sudo firewall-cmd --reload
+```
+**别忘了去阿里云/腾讯云控制台的安全组里放行这两个端口！**
+
+## 3. 运维命令
+
+```bash
+# 查看后端状态
+pm2 list
+pm2 logs jerkie-server
+pm2 monit
+
+# 手动重启后端
+pm2 restart jerkie-server
+
+# 查看 Nginx 日志 (前端网页打不开时)
+tail -f /var/log/nginx/error.log
+tail -f /var/log/nginx/access.log
+```
