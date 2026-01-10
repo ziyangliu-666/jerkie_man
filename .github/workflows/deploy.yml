@@ -45,6 +45,7 @@ jobs:
           mkdir -p deployment/server/shared
           cp shared/package.json deployment/server/shared/
           cp -r shared/dist deployment/server/shared/
+          cp -r shared/maps deployment/server/shared/
 
           # Copy Server workspace (dist + package.json)
           mkdir -p deployment/server/server
