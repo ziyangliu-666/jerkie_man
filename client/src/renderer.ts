@@ -2096,7 +2096,7 @@ export class Renderer {
     } else {
       // --- 障碍物命中：火花/碎屑效果 ---
       // 1. 中央核心闪光
-      const coreSize = 4 * (1 - effect.age);
+      const coreSize = Math.max(0, 4 * (1 - effect.age));
       this.ctx.fillStyle = `rgba(255, 255, 200, ${alpha})`;
       this.ctx.beginPath();
       this.ctx.arc(screenX, screenY, coreSize, 0, Math.PI * 2);
