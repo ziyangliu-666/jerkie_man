@@ -599,6 +599,14 @@ function checkCollision(
   if (ctx.extractZone && rectsOverlap(rect, ctx.extractZone)) {
     return true;
   }
+
+  // 检测与地图边界的碰撞 (保持 50px buffer)
+  const buffer = 50;
+  if (rect.x < buffer || rect.y < buffer || 
+      rect.x + rect.w > ctx.mapWidth - buffer || 
+      rect.y + rect.h > ctx.mapHeight - buffer) {
+    return true;
+  }
   
   return false;
 }
@@ -1113,22 +1121,77 @@ export function lintMap(
       for (let j = 0; j < template.obstacles.length; j++) {
         if (i === j) continue;
         const obs = template.obstacles[j];
-        // 只检测固体障碍物，排除 bush 和其他门
-        if (!solidTypes.includes(obs.type) || obs.type === 'door_closed') continue;
-        
+        // 只检测固体障碍物，排除 bush 和其他门（除非完全重叠）
+        if (!solidTypes.includes(obs.type)) continue;
+
+        // 特殊处理：如果是同一 roomgroup 的墙，且只是轻微重叠（通常是由于 T 型墙角），忽略
+        if (obs.type === 'wall' && inSameRoomGroup(i, j)) {
+          const area = getOverlapArea(zone, obs);
+          if (area && area.w * area.h < 300) continue; 
+        }
+
         const overlap = getOverlapArea(zone, obs);
-        if (overlap && overlap.w * overlap.h > 200) {
-          warnings.push({
+        if (overlap && overlap.w * overlap.h > 150) { // 降低阈值，更严格点
+          // 如果是被墙挡住，且这个墙不是为了留出门的位置，那就是严重错误
+          const isError = obs.type === 'wall';
+          
+          const issue: LintIssue = {
             type: 'door_blocked',
-            severity: 'warning',
+            severity: isError ? 'error' : 'warning',
             message: `门 [${i}] 的 ${zone.side} 侧被 ${obs.type} [${j}] 堵住`,
             entities: [door.id ?? `obs_${i}`, obs.id ?? `obs_${j}`],
             location: { x: door.x, y: door.y, w: door.w, h: door.h },
             details: { doorIndex: i, blockerIndex: j, side: zone.side },
-          });
+          };
+
+          if (isError) errors.push(issue);
+          else warnings.push(issue);
+          
           break; // 每侧只报告一次
         }
       }
+    }
+  }
+
+  // ============================================================
+  // 9. 房间连通性初步检测 (warning) 
+  // ============================================================
+  // 检测是否有房间没有任何有效的门通向外部或其他房间
+  for (let ri = 0; ri < template.rooms.length; ri++) {
+    const room = template.rooms[ri];
+    let accessibleDoorCount = 0;
+
+    for (const door of room.doors) {
+      // 检查这扇门是否被堵住了
+      // 注意：这里的 logic 比较简单，只是检查门是否被 template.obstacles 里的墙挡住
+      // 实际上在 @roomgroup 生成时，门已经变成障碍物了
+      
+      // 寻找位置匹配的门障碍物
+      const doorObsIdx = template.obstacles.findIndex(o => 
+        o.type === 'door_closed' && 
+        Math.abs(o.x + o.w/2 - (room.x + (door.side === 'w' ? 0 : door.side === 'e' ? room.w : room.w * door.position))) < 50 &&
+        Math.abs(o.y + o.h/2 - (room.y + (door.side === 'n' ? 0 : door.side === 's' ? room.h : room.h * door.position))) < 50
+      );
+
+      if (doorObsIdx !== -1) {
+        // 检查该门是否被 lintMap 之前判定为 blocked
+        const isBlocked = errors.concat(warnings).some(issue => 
+          issue.type === 'door_blocked' && issue.details?.doorIndex === doorObsIdx
+        );
+        if (!isBlocked) {
+          accessibleDoorCount++;
+        }
+      }
+    }
+
+    if (accessibleDoorCount === 0 && room.doors.length > 0) {
+      errors.push({
+        type: 'roomgroup_sealed',
+        severity: 'error',
+        message: `房间 ${room.id} 的所有门均被堵塞或无有效入口`,
+        entities: [room.id],
+        location: { x: room.x, y: room.y, w: room.w, h: room.h },
+      });
     }
   }
   
@@ -1342,8 +1405,21 @@ function generateWallSegmentWithDoor(
   w: number,
   h: number,
   hasDoor: boolean,
-  doorWidth: number
+  doorWidth: number,
+  existingObstacles: any[] = [] // 新增：用于检测是否堵住了已有的门
 ): void {
+  // 检测这段墙是否会堵住已有的门
+  const wallRect = { x, y, w, h };
+  for (const obs of existingObstacles) {
+    if (obs.type === 'door_closed' || obs.type === 'door_open') {
+      const overlap = getOverlapArea(wallRect, obs);
+      if (overlap && overlap.w * overlap.h > 100) {
+        // 如果这扇门不是正在生成的门，且被堵住了，记录警告或跳过（这里暂时跳过墙体生成，保留门口）
+        if (!hasDoor) return; 
+      }
+    }
+  }
+
   if (!hasDoor) {
     // 无门，整段墙
     obstacles.push({
@@ -1400,16 +1476,17 @@ function generateWallWithDoor(
   side: 'north' | 'south' | 'east' | 'west',
   hasDoor: boolean,
   wallThickness: number,
-  doorWidth: number
+  doorWidth: number,
+  existingObstacles: any[] = []
 ): void {
   if (side === 'north') {
-    generateWallSegmentWithDoor(obstacles, rect.x, rect.y, rect.w, wallThickness, hasDoor, doorWidth);
+    generateWallSegmentWithDoor(obstacles, rect.x, rect.y, rect.w, wallThickness, hasDoor, doorWidth, existingObstacles);
   } else if (side === 'south') {
-    generateWallSegmentWithDoor(obstacles, rect.x, rect.y + rect.h - wallThickness, rect.w, wallThickness, hasDoor, doorWidth);
+    generateWallSegmentWithDoor(obstacles, rect.x, rect.y + rect.h - wallThickness, rect.w, wallThickness, hasDoor, doorWidth, existingObstacles);
   } else if (side === 'west') {
-    generateWallSegmentWithDoor(obstacles, rect.x, rect.y, wallThickness, rect.h, hasDoor, doorWidth);
+    generateWallSegmentWithDoor(obstacles, rect.x, rect.y, wallThickness, rect.h, hasDoor, doorWidth, existingObstacles);
   } else if (side === 'east') {
-    generateWallSegmentWithDoor(obstacles, rect.x + rect.w - wallThickness, rect.y, wallThickness, rect.h, hasDoor, doorWidth);
+    generateWallSegmentWithDoor(obstacles, rect.x + rect.w - wallThickness, rect.y, wallThickness, rect.h, hasDoor, doorWidth, existingObstacles);
   }
 }
 
@@ -1457,7 +1534,7 @@ function generateSharedWalls(
 /**
  * 根据 RoomGroup 定义生成所有墙体和门
  */
-function generateRoomGroupWalls(group: RoomGroup): any[] {
+function generateRoomGroupWalls(group: RoomGroup, existingObstacles: any[] = []): any[] {
   const obstacles: any[] = [];
   const { wallThickness, doorWidth, rooms, layout } = group;
   
@@ -1466,7 +1543,7 @@ function generateRoomGroupWalls(group: RoomGroup): any[] {
   
   // 走廊布局需要特殊处理
   if (layout === 'corridor') {
-    return generateCorridorWalls(group, roomRects);
+    return generateCorridorWalls(group, roomRects, existingObstacles);
   }
   
   // 生成所有房间的外墙
@@ -1480,16 +1557,16 @@ function generateRoomGroupWalls(group: RoomGroup): any[] {
     
     // 生成外墙
     if (walls.north) {
-      generateWallWithDoor(obstacles, rect, 'north', doors.includes('n'), wallThickness, doorWidth);
+      generateWallWithDoor(obstacles, rect, 'north', doors.includes('n'), wallThickness, doorWidth, existingObstacles);
     }
     if (walls.south) {
-      generateWallWithDoor(obstacles, rect, 'south', doors.includes('s'), wallThickness, doorWidth);
+      generateWallWithDoor(obstacles, rect, 'south', doors.includes('s'), wallThickness, doorWidth, existingObstacles);
     }
     if (walls.west) {
-      generateWallWithDoor(obstacles, rect, 'west', doors.includes('w'), wallThickness, doorWidth);
+      generateWallWithDoor(obstacles, rect, 'west', doors.includes('w'), wallThickness, doorWidth, existingObstacles);
     }
     if (walls.east) {
-      generateWallWithDoor(obstacles, rect, 'east', doors.includes('e'), wallThickness, doorWidth);
+      generateWallWithDoor(obstacles, rect, 'east', doors.includes('e'), wallThickness, doorWidth, existingObstacles);
     }
   }
   
@@ -1505,7 +1582,8 @@ function generateRoomGroupWalls(group: RoomGroup): any[] {
  */
 function generateCorridorWalls(
   group: RoomGroup,
-  roomRects: Array<{ x: number; y: number; w: number; h: number }>
+  roomRects: Array<{ x: number; y: number; w: number; h: number }>,
+  existingObstacles: any[] = []
 ): any[] {
   const obstacles: any[] = [];
   const { wallThickness, doorWidth, rooms } = group;
@@ -1609,32 +1687,32 @@ function generateCorridorWalls(
     // 生成房间的外墙
     // 北墙
     if (isNorthSide) {
-      generateWallWithDoor(obstacles, rect, 'north', doors.includes('n'), wallThickness, doorWidth);
+      generateWallWithDoor(obstacles, rect, 'north', doors.includes('n'), wallThickness, doorWidth, existingObstacles);
     } else {
       // 南侧房间的北墙面向走廊，需要门
-      generateWallWithDoor(obstacles, rect, 'north', true, wallThickness, doorWidth);
+      generateWallWithDoor(obstacles, rect, 'north', true, wallThickness, doorWidth, existingObstacles);
     }
     
     // 南墙
     if (!isNorthSide) {
-      generateWallWithDoor(obstacles, rect, 'south', doors.includes('s'), wallThickness, doorWidth);
+      generateWallWithDoor(obstacles, rect, 'south', doors.includes('s'), wallThickness, doorWidth, existingObstacles);
     } else {
       // 北侧房间的南墙面向走廊，需要门
-      generateWallWithDoor(obstacles, rect, 'south', true, wallThickness, doorWidth);
+      generateWallWithDoor(obstacles, rect, 'south', true, wallThickness, doorWidth, existingObstacles);
     }
     
     // 西墙（如果是第一个房间或与前一个房间不相邻）
     const prevRect = i > 0 ? roomRects[i - 1] : null;
     const shareWestWall = prevRect && Math.abs(rect.x - (prevRect.x + prevRect.w)) < 1 && rect.y === prevRect.y;
     if (!shareWestWall) {
-      generateWallWithDoor(obstacles, rect, 'west', doors.includes('w'), wallThickness, doorWidth);
+      generateWallWithDoor(obstacles, rect, 'west', doors.includes('w'), wallThickness, doorWidth, existingObstacles);
     }
     
     // 东墙（如果是最后一个房间或与下一个房间不相邻）
     const nextRect = i < roomRects.length - 1 ? roomRects[i + 1] : null;
     const shareEastWall = nextRect && Math.abs((rect.x + rect.w) - nextRect.x) < 1 && rect.y === nextRect.y;
     if (!shareEastWall) {
-      generateWallWithDoor(obstacles, rect, 'east', doors.includes('e'), wallThickness, doorWidth);
+      generateWallWithDoor(obstacles, rect, 'east', doors.includes('e'), wallThickness, doorWidth, existingObstacles);
     }
   }
   
@@ -2063,7 +2141,7 @@ export function parseMapTemplateText(text: string): MapTemplate {
       // 新增: 解析房间组（高级语法）
       const result = parseRoomGroup(tokens, lines, i, lineNumber, layoutCtx);
       const startObstacleIndex = template.obstacles.length; // 记录起始索引
-      const obstacles = generateRoomGroupWalls(result.roomGroup);
+      const obstacles = generateRoomGroupWalls(result.roomGroup, template.obstacles);
       template.obstacles.push(...obstacles);
       // 跟踪房间组用于后续验证
       roomGroups.push({ group: result.roomGroup, startObstacleIndex });
