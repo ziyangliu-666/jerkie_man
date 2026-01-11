@@ -365,6 +365,7 @@ ws.on('message', (data: Buffer) => {
               obstacles: room.getObstacles(),
               items: room.getItems(), // 保留兼容
               worldItems: room.getWorldItems(), // 新增: 世界物品列表
+              lootBags: room.getLootBags(), // 新增: 掉落包列表
               rooms: room.getRooms(), // 新增: 房间列表（用于地板渲染）
             })
           )
@@ -1969,6 +1970,12 @@ setInterval(() => {
   // 新增: 更新燃烧区域（清理过期 + 造成伤害）
   room.updateFires(0.05);
 
+  // 新增: 更新障碍物状态（清理被破坏的障碍物）
+  room.updateObstacles();
+
+  // 新增: 更新诱饵状态
+  room.updateDecoys(0.05);
+
   // 新增: 处理战斗事件（干火/命中/受伤反馈）
   const combatEvents = room.drainCombatEvents();
   for (const [playerId, events] of combatEvents.entries()) {
@@ -2094,6 +2101,19 @@ setInterval(() => {
            ws.send(JSON.stringify(message));
          }
        }
+    }
+  }
+
+  // Broadcast World Events (Event-Driven Updates)
+  const worldEvents = room.drainWorldEvents();
+  if (worldEvents.length > 0) {
+    for (const event of worldEvents) {
+      const msgString = JSON.stringify(event);
+      for (const ws of connections.keys()) {
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.send(msgString);
+        }
+      }
     }
   }
 

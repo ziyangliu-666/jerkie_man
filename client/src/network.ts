@@ -30,6 +30,9 @@ import {
   type S2C_SMOKE, // 新增: 烟雾事件类型
   type S2C_FIRE, // 新增: 燃烧事件类型
   type S2C_KILL_FEED, // 新增: 击杀播报类型
+  type S2C_OBSTACLE_UPDATE,
+  type S2C_WORLD_ITEM_UPDATE,
+  type S2C_LOOT_BAG_UPDATE,
   type MAP_CONFIG, // P0-1 修复: 使用 shared 的 MAP_CONFIG 类型，避免类型漂移
   type OBSTACLE_STATE, // 修复: 静态世界初始化
   type ITEM_STATE, // 修复: 静态世界初始化
@@ -88,6 +91,9 @@ export interface NetworkCallbacks {
   onSmoke?: (event: S2C_SMOKE) => void; // 新增: 烟雾事件回调
   onFire?: (event: S2C_FIRE) => void; // 新增: 燃烧事件回调
   onKillFeed?: (feed: S2C_KILL_FEED) => void; // 新增: 击杀播报回调
+  onObstacleUpdate?: (event: S2C_OBSTACLE_UPDATE) => void;
+  onWorldItemUpdate?: (event: S2C_WORLD_ITEM_UPDATE) => void;
+  onLootBagUpdate?: (event: S2C_LOOT_BAG_UPDATE) => void;
 }
 
 export class Network {
@@ -188,6 +194,8 @@ export class Network {
           const message = S2C_MESSAGE_SCHEMA.parse(raw) as S2C_MESSAGE;
 
           // 统一通过schema解析，未知类型会被zod拒绝
+          // if (message.type !== 'S2C_SNAPSHOT') console.log('[Network] Received:', message.type);
+
           if (message.type === 'S2C_WELCOME') {
             if (this.callbacks.onWelcome) {
               // Day4-1: 传递 roomInfo（seed + mapConfig）
@@ -197,6 +205,10 @@ export class Network {
               });
             }
           } else if (message.type === 'S2C_SNAPSHOT') {
+            if (message.tick % 100 === 0) {
+               const size = JSON.stringify(message).length;
+               console.log(`[Network] Snapshot size (tick ${message.tick}): ${size} bytes`);
+            }
             this.lastServerTick = message.tick;
             this.snapshotBuffer.add(message);
             if (this.callbacks.onSnapshot) {
@@ -271,6 +283,20 @@ export class Network {
             if (this.callbacks.onKillFeed) {
               this.callbacks.onKillFeed(message);
             }
+          } else if (message.type === 'S2C_OBSTACLE_UPDATE') {
+            console.log('[Network] Dispatching S2C_OBSTACLE_UPDATE', message);
+            if (this.callbacks.onObstacleUpdate) {
+              this.callbacks.onObstacleUpdate(message);
+            }
+          } else if (message.type === 'S2C_WORLD_ITEM_UPDATE') {
+            console.log('[Network] Dispatching S2C_WORLD_ITEM_UPDATE', message);
+            if (this.callbacks.onWorldItemUpdate) {
+              this.callbacks.onWorldItemUpdate(message);
+            }
+          } else if (message.type === 'S2C_LOOT_BAG_UPDATE') {
+            if (this.callbacks.onLootBagUpdate) {
+              this.callbacks.onLootBagUpdate(message);
+            }
           } else if (message.type === 'S2C_ERROR') {
             console.error('Server error:', message.message);
             if (this.callbacks.onError) {
@@ -278,7 +304,9 @@ export class Network {
             }
           }
         } catch (error) {
-          // 解析失败：静默忽略（策略：只在debug模式下或节流打印）
+          // 解析失败：打印完整错误信息
+          console.error('[Network] Failed to parse message:', error, event.data);
+          
           if (this.isDebug) {
             console.warn('Failed to parse message (ignored):', error);
           } else {

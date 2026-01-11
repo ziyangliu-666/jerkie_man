@@ -590,6 +590,8 @@ let cachedObstacles: OBSTACLE_STATE[] = [];
 let cachedItems: ITEM_STATE[] = [];
 // 新增: 缓存世界物品（从 WORLD_INIT 接收）
 let cachedWorldItems: WorldItem[] = [];
+// 新增: 缓存掉落包（从 WORLD_INIT 接收 + 增量更新）
+let cachedLootBags: LootBag[] = [];
 // 新增: 缓存房间列表（从 WORLD_INIT 接收，用于地板渲染）
 let cachedRooms: any[] = [];
 // P1-1 新增: 玩家 Profile（从 S2C_PROFILE 接收）
@@ -3930,6 +3932,9 @@ network = new Network(getWebSocketUrl(), 'local', {
     cachedObstacles = world.obstacles;
     cachedItems = world.items ?? []; // 修复: 处理可选字段
     cachedWorldItems = world.worldItems ?? []; // 新增: 缓存世界物品
+    // FIXME: WORLD_INIT 协议暂无 lootBags，暂时初始化为空，后续通过 UPDATE 补充，或协议需升级
+    cachedLootBags = []; 
+    // cachedLootBags = world.lootBags ?? []; 
     cachedRooms = world.rooms ?? []; // 新增: 缓存房间列表
     serverMapConfig = world.mapConfig;
     serverSeed = world.seed;
@@ -3939,7 +3944,7 @@ network = new Network(getWebSocketUrl(), 'local', {
     
     // 设置子弹轨迹管理器的地图尺寸和障碍物（用于本地碰撞检测）
     bulletTracks.setMapSize(world.mapConfig.width, world.mapConfig.height);
-    bulletTracks.setObstacles(world.obstacles);
+    bulletTracks.setObstacles(cachedObstacles);
     
     // 新增: 设置渲染器的房间列表（用于地板渲染）
     renderer.setRooms(cachedRooms);
@@ -3947,7 +3952,7 @@ network = new Network(getWebSocketUrl(), 'local', {
     const itemsCount = world.items?.length ?? 0;
     const worldItemsCount = world.worldItems?.length ?? 0;
     const roomsCount = world.rooms?.length ?? 0;
-    console.log(`Received world init: seed=${world.seed}, obstacles=${world.obstacles.length}, items=${itemsCount}, worldItems=${worldItemsCount}, rooms=${roomsCount}`);
+    console.log(`Received world init: seed=${world.seed}, obstacles=${world.obstacles.length} (first ID: ${world.obstacles[0]?.id}), items=${itemsCount}, worldItems=${worldItemsCount}, rooms=${roomsCount}`);
     hud.addEvent(`世界已初始化：${world.obstacles.length} 个障碍物，${itemsCount} 个物品，${worldItemsCount} 个世界物品，${roomsCount} 个房间`);
   },
   // P1-1 新增: 接收 Profile 消息并更新 HUD
@@ -4086,6 +4091,55 @@ network = new Network(getWebSocketUrl(), 'local', {
       durationMs: event.durationMs,
     });
   },
+  onObstacleUpdate: (event) => {
+    console.log('[ObstacleUpdate] Handler called with:', event);
+    // 处理障碍物状态更新 (HP, visual state, removal)
+    if (event.removed) {
+        cachedObstacles = cachedObstacles.filter(o => o.id !== event.id);
+        console.log(`[ObstacleUpdate] Removed obstacle ${event.id}`);
+        return;
+    }
+
+    const target = cachedObstacles.find(o => o.id === event.id);
+    if (target) {
+      if (event.hp !== undefined) target.hp = event.hp;
+      if (event.maxHp !== undefined) target.maxHp = event.maxHp;
+      if (event.obstacleType !== undefined) target.type = event.obstacleType;
+      if (event.data !== undefined) target.data = event.data;
+    } else {
+      // console.warn(`[ObstacleUpdate] Target obstacle not found: ${event.id}`);
+    }
+  },
+  onWorldItemUpdate: (event) => {
+    console.log('[WorldItemUpdate] Handler called with:', event);
+    // console.log('[WorldItemUpdate] Event:', event);
+    if (event.action === 'ADD' && event.item) {
+      // 避免重复添加
+      if (!cachedWorldItems.find(i => i.wid === event.item!.wid)) {
+        cachedWorldItems.push(event.item);
+        // console.log(`[WorldItemUpdate] Added item ${event.item.wid}, total: ${cachedWorldItems.length}`);
+      }
+    } else if (event.action === 'REMOVE' && event.wid) {
+      const before = cachedWorldItems.length;
+      cachedWorldItems = cachedWorldItems.filter(i => i.wid !== event.wid);
+      console.log(`[WorldItemUpdate] Removed item ${event.wid}, before: ${before}, after: ${cachedWorldItems.length}`);
+      if (before === cachedWorldItems.length) {
+         console.warn(`[WorldItemUpdate] Failed to remove item ${event.wid}, not found in cache. IDs: ${cachedWorldItems.map(i => i.wid).join(',')}`);
+      }
+    }
+  },
+  onLootBagUpdate: (event) => {
+    if (event.action === 'ADD' && event.bag) {
+      const existingIdx = cachedLootBags.findIndex(b => b.bid === event.bag!.bid);
+      if (existingIdx !== -1) {
+        cachedLootBags[existingIdx] = event.bag;
+      } else {
+        cachedLootBags.push(event.bag);
+      }
+    } else if (event.action === 'REMOVE' && event.bid) {
+      cachedLootBags = cachedLootBags.filter(b => b.bid !== event.bid);
+    }
+  },
 }, isDebug);
 
 // Step3: 右键选中实体（避免与左键开火冲突）
@@ -4223,15 +4277,18 @@ function renderLoop(): void {
         const extractZone = mapConfig.extractZone;
         
         // 修复: 使用 snapshot 中的障碍物（可破坏，需要实时同步）
-        // 如果 snapshot 中没有 obstacles，则使用缓存的（向后兼容）
-        const obstaclesForRender = state.obstacles ?? cachedObstacles;
-
-        // 同步最新障碍物到缓存与子弹轨迹管理器：
-        // - cachedObstacles：用于本地移动预测的 simulatePlayerMove
-        // - bulletTracks：用于本地子弹 vs 障碍物碰撞（避免“看不见的旧木箱”）
+        // 修复: 使用缓存的障碍物（Event-Driven）
+        // Snapshot 不再发送全量障碍物，仅依赖 cachedObstacles + S2C_OBSTACLE_UPDATE
+        // 为了兼容旧协议（如果 snapshot 偶尔发了），可以合并
+        let obstaclesForRender = cachedObstacles;
         if (state.obstacles && state.obstacles.length > 0) {
-          cachedObstacles = state.obstacles;
-          bulletTracks.setObstacles(state.obstacles);
+           // 如果 snapshot 包含障碍物，视为权威数据更新缓存
+           cachedObstacles = state.obstacles;
+           bulletTracks.setObstacles(state.obstacles);
+           obstaclesForRender = state.obstacles;
+        } else {
+           // 确保子弹轨迹管理器使用缓存的障碍物
+           bulletTracks.setObstacles(cachedObstacles);
         }
         
         // 调试：检查障碍物数量
@@ -4343,8 +4400,9 @@ function renderLoop(): void {
           nearbyInteractableForRender = findNearestInteractable(
             renderLocalPlayerForTooltip.x,
             renderLocalPlayerForTooltip.y,
-            state.worldItems,
-            state.lootBags,
+            // 修复: 使用 cachedWorldItems 和 cachedLootBags
+            cachedWorldItems,
+            cachedLootBags,
             mapConfig.extractZone
           );
         }
@@ -4361,8 +4419,8 @@ function renderLoop(): void {
           state.items,
           extractZone,
           obstaclesForRender,
-          state.worldItems, // 新增: 世界物品
-          state.lootBags, // 新增: 掉落包
+          cachedWorldItems, // 新增: 世界物品 (Event-Driven cache)
+          cachedLootBags, // 新增: 掉落包 (Event-Driven cache)
           meleeSwingsToRender,
           bulletTracks.getHitEffects(), // 命中特效
           explosionsToRender,
@@ -5045,8 +5103,8 @@ function renderLoop(): void {
         nearbyInteractable = findNearestInteractable(
           localPlayer.x,
           localPlayer.y,
-          state.worldItems,
-          state.lootBags,
+          cachedWorldItems,
+          cachedLootBags,
           mapConfig.extractZone
         );
       }
@@ -5073,8 +5131,8 @@ function renderLoop(): void {
       players: state.players,
       counts: {
         bullets: currentPhase === 'RAID' ? bulletTracks.getBulletsForRender().length : 0, // 修复: 只在 RAID 阶段计算子弹数
-        worldItems: state.worldItems.length, // P2-1: 改用 worldItems
-        lootBags: state.lootBags.length, // P2-1: 新增掉落包计数
+        worldItems: cachedWorldItems.length, // P2-1: 改用 cachedWorldItems
+        lootBags: cachedLootBags.length, // P2-1: 使用 cachedLootBags
       },
       selectedEntity: selectedEntity,
       events: [], // events由HUD内部管理

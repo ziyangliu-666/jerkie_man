@@ -1,7 +1,7 @@
 
 import { Player } from './player.js';
 import { ProfileManager } from './profile.js';
-import type { PLAYER_STATE, BULLET_STATE, ITEM_STATE, C2S_INPUT, MAP_CONFIG, OBSTACLE_STATE, WorldItem, LootBag, ItemInstance, WeaponRuntime, WeaponDef, MapTemplate, SpawnPoint, AI_STATE, AISpawn, DECOY_STATE, TURRET_STATE } from '@jerkie-man/shared';
+import type { PLAYER_STATE, BULLET_STATE, ITEM_STATE, C2S_INPUT, MAP_CONFIG, OBSTACLE_STATE, WorldItem, LootBag, ItemInstance, WeaponRuntime, WeaponDef, MapTemplate, SpawnPoint, AI_STATE, AISpawn, DECOY_STATE, TURRET_STATE, S2C_MESSAGE } from '@jerkie-man/shared';
 import { loadMapConfig, loadItemTypes, circleVsAABB, createRng, rectIntersects, segmentIntersectsCircle, segmentPointDistanceSquared, getItemType, getAllItemTypes, getItemTypesByRarity, getWeaponDef, getArmorDef, getBagDef, applySpread, msToTicks, getFireSchedule, shouldStartBurst, canFireTick, advanceFireCooldown, PLAYER_HIT_RADIUS, getBulletPenetration, isObstacleDestructible, isUsableItem, doesObstacleBlockPlayer, AI_ROLE_PRESETS, ticksToMs, ItemType, EXTRACT_DURATION_MS, CLIENT_INTERPOLATION_DELAY_MS } from '@jerkie-man/shared';
 import { log } from './logger.js';
 import { AI, type PatrolConfig, type GuardConfig } from './ai.js';
@@ -60,6 +60,7 @@ export class Room {
   private newSmokes: Array<{ id: string; x: number; y: number; radius: number; durationMs: number }> = []; // 新生成的烟雾（用于广播）
   private fires: Array<{ id: string; x: number; y: number; radius: number; durationMs: number; createdAt: number; ownerId?: string; damagePerSecond: number }> = [];
   private newFires: Array<{ id: string; x: number; y: number; radius: number; durationMs: number }> = []; // 新生成的燃烧区域（用于广播）
+  private worldEvents: S2C_MESSAGE[] = []; // Event-driven updates queue
 
   // Decoys
   public decoys: Decoy[] = [];
@@ -121,7 +122,7 @@ export class Room {
     if (mapTemplate) {
       this.obstacles = mapTemplate.obstacles.map((obs, idx) => ({ 
         ...obs,
-        id: obs.id || `obs_${idx}` // 防御性逻辑：确保从模板加载的障碍物也有唯一ID
+        id: obs.id && obs.id.length > 0 ? obs.id : `obs_${idx}`
       }));
     } else {
       this.generateObstacles();
@@ -465,6 +466,13 @@ export class Room {
       y: y!,
     });
 
+    this.worldEvents.push({
+      type: 'S2C_WORLD_ITEM_UPDATE',
+      action: 'ADD',
+      item: this.worldItems.get(wid),
+      wid: wid,
+    });
+
     // 调试日志：记录每次刷新的位置与规则
     log('WORLD_ITEM_SPAWNED', {
       room: this.id,
@@ -760,6 +768,13 @@ export class Room {
       qty: item.qty,
       x: player.x,
       y: player.y,
+    });
+    
+    this.worldEvents.push({
+      type: 'S2C_WORLD_ITEM_UPDATE',
+      action: 'ADD',
+      item: this.worldItems.get(wid),
+      wid: wid,
     });
   }
 
@@ -1612,6 +1627,13 @@ export class Room {
       x: player.x,
       y: player.y,
     });
+    
+    this.worldEvents.push({
+      type: 'S2C_WORLD_ITEM_UPDATE',
+      action: 'ADD',
+      item: this.worldItems.get(wid),
+      wid: wid,
+    });
 
     let itemName = item.typeId;
     try {
@@ -2199,10 +2221,8 @@ export class Room {
                 
                 // 命中逻辑继续...
                   // 命中障碍物！造成伤害
-                  const obstacleHp = (obstacle as any).hp ?? Infinity;
                   const damage = weaponDef.damage;
-                  const newHp = Math.max(0, obstacleHp - damage);
-                  (obstacle as any).hp = newHp;
+                  this.damageObstacle(obstacle, damage);
                   
                   log('MELEE_OBSTACLE_DAMAGE', {
                     room: this.id,
@@ -2210,9 +2230,9 @@ export class Room {
                     obstacleId: (obstacle as any).id ?? 'unknown',
                     obstacleType: obsType,
                     damage,
-                    oldHp: obstacleHp,
-                    newHp,
-                    destroyed: newHp <= 0 ? 'true' : 'false',
+                    oldHp: ((obstacle as any).hp ?? Infinity) + damage,
+                    newHp: (obstacle as any).hp,
+                    destroyed: ((obstacle as any).hp ?? Infinity) <= 0 ? 'true' : 'false',
                     tick: this.tick,
                   });
                   
@@ -2483,20 +2503,17 @@ export class Room {
       const scaledDamage = Math.floor(damage * (1 - dist / radius));
       if (scaledDamage <= 0) continue;
 
-      const obstacleHp = (obstacle as any).hp ?? Infinity;
-      const obstacleMaxHp = (obstacle as any).maxHp ?? Infinity;
-      const newHp = Math.max(0, obstacleHp - scaledDamage);
-      (obstacle as any).hp = newHp;
+      this.damageObstacle(obstacle, scaledDamage);
 
       log('EXPLOSION_OBSTACLE_DAMAGE', {
         room: this.id,
         obstacleId: (obstacle as any).id ?? 'unknown',
         obstacleType: obsType,
-        scaledDamage,
-        oldHp: obstacleHp,
-        newHp,
-        maxHp: obstacleMaxHp,
-        destroyed: newHp <= 0 ? 'true' : 'false',
+        damage: scaledDamage,
+        oldHp: ((obstacle as any).hp ?? Infinity) + scaledDamage,
+        newHp: (obstacle as any).hp,
+        maxHp: (obstacle as any).maxHp ?? Infinity,
+        destroyed: ((obstacle as any).hp ?? Infinity) <= 0 ? 'true' : 'false',
         distance: Math.round(dist),
         tick: this.tick,
       });
@@ -3212,21 +3229,18 @@ export class Room {
 
               // 检查是否可破坏，如果是则造成伤害
               if (isObstacleDestructible(obsType)) {
-                const obstacleHp = (obstacle as any).hp ?? Infinity;
-                const obstacleMaxHp = (obstacle as any).maxHp ?? Infinity;
                 const damage = bullet.damage;
-                const newHp = Math.max(0, obstacleHp - damage);
-                (obstacle as any).hp = newHp;
+                this.damageObstacle(obstacle, damage);
 
                 log('OBSTACLE_DAMAGE', {
                   room: this.id,
                   obstacleId: (obstacle as any).id ?? 'unknown',
                   obstacleType: obsType,
                   damage,
-                  oldHp: obstacleHp,
-                  newHp,
-                  maxHp: obstacleMaxHp,
-                  destroyed: newHp <= 0 ? 'true' : 'false',
+                  oldHp: ((obstacle as any).hp ?? Infinity) + damage,
+                  newHp: (obstacle as any).hp,
+                  maxHp: (obstacle as any).maxHp ?? Infinity,
+                  destroyed: ((obstacle as any).hp ?? Infinity) <= 0 ? 'true' : 'false',
                   tick: this.tick,
                 });
 
@@ -3576,49 +3590,52 @@ export class Room {
     // Step4: 移除所有标记的子弹（用Set.has，O(1)查找）
     this.bullets = this.bullets.filter(b => !bulletsToRemove.has(b.id));
 
+    // 移除旧的障碍物清除逻辑，现在由 public updateObstacles() 统一处理
+    // 这个旧逻辑没有发送 removed 事件，导致客户端障碍物无法消除
+    
     // 清理被摧毁的障碍物（HP <= 0）
-    const beforeCount = this.obstacles.length;
-    this.obstacles = this.obstacles.filter((obs: any) => {
-      const obsType = obs.type || 'wall';
-      if (!isObstacleDestructible(obsType)) return true; // 不可破坏的永久保留
-      const isDestroyed = (obs.hp ?? Infinity) <= 0;
-      if (isDestroyed) {
-        // 宝箱和所有类型的箱子/资源点被破坏时生成掉落物
-        const crateTypes = [
-          'chest_closed', 'crate', 'weapon_crate', 'throwable_crate', 'medical_crate', 'equipment_crate',
-          'vehicle', 'supply_stack'
-        ];
-        if (crateTypes.includes(obsType)) {
-          this.spawnLootFromChest(obs);
-          log('CHEST_DESTROYED_WITH_LOOT', {
-            room: this.id,
-            obstacleId: obs.id ?? 'unknown',
-            obstacleType: obsType,
-            x: obs.x,
-            y: obs.y,
-            tick: this.tick,
-          });
-        }
+    // const beforeCount = this.obstacles.length;
+    // this.obstacles = this.obstacles.filter((obs: any) => {
+    //   const obsType = obs.type || 'wall';
+    //   if (!isObstacleDestructible(obsType)) return true; // 不可破坏的永久保留
+    //   const isDestroyed = (obs.hp ?? Infinity) <= 0;
+    //   if (isDestroyed) {
+    //     // 宝箱和所有类型的箱子/资源点被破坏时生成掉落物
+    //     const crateTypes = [
+    //       'chest_closed', 'crate', 'weapon_crate', 'throwable_crate', 'medical_crate', 'equipment_crate',
+    //       'vehicle', 'supply_stack'
+    //     ];
+    //     if (crateTypes.includes(obsType)) {
+    //       this.spawnLootFromChest(obs);
+    //       log('CHEST_DESTROYED_WITH_LOOT', {
+    //         room: this.id,
+    //         obstacleId: obs.id ?? 'unknown',
+    //         obstacleType: obsType,
+    //         x: obs.x,
+    //         y: obs.y,
+    //         tick: this.tick,
+    //       });
+    //     }
         
-        log('OBSTACLE_DESTROYED', {
-          room: this.id,
-          obstacleId: obs.id ?? 'unknown',
-          obstacleType: obsType,
-          tick: this.tick,
-        });
-      }
-      return !isDestroyed; // 可破坏的检查HP
-    });
-    const destroyedCount = beforeCount - this.obstacles.length;
+    //     log('OBSTACLE_DESTROYED', {
+    //       room: this.id,
+    //       obstacleId: obs.id ?? 'unknown',
+    //       obstacleType: obsType,
+    //       tick: this.tick,
+    //     });
+    //   }
+    //   return !isDestroyed; // 可破坏的检查HP
+    // });
+    // const destroyedCount = beforeCount - this.obstacles.length;
 
-    if (destroyedCount > 0) {
-      log('OBSTACLES_DESTROYED', {
-        room: this.id,
-        count: destroyedCount,
-        remaining: this.obstacles.length,
-        tick: this.tick,
-      });
-    }
+    // if (destroyedCount > 0) {
+    //   log('OBSTACLES_DESTROYED', {
+    //     room: this.id,
+    //     count: destroyedCount,
+    //     remaining: this.obstacles.length,
+    //     tick: this.tick,
+    //   });
+    // }
   }
 
   // New: Update decoys (movement, lifetime)
@@ -4103,6 +4120,13 @@ export class Room {
       y: ai.y,
       items: [weaponItem],
     });
+    
+    this.worldEvents.push({
+      type: 'S2C_LOOT_BAG_UPDATE',
+      action: 'ADD',
+      bag: this.lootBags.get(bid),
+      bid: bid,
+    });
 
     log('AI_DEATH', { 
       room: this.id, 
@@ -4178,9 +4202,9 @@ export class Room {
       // Step4: 映射内部Bullet类型到BULLET_STATE（去掉spawnAt和damage字段，保留clientShotId和weaponTypeId）
       bullets: snapshotBullets,
       items: [], // P2-1: 旧 items 系统已停用，返回空数组
-      worldItems: this.getWorldItems(), // 新增: 世界物品
-      lootBags: this.getLootBags(), // 新增: 掉落包
-      obstacles: this.getObstacles(), // 新增: 障碍物（可破坏，需要同步）
+      worldItems: [], // MVP Optimization: Return empty, use event stream
+      lootBags: [],   // MVP Optimization: Return empty, use event stream
+      obstacles: [],  // MVP Optimization: Return empty, use event stream
       ais: aiStates, // 新增: AI实体
       turrets: Array.from(this.turrets.values()).map(t => {
         const state = t.toState();
@@ -4223,6 +4247,12 @@ export class Room {
           };
         }),
     };
+  }
+
+  public drainWorldEvents(): S2C_MESSAGE[] {
+    const events = [...this.worldEvents];
+    this.worldEvents = [];
+    return events;
   }
 
   /**
@@ -4357,13 +4387,37 @@ export class Room {
         if (type === 'door_closed') {
              bestObs.type = 'door_open';
              this.pushEvent(`Player ${player.name || playerId} opened a door`);
+
+             this.worldEvents.push({
+               type: 'S2C_OBSTACLE_UPDATE',
+               id: bestObs.id,
+               hp: bestObs.hp,
+               obstacleType: 'door_open',
+               data: bestObs.data,
+             });
         } else if (type === 'door_open') {
              bestObs.type = 'door_closed';
              this.pushEvent(`Player ${player.name || playerId} closed a door`);
+             
+             this.worldEvents.push({
+               type: 'S2C_OBSTACLE_UPDATE',
+               id: bestObs.id,
+               hp: bestObs.hp,
+               obstacleType: 'door_closed',
+               data: bestObs.data,
+             });
         } else if (type === 'chest_closed') {
              bestObs.type = 'chest_open';
              this.spawnLootFromChest(bestObs);
              this.pushEvent(`Player ${player.name || playerId} opened a chest`);
+
+             this.worldEvents.push({
+               type: 'S2C_OBSTACLE_UPDATE',
+               id: bestObs.id,
+               hp: bestObs.hp,
+               obstacleType: 'chest_open',
+               data: bestObs.data,
+             });
         }
     }
   }
@@ -4421,6 +4475,13 @@ export class Room {
         y: lootY + offsetY,
         typeId: loot.typeId,
         qty: loot.qty,
+      });
+
+      this.worldEvents.push({
+        type: 'S2C_WORLD_ITEM_UPDATE',
+        action: 'ADD',
+        item: this.worldItems.get(wid),
+        wid: wid,
       });
     }
   }
@@ -4690,8 +4751,32 @@ export class Room {
     return result;
   }
 
+  /**
+   * 造成障碍物伤害并同步事件
+   */
+  private damageObstacle(obstacle: any, damage: number): void {
+    const obstacleHp = obstacle.hp ?? Infinity;
+    const newHp = Math.max(0, obstacleHp - damage);
+    
+    // Only update if changed
+    if (newHp !== obstacleHp) {
+        obstacle.hp = newHp;
+        
+        // Push update event for partial damage
+        // (Destruction transition to 'broken' is handled in updateObstacles loop)
+        // We send event here to ensure HP bar updates on client
+        if (newHp > 0) {
+             this.worldEvents.push({
+                 type: 'S2C_OBSTACLE_UPDATE',
+                 id: obstacle.id,
+                 hp: newHp
+             });
+        }
+    }
+  }
+
   // 新增: 更新障碍物状态（破坏逻辑）
-  private updateObstacles(): void {
+  public updateObstacles(): void {
     // 遍历所有障碍物，处理HP<=0的情况
     // 使用 for loop 以便原地修改或替换
     for (const obs of this.obstacles) {
@@ -4699,42 +4784,35 @@ export class Room {
        if (hp !== undefined && hp <= 0) {
            const type = (obs as any).type;
            
-           // 如果是还没“坏掉”的状态
-           if (type !== 'broken') {
-               // 宝箱被破坏也会掉落（如果还没开）
-               if (type === 'chest_closed') {
-                   this.spawnLootFromChest(obs);
-                   (obs as any).type = 'broken';
-                   (obs as any).hp = Infinity; // 残骸不可破坏
-               } else if (type === 'door_closed' || type === 'door_open' || type === 'glass') {
-                   // 门和玻璃变为残骸
-                   (obs as any).type = 'broken';
-                   (obs as any).hp = Infinity;
-                   // 木箱被破坏，应当掉落物品
-                   this.spawnLootFromChest(obs);
-                   log('CRATE_DESTROYED_WITH_LOOT', {
-                     room: this.id,
-                     obsId: (obs as any).id,
-                     x: obs.x,
-                     y: obs.y,
-                     tick: this.tick
-                   });
-                   // 之后会在 filter 中被移除
-               }
+           // 修复: 检查所有可掉落容器，并在移除前生成掉落物
+           const crateTypes = [
+              'chest_closed', 'crate', 'weapon_crate', 'throwable_crate', 'medical_crate', 'equipment_crate',
+              'vehicle', 'supply_stack'
+           ];
+           
+           if (crateTypes.includes(type)) {
+               this.spawnLootFromChest(obs);
+               log('CRATE_DESTROYED_WITH_LOOT', {
+                   room: this.id,
+                   obstacleId: (obs as any).id,
+                   obstacleType: type,
+                   tick: this.tick,
+               });
            }
        }
     }
 
-    // 真正移除需要移除的障碍物（crate）
-    // 保留 (hp > 0) 或者 (type === 'broken' or 'chest_open')
-    // 注意：墙壁 HP 是 Infinity，也会保留
+    // 真正移除所有需要移除的障碍物
+    // 现在所有破坏或开启后的障碍物都直接消失，不再保留残骸
     this.obstacles = this.obstacles.filter(obs => {
         const hp = (obs as any).hp;
         if (hp !== undefined && hp <= 0) {
-            const type = (obs as any).type;
-            // 保留残骸和已开启的宝箱
-            if (type === 'broken' || type === 'chest_open') return true;
-            // 其他（如 crate）移除
+            // 发送移除事件给客户端
+            this.worldEvents.push({
+                type: 'S2C_OBSTACLE_UPDATE',
+                id: (obs as any).id,
+                removed: true,
+            });
             return false;
         }
         return true;
@@ -4763,6 +4841,12 @@ export class Room {
       const autoEquipItem = player.createItemInstance(nearestWorldItem.typeId, nearestWorldItem.qty);
       if (this.tryAutoEquipItem(playerId, player, autoEquipItem)) {
         this.worldItems.delete(nearestWid);
+        
+        this.worldEvents.push({
+          type: 'S2C_WORLD_ITEM_UPDATE',
+          action: 'REMOVE',
+          wid: nearestWid,
+        });
         log('PICKUP_WORLD_ITEM', {
           room: this.id,
           player: playerId,
@@ -4771,18 +4855,26 @@ export class Room {
           qty: nearestWorldItem.qty,
           tick: this.tick,
         });
+        // console.log(`[Pickup] Removed world item ${nearestWid} for player ${playerId}`);
         return true;
       }
 
       const result = player.addItem(nearestWorldItem.typeId, nearestWorldItem.qty);
       if (result.success) {
         this.worldItems.delete(nearestWid);
+
+        this.worldEvents.push({
+          type: 'S2C_WORLD_ITEM_UPDATE',
+          action: 'REMOVE',
+          wid: nearestWid,
+        });
         const itemType = getItemType(nearestWorldItem.typeId);
         this.pushEvent(`Player ${playerId} picked up ${itemType.name} x${result.added}`);
         log('PICKUP_WORLD_ITEM', {
           room: this.id,
           player: playerId,
           wid: nearestWid,
+          // console.log(`[Pickup] Removed world item ${nearestWid} for player ${playerId} (manual add)`);
           typeId: nearestWorldItem.typeId,
           qty: result.added,
           tick: this.tick,
@@ -4934,6 +5026,13 @@ export class Room {
         x: player.x,
         y: player.y,
         items: droppedItems,
+      });
+
+      this.worldEvents.push({
+        type: 'S2C_LOOT_BAG_UPDATE',
+        action: 'ADD',
+        bag: this.lootBags.get(bid),
+        bid: bid,
       });
       
       this.pushEvent(`Player ${playerId} died and dropped loot`);
@@ -5205,12 +5304,28 @@ export class Room {
     const autoEquipItem = player.createItemInstance(worldItem.typeId, worldItem.qty);
     if (this.tryAutoEquipItem(playerId, player, autoEquipItem)) {
       this.worldItems.delete(wid);
+
+      // 修复: 广播移除事件
+      this.worldEvents.push({
+        type: 'S2C_WORLD_ITEM_UPDATE',
+        action: 'REMOVE',
+        wid,
+      });
+
       return { success: true };
     }
 
     const result = player.addItem(worldItem.typeId, worldItem.qty);
     if (result.success) {
       this.worldItems.delete(wid);
+      
+      // 修复: 广播移除事件
+      this.worldEvents.push({
+        type: 'S2C_WORLD_ITEM_UPDATE',
+        action: 'REMOVE',
+        wid,
+      });
+
       const itemType = getItemType(worldItem.typeId);
       this.pushEvent(`Player ${playerId} picked up ${itemType.name} x${result.added}`);
       return { success: true };
@@ -5267,8 +5382,21 @@ export class Room {
     if (pickedAny) {
       if (remainingItems.length === 0) {
         this.lootBags.delete(bid);
+        // 修复: 广播移除事件
+        this.worldEvents.push({
+          type: 'S2C_LOOT_BAG_UPDATE',
+          action: 'REMOVE',
+          bid,
+        });
       } else {
         bag.items = remainingItems;
+        // 修复: 广播更新事件 (使用 ADD 覆盖)
+        this.worldEvents.push({
+           type: 'S2C_LOOT_BAG_UPDATE',
+           action: 'ADD',
+           bag: bag, 
+           bid: bid, 
+         });
       }
       this.pushEvent(`Player ${playerId} picked up loot bag`);
       return { success: true };
@@ -5288,11 +5416,7 @@ export class Room {
     for (const [bid, bag] of this.lootBags.entries()) {
       const filteredItems = bag.items.filter((item) => item.qty > 0);
       if (filteredItems.length === 0) {
-        this.lootBags.delete(bid);
         continue;
-      }
-      if (filteredItems.length !== bag.items.length) {
-        bag.items = filteredItems;
       }
       bags.push(bag);
     }
@@ -5392,6 +5516,14 @@ export class Room {
       const autoEquipItem = player.createItemInstance(nearestWorldItem.typeId, nearestWorldItem.qty);
       if (this.tryAutoEquipItem(playerId, player, autoEquipItem)) {
         this.worldItems.delete(nearestWid);
+        
+        // 修复: 广播移除事件
+        this.worldEvents.push({
+           type: 'S2C_WORLD_ITEM_UPDATE',
+           action: 'REMOVE',
+           wid: nearestWid,
+        });
+
         log('AUTO_PICKUP_WORLD', {
           room: this.id,
           player: playerId,
@@ -5407,6 +5539,14 @@ export class Room {
       const result = player.addItem(nearestWorldItem.typeId, nearestWorldItem.qty);
       if (result.success) {
         this.worldItems.delete(nearestWid);
+
+        // 修复: 广播移除事件
+        this.worldEvents.push({
+           type: 'S2C_WORLD_ITEM_UPDATE',
+           action: 'REMOVE',
+           wid: nearestWid,
+        });
+
         const itemType = getItemType(nearestWorldItem.typeId);
         this.pushEvent(`Player ${playerId} picked up ${itemType.name} x${result.added}`);
         log('AUTO_PICKUP_WORLD', {
@@ -5455,8 +5595,21 @@ export class Room {
       if (pickedAny) {
         if (remainingItems.length === 0) {
           this.lootBags.delete(nearestBid);
+          // 修复: 广播移除事件
+          this.worldEvents.push({
+             type: 'S2C_LOOT_BAG_UPDATE',
+             action: 'REMOVE',
+             bid: nearestBid,
+          });
         } else {
           nearestBag.items = remainingItems;
+          // 修复: 广播更新事件 (ADD 覆盖)
+          this.worldEvents.push({
+             type: 'S2C_LOOT_BAG_UPDATE',
+             action: 'ADD',
+             bag: nearestBag, 
+             bid: nearestBid, 
+          });
         }
         this.pushEvent(`Player ${playerId} picked up loot bag`);
         log('AUTO_PICKUP_BAG', {

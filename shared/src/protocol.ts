@@ -422,6 +422,7 @@ export const S2C_WORLD_INIT_SCHEMA = z.object({
   obstacles: z.array(OBSTACLE_STATE_SCHEMA),
   items: z.array(ITEM_STATE_SCHEMA).optional(), // 保留兼容
   worldItems: z.array(WORLD_ITEM_SCHEMA).optional(), // 新增: 世界物品列表
+  lootBags: z.array(LOOT_BAG_SCHEMA).optional(), // 新增: 掉落包列表
   rooms: z.array(ROOM_SCHEMA).optional(), // 新增: 房间列表（用于地板渲染）
 });
 
@@ -517,6 +518,30 @@ export const S2C_KILL_FEED_SCHEMA = z.object({
   weapon: z.string(),
 });
 
+export const S2C_OBSTACLE_UPDATE_SCHEMA = z.object({
+  type: z.literal('S2C_OBSTACLE_UPDATE'),
+  id: z.string(),
+  hp: z.number().optional(), // Make HP optional if we only update type
+  maxHp: z.number().optional(),
+  obstacleType: z.string().optional(), // 'type' is taken by discriminator
+  data: z.record(z.any()).optional(), // Extra data like door rotation
+  removed: z.boolean().optional(), // New: explicitly mark as removed
+});
+
+export const S2C_WORLD_ITEM_UPDATE_SCHEMA = z.object({
+  type: z.literal('S2C_WORLD_ITEM_UPDATE'),
+  action: z.enum(['ADD', 'REMOVE']),
+  item: WORLD_ITEM_SCHEMA.optional(),
+  wid: z.string(),
+});
+
+export const S2C_LOOT_BAG_UPDATE_SCHEMA = z.object({
+  type: z.literal('S2C_LOOT_BAG_UPDATE'),
+  action: z.enum(['ADD', 'REMOVE']),
+  bag: LOOT_BAG_SCHEMA.optional(),
+  bid: z.string(),
+});
+
 export const S2C_MESSAGE_SCHEMA = z.discriminatedUnion('type', [
   S2C_SNAPSHOT_SCHEMA,
   S2C_ERROR_SCHEMA,
@@ -532,6 +557,9 @@ export const S2C_MESSAGE_SCHEMA = z.discriminatedUnion('type', [
   S2C_SMOKE_SCHEMA, // 新增: 烟雾事件
   S2C_FIRE_SCHEMA, // 新增: 燃烧事件
   S2C_KILL_FEED_SCHEMA, // 新增: 击杀播报
+  S2C_OBSTACLE_UPDATE_SCHEMA, // 新增: 障碍物更新
+  S2C_WORLD_ITEM_UPDATE_SCHEMA, // 新增: 世界物品更新
+  S2C_LOOT_BAG_UPDATE_SCHEMA, // 新增: 掉落包更新
 ]);
 
 // TypeScript 类型推导
@@ -564,6 +592,10 @@ export type S2C_EXPLOSION = z.infer<typeof S2C_EXPLOSION_SCHEMA>; // 新增: 爆
 export type S2C_SMOKE = z.infer<typeof S2C_SMOKE_SCHEMA>; // 新增: 烟雾事件类型
 export type S2C_FIRE = z.infer<typeof S2C_FIRE_SCHEMA>; // 新增: 燃烧事件类型
 export type S2C_KILL_FEED = z.infer<typeof S2C_KILL_FEED_SCHEMA>; // 新增: 击杀播报类型
+
+export type S2C_OBSTACLE_UPDATE = z.infer<typeof S2C_OBSTACLE_UPDATE_SCHEMA>;
+export type S2C_WORLD_ITEM_UPDATE = z.infer<typeof S2C_WORLD_ITEM_UPDATE_SCHEMA>;
+export type S2C_LOOT_BAG_UPDATE = z.infer<typeof S2C_LOOT_BAG_UPDATE_SCHEMA>;
 export type S2C_MESSAGE = z.infer<typeof S2C_MESSAGE_SCHEMA>;
 
 // 新增: 物品系统类型导出
