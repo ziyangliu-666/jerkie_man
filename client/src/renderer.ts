@@ -1740,9 +1740,9 @@ export class Renderer {
     
     // 5. Remaining Time Bar (Local Player Only) - Now displayed ABOVE the status label
     // Style matches the status label (Box + Text + Progress)
-    if (localPlayerId && turret.ownerId === localPlayerId) {
+    if (localPlayerId && turret.ownerId === localPlayerId && turret.remainingTimeMs !== undefined) {
       const durationMs = 30000; 
-      const remaining = Math.max(0, turret.remainingTimeMs);
+      const remaining = Math.max(0, turret.remainingTimeMs ?? 0);
       const timeProgress = Math.min(1, Math.max(0, remaining / durationMs));
       
       const timeText = `⏳ ${(remaining / 1000).toFixed(1)}s`;

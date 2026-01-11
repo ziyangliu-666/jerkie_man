@@ -3,6 +3,7 @@ import { Room } from './room.js';
 import { getMapTemplate, listMapTemplateIds, loadMapTemplates, resolveMapTemplateDir } from './mapTemplates.js';
 import { log } from './logger.js';
 import crypto from 'crypto';
+import { deflateSync } from 'zlib';
 import {
   C2S_MESSAGE_SCHEMA,
   S2C_SNAPSHOT_SCHEMA,
@@ -22,6 +23,8 @@ import {
   getWeaponDef, // 新增: 用于重置武器运行时状态
   TICK_MS,
   SNAPSHOT_MS,
+  encodeMessage, // 二进制编码
+  exportFieldMapping, // 动态字段压缩
   type C2S_MESSAGE,
 } from '@jerkie-man/shared';
 
@@ -34,7 +37,26 @@ const SNAPSHOT_INTERVAL_MS = SNAPSHOT_MS; // 10Hz
 // Admin password hash (SHA-256 of "[REDACTED-CREDENTIAL]")
 const ADMIN_PASSWORD_HASH = crypto.createHash('sha256').update('[REDACTED-CREDENTIAL]').digest('hex');
 
-const wss = new WebSocketServer({ host: HOST, port: PORT });
+// 启用 WebSocket 压缩（permessage-deflate）
+const wss = new WebSocketServer({ 
+  host: HOST, 
+  port: PORT,
+  perMessageDeflate: {
+    zlibDeflateOptions: {
+      chunkSize: 1024,
+      memLevel: 7,
+      level: 3, // 压缩级别 1-9，3 是速度与压缩率的平衡点
+    },
+    zlibInflateOptions: {
+      chunkSize: 10 * 1024,
+    },
+    clientNoContextTakeover: true, // 客户端不保留上下文（节省内存）
+    serverNoContextTakeover: true, // 服务端不保留上下文
+    serverMaxWindowBits: 10,       // 服务端窗口大小
+    concurrencyLimit: 10,          // 并发压缩限制
+    threshold: 1024,               // 只压缩大于 1KB 的消息
+  },
+});
 
 const mapTemplateDir = resolveMapTemplateDir(process.env.MAP_TEMPLATE_DIR);
 let mapTemplateCatalog = loadMapTemplates(mapTemplateDir);
@@ -351,6 +373,7 @@ ws.on('message', (data: Buffer) => {
               accountId: accountId,
               seed: room.seed,
               mapConfig: room.mapConfig,
+              fieldMapping: exportFieldMapping(), // 动态字段压缩映射表
             })
           )
         );
@@ -2128,28 +2151,64 @@ setInterval(() => {
 }, TICK_INTERVAL_MS);
 
 // Snapshot 广播循环（10Hz）
-setInterval(() => {
-  const snapshot = room.getSnapshot();
-  const message = S2C_SNAPSHOT_SCHEMA.parse({
-    type: 'S2C_SNAPSHOT',
-    tick: room.tick,
-    timestamp: Date.now(),
-    players: snapshot.players,
-    bullets: snapshot.bullets,
-    items: snapshot.items, // 保留兼容
-    worldItems: snapshot.worldItems, // 新增: 世界物品列表（MVP 全量，未来做 delta）
-    lootBags: snapshot.lootBags, // 新增: 掉落包列表
-    obstacles: snapshot.obstacles, // 新增: 障碍物列表（可破坏，需要同步）
-    ais: snapshot.ais, // 新增: AI实体列表
-    decoys: snapshot.decoys, // 修复: 诱饵列表（之前遗漏导致客户端收不到诱饵）
-    turrets: snapshot.turrets, // 新增: 炮台列表
-  });
+let lastSnapshotLogTick = 0;
 
-  // 广播给所有连接
-  for (const ws of connections.keys()) {
-    if (ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify(message));
-    }
+setInterval(() => {
+  // 调试日志：每200 tick（约10秒）打印一次快照大小和内容摘要
+  if (room.tick - lastSnapshotLogTick >= 200 && connections.size > 0) {
+    lastSnapshotLogTick = room.tick;
+    
+    // 获取一个通用快照用于调试（不带 playerId）
+    const debugSnapshot = room.getSnapshot();
+    const debugMessage = {
+      type: 'S2C_SNAPSHOT',
+      tick: room.tick,
+      timestamp: Date.now(),
+      ...debugSnapshot,
+    };
+    const debugJsonString = JSON.stringify(debugMessage);
+    
+    // 估算压缩后大小
+    const compressed = deflateSync(Buffer.from(debugJsonString));
+    const compressionRatio = ((1 - compressed.length / debugJsonString.length) * 100).toFixed(0);
+    
+    console.log(`\n========== SNAPSHOT DEBUG (tick=${room.tick}) ==========`);
+    console.log(`📦 JSON Size: ${(debugJsonString.length / 1024).toFixed(2)} KB`);
+    console.log(`🗜️ Compressed: ${(compressed.length / 1024).toFixed(2)} KB (${compressionRatio}% smaller)`);
+    console.log(`👤 Players: ${debugSnapshot.players.length}`);
+    console.log(`🤖 AIs: ${debugSnapshot.ais.length}`);
+    console.log(`🔫 Bullets: ${debugSnapshot.bullets.length}`);
+    console.log(`🎯 Decoys: ${debugSnapshot.decoys.length}`);
+    console.log(`🗼 Turrets: ${debugSnapshot.turrets.length}`);
+    console.log(`\n--- Full Snapshot JSON ---`);
+    console.log(debugJsonString);
+    console.log(`==========================================\n`);
+  }
+
+  // ✅ 优化: 按玩家发送快照，每个玩家收到包含自己 inventory 的版本
+  // 注意: 不使用 S2C_SNAPSHOT_SCHEMA.parse()，因为 zod 会填回所有 .default() 字段
+  for (const [ws, playerId] of connections.entries()) {
+    if (ws.readyState !== WebSocket.OPEN) continue;
+    
+    const snapshot = room.getSnapshot(playerId);
+    // 直接构造消息，保持精简的字段结构
+    const message = {
+      type: 'S2C_SNAPSHOT' as const,
+      tick: room.tick,
+      timestamp: Date.now(),
+      players: snapshot.players,
+      bullets: snapshot.bullets,
+      items: snapshot.items,
+      worldItems: snapshot.worldItems,
+      lootBags: snapshot.lootBags,
+      obstacles: snapshot.obstacles,
+      ais: snapshot.ais,
+      decoys: snapshot.decoys,
+      turrets: snapshot.turrets,
+    };
+    
+    // 使用 MessagePack 二进制编码发送
+    ws.send(encodeMessage(message));
   }
 }, SNAPSHOT_INTERVAL_MS);
 

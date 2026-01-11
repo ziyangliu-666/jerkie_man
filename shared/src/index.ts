@@ -47,3 +47,9 @@ export * from './obstacleConfig.js';
 
 // 显式导出内容加载器函数 (已在上文导出)
 // export { loadMapConfig, loadItemTypes } from './content.js';
+
+// 二进制编解码器 (MessagePack)
+export * from './binaryCodec.js';
+
+// 字段名压缩
+export * from './fieldCompression.js';

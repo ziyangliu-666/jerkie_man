@@ -36,6 +36,8 @@ import {
   type MAP_CONFIG, // P0-1 修复: 使用 shared 的 MAP_CONFIG 类型，避免类型漂移
   type OBSTACLE_STATE, // 修复: 静态世界初始化
   type ITEM_STATE, // 修复: 静态世界初始化
+  parseWebSocketMessage, // 二进制解码
+  importFieldMapping, // 动态字段压缩映射
 } from '@jerkie-man/shared';
 import { SnapshotBuffer } from './snapshot.js';
 
@@ -147,6 +149,8 @@ export class Network {
   public connect(): void {
     try {
       this.ws = new WebSocket(this.url);
+      // 设置二进制消息接收类型
+      this.ws.binaryType = 'arraybuffer';
 
       this.ws.onopen = () => {
         // 修复: 如果用户已手动断开，立即关闭连接
@@ -190,13 +194,19 @@ export class Network {
 
       this.ws.onmessage = (event) => {
         try {
-          const raw = JSON.parse(event.data.toString());
+          // 支持二进制和 JSON 两种格式
+          const raw = parseWebSocketMessage<unknown>(event.data);
           const message = S2C_MESSAGE_SCHEMA.parse(raw) as S2C_MESSAGE;
 
           // 统一通过schema解析，未知类型会被zod拒绝
           // if (message.type !== 'S2C_SNAPSHOT') console.log('[Network] Received:', message.type);
 
           if (message.type === 'S2C_WELCOME') {
+            // 动态导入字段压缩映射表（必须在处理其他消息之前）
+            if (message.fieldMapping) {
+              importFieldMapping(message.fieldMapping);
+              console.log('[Network] Imported field mapping:', Object.keys(message.fieldMapping).length, 'fields');
+            }
             if (this.callbacks.onWelcome) {
               // Day4-1: 传递 roomInfo（seed + mapConfig）
               this.callbacks.onWelcome(message.playerId, message.accountId, {

@@ -4138,10 +4138,16 @@ export class Room {
     });
   }
 
-  // 获取当前状态快照
-  // Step4: 导出时只包含BULLET_STATE字段，不包含spawnAt，保证协议兼容
-  // 新增: 只包含 inWorld=true 的玩家（未来会实现 inWorld 字段，现在先包含所有玩家）
-  getSnapshot(): {
+  // 辅助函数：四舍五入到2位小数（用于减少JSON体积）
+  private r2(n: number): number {
+    return Math.round(n * 100) / 100;
+  }
+
+  // 获取当前状态快照（优化版）
+  // 优化1: 坐标精度截断（保留2位小数）
+  // 优化2: 省略默认值（false/0/null 不发送）
+  // 优化3: Inventory 隐私（只发给本人，其他玩家不看）
+  getSnapshot(forPlayerId?: string): {
     players: PLAYER_STATE[];
     bullets: BULLET_STATE[];
     items: ITEM_STATE[];
@@ -4149,102 +4155,240 @@ export class Room {
     lootBags: LootBag[];
     obstacles: OBSTACLE_STATE[];
     ais: AI_STATE[];
-    turrets: TURRET_STATE[]; // 新增: 炮台列表
-    decoys: DECOY_STATE[]; // Added decoys to snapshot
+    turrets: TURRET_STATE[];
+    decoys: DECOY_STATE[];
   } {
+    const now = Date.now();
+    
     // 新增: 只包含 ALIVE/DEAD 状态的玩家（EXTRACTED 玩家不再出现在 snapshot 中）
-    // 未来会改为检查 inWorld 字段
     const visiblePlayers = Array.from(this.players.values())
       .filter(p => p.status !== 'EXTRACTED')
       .map((p) => {
         const state = p.toState(this.tick);
-        // 计算玩家是否在草丛内
+        
+        // 计算玩家是否在草丛/烟雾内
         const bushId = this.isPlayerInBush(p.x, p.y);
-        state.inBush = !!bushId;
-        state.inBushId = bushId;
-        // 计算玩家是否在烟雾内
         const smokeId = this.isPointInSmoke(p.x, p.y);
-        state.inSmoke = !!smokeId;
-        state.inSmokeId = smokeId;
-        // 计算玩家是否被闪光弹致盲
-        const now = Date.now();
-        state.isFlashed = p.flashedUntil > now;
-        state.flashEndTime = p.flashedUntil;
-        return state;
+        const isFlashed = p.flashedUntil > now;
+        
+        // 优化: 构建精简的玩家状态（省略默认值）
+        const optimized: any = {
+          id: state.id,
+          x: this.r2(state.x),
+          y: this.r2(state.y),
+          hp: state.hp,
+          status: state.status,
+          lastInputSeq: state.lastInputSeq,
+          lastInputTick: state.lastInputTick,
+          aimRad: this.r2(state.aimRad),
+        };
+        
+        // 只在非默认值时添加字段
+        if (state.stamina !== 100) optimized.stamina = state.stamina;
+        if (state.maxStamina !== 100) optimized.maxStamina = state.maxStamina;
+        if (state.isSprinting) optimized.isSprinting = true;
+        if (state.extractProgress > 0) optimized.extractProgress = state.extractProgress;
+        if (state.name) optimized.name = state.name;
+        
+        // weaponRuntime 始终发送（核心状态）
+        if (state.weaponRuntime) {
+          optimized.weaponRuntime = {
+            weaponTypeId: state.weaponRuntime.weaponTypeId,
+            ammoInMag: state.weaponRuntime.ammoInMag,
+            reloadingUntilTick: state.weaponRuntime.reloadingUntilTick,
+            nextFireTick: state.weaponRuntime.nextFireTick,
+          };
+          if (state.weaponRuntime.fireCredit) optimized.weaponRuntime.fireCredit = state.weaponRuntime.fireCredit;
+        }
+        
+        // 草丛/烟雾状态（只在 true 时发送）
+        if (bushId) {
+          optimized.inBush = true;
+          optimized.inBushId = bushId;
+        }
+        if (smokeId) {
+          optimized.inSmoke = true;
+          optimized.inSmokeId = smokeId;
+        }
+        
+        // 闪光/眩晕状态（只在 true 时发送）
+        if (isFlashed) {
+          optimized.isFlashed = true;
+          optimized.flashEndTime = p.flashedUntil;
+        }
+        if (state.isStunned) {
+          optimized.isStunned = true;
+          optimized.stunnedEndTime = state.stunnedEndTime;
+        }
+        
+        // raidEquipment（其他玩家需要看到武器外观）
+        if (state.raidEquipment) {
+          optimized.raidEquipment = state.raidEquipment;
+        }
+        
+        // buffs（只在有 buff 时发送）
+        if (state.buffs && state.buffs.length > 0) {
+          optimized.buffs = state.buffs;
+        }
+        
+        // usingItem 读条状态（始终发送，包括 null，让客户端知道何时停止读条）
+        optimized.usingItemTypeId = state.usingItemTypeId ?? null;
+        if (state.usingItemTypeId) {
+          optimized.usingItemRemainingMs = state.usingItemRemainingMs;
+          optimized.usingItemTotalMs = state.usingItemTotalMs;
+        }
+        
+        // 伪装状态
+        if (state.disguisedAsAiBehavior) optimized.disguisedAsAiBehavior = state.disguisedAsAiBehavior;
+        if (state.disguisedAsAiRole) optimized.disguisedAsAiRole = state.disguisedAsAiRole;
+        if (state.disguisedAimRad !== undefined) optimized.disguisedAimRad = this.r2(state.disguisedAimRad);
+        
+        // 死亡信息
+        if (state.killedBy) optimized.killedBy = state.killedBy;
+        if (state.killedByWeaponName) optimized.killedByWeaponName = state.killedByWeaponName;
+        
+        // ✅ 优化3: Inventory 隐私 - 只发给本人
+        if (forPlayerId && state.id === forPlayerId) {
+          optimized.inventory = state.inventory;
+        }
+        // 其他玩家不发送 inventory，节省约 200 bytes/玩家
+        
+        return optimized as PLAYER_STATE;
       });
     
-    const snapshotBullets = this.bullets.map(({ spawnAt, damage, isGrenade, explodeTick, targetX, targetY, ...b }) => ({
-      ...b,
-      clientShotId: b.clientShotId, // 传递客户端发射ID
-      weaponTypeId: b.weaponTypeId, // 传递武器类型ID（用于客户端渲染样式）
-      bulletLifeMs: b.bulletLifeMs, // 传递子弹生命周期（用于客户端TTL判断）
-      targetX,
-      targetY,
-    }));
+    // 子弹状态（精度截断）
+    const snapshotBullets = this.bullets.map(({ spawnAt, damage, isGrenade, explodeTick, ...b }) => {
+      const bullet: any = {
+        id: b.id,
+        x: this.r2(b.x),
+        y: this.r2(b.y),
+        vx: this.r2(b.vx),
+        vy: this.r2(b.vy),
+        ownerId: b.ownerId,
+      };
+      if (b.clientShotId !== undefined) bullet.clientShotId = b.clientShotId;
+      if (b.weaponTypeId) bullet.weaponTypeId = b.weaponTypeId;
+      if (b.bulletLifeMs) bullet.bulletLifeMs = b.bulletLifeMs;
+      if (b.targetX !== undefined) bullet.targetX = this.r2(b.targetX);
+      if (b.targetY !== undefined) bullet.targetY = this.r2(b.targetY);
+      if (b.spawnX !== undefined) bullet.spawnX = this.r2(b.spawnX);
+      if (b.spawnY !== undefined) bullet.spawnY = this.r2(b.spawnY);
+      return bullet as BULLET_STATE;
+    });
 
+    // AI 状态（精度截断 + 省略默认值）
     const aiStates = Array.from(this.ais.values())
       .filter(ai => ai.status === 'ALIVE')
       .map(ai => {
         const state = ai.toState(this.tick);
-        // 计算AI是否在草丛内
         const bushId = this.isPlayerInBush(ai.x, ai.y);
-        state.inBush = !!bushId;
-        state.inBushId = bushId;
-        // 计算AI是否在烟雾内
         const smokeId = this.isPointInSmoke(ai.x, ai.y);
-        state.inSmoke = !!smokeId;
-        state.inSmokeId = smokeId;
-        return state;
+        
+        const optimized: any = {
+          id: state.id,
+          x: this.r2(state.x),
+          y: this.r2(state.y),
+          hp: state.hp,
+          maxHp: state.maxHp,
+          status: state.status,
+          aimRad: this.r2(state.aimRad),
+          behaviorState: state.behaviorState,
+        };
+        
+        // 只在非 basic 时发送 role
+        if (state.role && state.role !== 'basic') optimized.role = state.role;
+        
+        // weaponRuntime 精简
+        if (state.weaponRuntime) {
+          optimized.weaponRuntime = {
+            weaponTypeId: state.weaponRuntime.weaponTypeId,
+            ammoInMag: state.weaponRuntime.ammoInMag,
+            reloadingUntilTick: state.weaponRuntime.reloadingUntilTick,
+            nextFireTick: state.weaponRuntime.nextFireTick,
+          };
+        }
+        
+        // 只在有目标时发送
+        if (state.currentTargetId) optimized.currentTargetId = state.currentTargetId;
+        
+        // 只在 true 时发送状态标志
+        if (bushId) {
+          optimized.inBush = true;
+          optimized.inBushId = bushId;
+        }
+        if (smokeId) {
+          optimized.inSmoke = true;
+          optimized.inSmokeId = smokeId;
+        }
+        if (state.isFlashed) {
+          optimized.isFlashed = true;
+          optimized.flashEndTime = state.flashEndTime;
+        }
+        if (state.isStunned) {
+          optimized.isStunned = true;
+          optimized.stunnedEndTime = state.stunnedEndTime;
+        }
+        
+        return optimized as AI_STATE;
       });
 
     return {
       players: visiblePlayers,
-      // Step4: 映射内部Bullet类型到BULLET_STATE（去掉spawnAt和damage字段，保留clientShotId和weaponTypeId）
       bullets: snapshotBullets,
-      items: [], // P2-1: 旧 items 系统已停用，返回空数组
-      worldItems: [], // MVP Optimization: Return empty, use event stream
-      lootBags: [],   // MVP Optimization: Return empty, use event stream
-      obstacles: [],  // MVP Optimization: Return empty, use event stream
-      ais: aiStates, // 新增: AI实体
+      items: [],
+      worldItems: [],
+      lootBags: [],
+      obstacles: [],
+      ais: aiStates,
       turrets: Array.from(this.turrets.values()).map(t => {
         const state = t.toState();
-        // 计算炮台是否在草丛内
         const bushId = this.isPlayerInBush(t.x, t.y);
         const smokeId = this.isPointInSmoke(t.x, t.y);
-        return {
+        const result: any = {
           ...state,
-          inBush: !!bushId,
-          inBushId: bushId,
-          inSmoke: !!smokeId,
-          inSmokeId: smokeId,
+          x: this.r2(state.x),
+          y: this.r2(state.y),
+          aimRad: this.r2(state.aimRad),
         };
+        if (bushId) {
+          result.inBush = true;
+          result.inBushId = bushId;
+        }
+        if (smokeId) {
+          result.inSmoke = true;
+          result.inSmokeId = smokeId;
+        }
+        return result;
       }),
       decoys: this.decoys
-        .filter(d => d.hp > 0) // 只同步存活的诱饵
+        .filter(d => d.hp > 0)
         .map(d => {
-          // 计算诱饵是否在草丛内
           const bushId = this.isPlayerInBush(d.x, d.y);
-          // 计算诱饵是否在烟雾内
           const smokeId = this.isPointInSmoke(d.x, d.y);
           
-          return {
+          const result: any = {
             id: d.id,
-            x: d.x,
-            y: d.y,
-            vx: d.vx,
-            vy: d.vy,
+            x: this.r2(d.x),
+            y: this.r2(d.y),
+            vx: this.r2(d.vx),
+            vy: this.r2(d.vy),
             ownerId: d.ownerId,
             hp: d.hp,
             maxHp: d.maxHp,
-            name: d.name,
-            weaponTypeId: d.weaponTypeId,
-            armorTypeId: d.armorTypeId,
-            aimRad: d.aimRad, // 新增: 瞄准角度
-            inBush: !!bushId,
-            inBushId: bushId,
-            inSmoke: !!smokeId,
-            inSmokeId: smokeId,
+            aimRad: this.r2(d.aimRad),
           };
+          if (d.name) result.name = d.name;
+          if (d.weaponTypeId) result.weaponTypeId = d.weaponTypeId;
+          if (d.armorTypeId) result.armorTypeId = d.armorTypeId;
+          if (bushId) {
+            result.inBush = true;
+            result.inBushId = bushId;
+          }
+          if (smokeId) {
+            result.inSmoke = true;
+            result.inSmokeId = smokeId;
+          }
+          return result as DECOY_STATE;
         }),
     };
   }

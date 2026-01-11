@@ -236,9 +236,9 @@ export const PLAYER_BUFF_SCHEMA = z.object({
   kind: z.enum(['speed', 'damage_reduction', 'regeneration', 'disguise']),
   remainingMs: z.number().int().nonnegative(),
   totalMs: z.number().int().positive(),
-  speedMultiplier: z.number().positive().optional(),
-  damageReductionBonus: z.number().min(0).max(1).optional(),
-  hpPerSecond: z.number().positive().optional(),
+  speedMultiplier: z.number().positive().nullish(), // nullish = null | undefined
+  damageReductionBonus: z.number().min(0).max(1).nullish(),
+  hpPerSecond: z.number().positive().nullish(),
 });
 
 export const PLAYER_STATE_SCHEMA = z.object({
@@ -266,8 +266,8 @@ export const PLAYER_STATE_SCHEMA = z.object({
   isStunned: z.boolean().optional().default(false), // 新增: 是否被眩晕
   stunnedEndTime: z.number().optional().default(0), // 新增: 眩晕结束时间（毫秒时间戳）
   raidEquipment: PLAYER_RAID_EQUIPMENT_SCHEMA.optional(), // 新增: 局内装备状态
-  killedBy: z.string().optional(), // 新增: 击杀者名字
-  killedByWeaponName: z.string().optional(), // 新增: 击杀使用的武器名称
+  killedBy: z.string().nullish(), // nullish: 允许 null/undefined
+  killedByWeaponName: z.string().nullish(), // nullish: 允许 null/undefined
   buffs: z.array(PLAYER_BUFF_SCHEMA).optional(), // 新增: 局内短效 Buff 列表
   // 新增: 正在使用的道具（读条）状态，用于 HUD 提示（例如急救包）
   usingItemTypeId: z.string().nullable().optional(),
@@ -292,7 +292,7 @@ export const AI_STATE_SCHEMA = z.object({
   aimRad: z.number(),
   behaviorState: z.enum(['IDLE', 'PATROL', 'SPOTTING', 'CHASE', 'ATTACK', 'SEARCH', 'RETURN']),
   role: z.enum(['basic', 'sniper', 'heavy_gunner', 'scout']).optional().default('basic'), // 新增：AI角色类型
-  currentTargetId: z.string().optional(), // 新增：当前目标ID（用于显示"瞄准中"状态）
+  currentTargetId: z.string().nullish(), // nullish: 允许 null/undefined
   // 新增: 闪光弹状态（与玩家字段对齐）
   isFlashed: z.boolean().optional().default(false),
   flashEndTime: z.number().optional().default(0),
@@ -313,9 +313,9 @@ export const DECOY_STATE_SCHEMA = z.object({
   vx: z.number(), // Decoys might move
   vy: z.number(),
   ownerId: z.string(),
-  name: z.string().optional(),
-  weaponTypeId: z.string().optional(),
-  armorTypeId: z.string().optional(),
+  name: z.string().nullish(), // nullish: 允许 null/undefined
+  weaponTypeId: z.string().nullish(),
+  armorTypeId: z.string().nullish(),
   hp: z.number(),
   maxHp: z.number(),
   aimRad: z.number().optional().default(0), // 新增: 瞄准角度（用于眼睛渲染）
@@ -336,8 +336,8 @@ export const TURRET_STATE_SCHEMA = z.object({
   maxHp: z.number(),
   aimRad: z.number(),
   state: z.enum(['IDLE', 'SPOOLING', 'FIRING', 'RELOADING']),
-  targetId: z.string().optional(),
-  remainingTimeMs: z.number(),
+  targetId: z.string().nullish(), // 允许 null/undefined（没有目标时）
+  remainingTimeMs: z.number().optional(), // 可选（可能不总是存在）
   isArmored: z.boolean(),
   range: z.number(),
 });
@@ -412,6 +412,8 @@ export const S2C_WELCOME_SCHEMA = z.object({
   // Day4-1: server 下发世界配置（可选，用于兼容）
   seed: z.number().int().optional(),
   mapConfig: MAP_CONFIG_SCHEMA.optional(),
+  // 动态字段压缩映射表（短名 -> 完整名）
+  fieldMapping: z.record(z.string(), z.string()).optional(),
 });
 
 // 静态世界初始化消息（一次性下发，减少 snapshot 带宽）
