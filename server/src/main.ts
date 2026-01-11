@@ -860,8 +860,12 @@ ws.on('message', (data: Buffer) => {
           tick: room.tick,
         });
         
-        // 发送更新后的 Profile（phase 变为 HIDEOUT）
-        sendProfile(ws, accountId, 'HIDEOUT');
+        // ✅ 修复：不仅发送 HIDEOUT，还要持久化 phase 状态
+        // 否则后续操作（如购买物品）回发 Profile 时会因存储的 phase 仍为 NAME 而导致客户端弹回取名界面
+        room.profileManager.updatePhase(accountId, 'HIDEOUT');
+        
+        // 发送更新后的 Profile
+        sendProfile(ws, accountId);
       } else if (parsed.type === 'C2S_SELL_FROM_STASH') {
         // 新增: 处理从仓库卖出物品
         if (!playerId) {

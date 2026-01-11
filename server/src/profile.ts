@@ -575,6 +575,9 @@ export class ProfileManager {
     if (updates.bagCap !== undefined) {
       profile.bagCap = updates.bagCap;
     }
+    if (updates.phase !== undefined) {
+      profile.phase = updates.phase;
+    }
     if (updates.stash !== undefined || updates.prep !== undefined) {
       this.normalizeContainers(profile);
     }
