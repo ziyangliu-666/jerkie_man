@@ -1,96 +1,82 @@
-# 私有服务器自动部署指南
+# 部署指南
 
-本项目采用 **GitHub Actions** 进行 CI/CD，自动构建并部署到私有服务器（CentOS/Ubuntu）。
+本项目部署在 **Fly.io**，采用「单域名全栈」架构：同一个进程、同一个端口，既托管前端静态资源，也提供 WebSocket 游戏服务。
+
+- 线上地址：https://game.ziy.bio （Fly 默认域名：https://jerkie-man.fly.dev）
+- 区域：`sin`（新加坡）
+- 应用名：`jerkie-man`
 
 ## 架构说明
-- **前端 (Client)**: 纯静态文件，构建后推送至服务器，由 Nginx 托管。
-    - **部署路径**: `~/jerkie_man/client`
-    - **访问端口**: `5174` (Nginx)
-    - **后端连接**: 自动连接 `ws://<当前网页IP>:18723`，无需配置。
-- **后端 (Server)**: Node.js 应用，构建后推送至服务器，由 PM2 管理进程。
-    - **部署路径**: `~/jerkie_man/server`
-    - **运行端口**: `18723` (WebSocket)
 
-## 1. 自动化部署流程
-每次向 `main` 分支推送代码时，GitHub Actions 会自动执行：
-1. **构建**: 在 CI 环境中打包 shared, server, client 代码。
-2. **传输**: 通过 SCP 将构建产物覆盖到服务器的 `~/jerkie_man` 目录。
-3. **重启**:
-    - 安装后端依赖 (`npm install --production`)
-    - 检查 PM2 进程：如果存在则 `restart`，不存在则 `start`。
-
-## 2. 服务器环境准备 (只需一次)
-
-### 安装 Node.js (v18+) & PM2
-因为项目使用了较新的语法，服务器必须安装 Node.js v18 或更高版本。
-```bash
-# 安装 Node.js 20 (推荐)
-curl -fsSL https://rpm.nodesource.com/setup_20.x | sudo bash -
-sudo yum install -y nodejs
-
-# 安装 PM2 进程管理器
-npm install -g pm2
+```
+浏览器 ──HTTPS──> Fly Proxy ──> 单个 Node 进程 (:8080)
+                                  ├── sirv  → client/dist 静态资源（含 BGM，支持 Range）
+                                  └── ws    → WebSocket 游戏服务（20Hz tick）
 ```
 
-### 安装与配置 Nginx
-前端页面需要 Web 服务器托管。
+前端通过**同源**连接 WebSocket（`wss://<当前域名>`），无需配置服务器地址。
+本地开发时客户端会自动回退到 `ws://<hostname>:18723`。
+
+### 为什么不用 Serverless（Vercel / Netlify / Cloudflare Workers）
+
+游戏服务端是**有状态长连接**服务：房间、玩家、子弹全部存活在进程内存中，并以 20Hz 持续推进。
+Serverless 函数无法维持长连接、也不保留内存状态，因此只能使用常驻容器。
+
+同理，**实例数必须固定为 1**（`--ha=false` + `auto_stop_machines = false`）。
+多实例会让玩家被负载均衡分到不同进程，彼此看不见对方。
+
+## 自动部署
+
+推送到 `main` 分支即自动部署（见 `.github/workflows/deploy.yml`）。
+依赖仓库 Secret：`FLY_API_TOKEN`。
+
+## 手动部署
+
 ```bash
-# 1. 安装 Nginx
-sudo yum install nginx
-sudo systemctl enable nginx
-sudo systemctl start nginx
-
-# 2. 配置 Nginx
-# 创建配置文件: /etc/nginx/conf.d/jerkie_man.conf
-server {
-    listen 5174;
-    server_name _;
-
-    root /root/jerkie_man/client; # 注意：确保此目录有读取权限
-    index index.html;
-    
-    # 开启 Gzip
-    gzip on;
-    gzip_types text/plain text/css application/json application/javascript;
-
-    location / {
-        try_files $uri $uri/ /index.html;
-    }
-}
-
-# 3. 解决权限问题 (如果部署在 /root 下)
-# 必须赋予 Nginx 读取权限，否则报 403/502
-chmod o+x /root
-chmod o+x /root/jerkie_man
-chmod o+x /root/jerkie_man/client
-
-# 4. 重载配置
-sudo nginx -t
-sudo systemctl reload nginx
+fly deploy --remote-only --ha=false
 ```
 
-### 配置防火墙 (重要!)
-必须同时开放 **系统防火墙** 和 **云厂商安全组**。
+## 环境变量与 Secret
+
+| 名称 | 用途 | 设置方式 |
+|------|------|----------|
+| `ADMIN_PASSWORD` | 管理员口令。**未设置时管理员登录整体禁用** | `fly secrets set ADMIN_PASSWORD=...` |
+| `PORT` | 监听端口，默认 8080 | 已在 `fly.toml` 配置 |
+| `MAP_TEMPLATE` | 指定地图模板，留空则随机 | `fly secrets set` 或 `fly.toml` |
+| `CLIENT_DIR` | 静态资源目录，默认 `client/dist` | 一般无需设置 |
+
+> 安全提示：管理员口令**绝不要写进代码**。仓库中曾硬编码过一个默认口令，已从全部历史中清除。
+
+## 数据持久化
+
+玩家档案 `server/data/profiles.json` 存放在 Fly 持久卷 `jerkie_data`（1GB，挂载于 `/app/server/data`），
+机器重启或重新部署都不会丢失。
+
 ```bash
-# CentOS firewalld
-sudo firewall-cmd --permanent --add-port=5174/tcp   # 前端网页
-sudo firewall-cmd --permanent --add-port=18723/tcp  # 游戏连接
-sudo firewall-cmd --reload
+fly volumes list -a jerkie-man          # 查看卷
+fly ssh console -a jerkie-man           # 进入容器
 ```
-**别忘了去阿里云/腾讯云控制台的安全组里放行这两个端口！**
 
-## 3. 运维命令
+## 运维命令
 
 ```bash
-# 查看后端状态
-pm2 list
-pm2 logs jerkie-server
-pm2 monit
+fly status  -a jerkie-man               # 应用与机器状态
+fly logs    -a jerkie-man               # 实时日志
+fly machine restart <id> -a jerkie-man  # 重启
+fly certs check game.ziy.bio -a jerkie-man   # 证书状态
+```
 
-# 手动重启后端
-pm2 restart jerkie-server
+## 自定义域名
 
-# 查看 Nginx 日志 (前端网页打不开时)
-tail -f /var/log/nginx/error.log
-tail -f /var/log/nginx/access.log
+DNS 记录（在域名服务商处配置）：
+
+| 类型 | 主机名 | 值 |
+|------|--------|-----|
+| `A` | `game` | `66.241.125.88` |
+| `AAAA` | `game` | `2a09:8280:1::177:5b42:0` |
+
+添加后 Fly 自动完成 Let's Encrypt 验证：
+
+```bash
+fly certs add game.ziy.bio -a jerkie-man
 ```

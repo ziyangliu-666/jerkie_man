@@ -1,4 +1,8 @@
 import { WebSocketServer, WebSocket } from 'ws';
+import http from 'http';
+import path from 'path';
+import { fileURLToPath } from 'url';
+import sirv from 'sirv';
 import { Room } from './room.js';
 import { getMapTemplate, listMapTemplateIds, loadMapTemplates, resolveMapTemplateDir } from './mapTemplates.js';
 import { log } from './logger.js';
@@ -34,13 +38,57 @@ const HOST = process.env.HOST || '0.0.0.0'; // 默认监听所有网络接口
 const TICK_INTERVAL_MS = TICK_MS; // 20Hz
 const SNAPSHOT_INTERVAL_MS = SNAPSHOT_MS; // 10Hz
 
-// Admin password hash (SHA-256 of "[REDACTED-CREDENTIAL]")
-const ADMIN_PASSWORD_HASH = crypto.createHash('sha256').update('[REDACTED-CREDENTIAL]').digest('hex');
+// 管理员口令仅从环境变量读取，仓库中不保留任何默认值。
+// 未设置 ADMIN_PASSWORD 时管理员登录整体关闭，避免出现「人人皆知的默认密码」。
+// Fly.io 设置方式：fly secrets set ADMIN_PASSWORD=...
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD ?? '';
+const ADMIN_PASSWORD_HASH = ADMIN_PASSWORD
+  ? crypto.createHash('sha256').update(ADMIN_PASSWORD).digest('hex')
+  : null;
+
+if (!ADMIN_PASSWORD_HASH) {
+  console.warn('[SECURITY] 未设置 ADMIN_PASSWORD，管理员登录已禁用。');
+}
+
+// 静态资源目录（client 构建产物），与 WebSocket 共用同一端口，实现同源部署
+const __main_filename = fileURLToPath(import.meta.url);
+const __main_dirname = path.dirname(__main_filename);
+const CLIENT_DIR = process.env.CLIENT_DIR
+  ? path.resolve(process.env.CLIENT_DIR)
+  : path.join(__main_dirname, '..', '..', 'client', 'dist');
+
+// sirv 负责 MIME、ETag、Range（音频播放需要）、以及带 hash 的静态资源长缓存
+const serveStatic = sirv(CLIENT_DIR, {
+  single: true,      // SPA fallback 到 index.html
+  etag: true,
+  gzip: true,
+  brotli: true,
+  setHeaders(res, pathname) {
+    // Vite 产物带内容 hash，可长期缓存；其余走协商缓存
+    if (pathname.startsWith('/assets/')) {
+      res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+    } else if (pathname.startsWith('/audio/')) {
+      res.setHeader('Cache-Control', 'public, max-age=604800');
+    }
+  },
+});
+
+const httpServer = http.createServer((req, res) => {
+  // 平台健康检查端点
+  if (req.url === '/healthz') {
+    res.writeHead(200, { 'Content-Type': 'text/plain' });
+    res.end('ok');
+    return;
+  }
+  serveStatic(req, res, () => {
+    res.writeHead(404, { 'Content-Type': 'text/plain' });
+    res.end('Not Found');
+  });
+});
 
 // 启用 WebSocket 压缩（permessage-deflate）
 const wss = new WebSocketServer({ 
-  host: HOST, 
-  port: PORT,
+  server: httpServer,
   perMessageDeflate: {
     zlibDeflateOptions: {
       chunkSize: 1024,
@@ -425,7 +473,7 @@ ws.on('message', (data: Buffer) => {
               const password = args.join(' ');
               const passwordHash = crypto.createHash('sha256').update(password).digest('hex');
               
-              if (passwordHash === ADMIN_PASSWORD_HASH) {
+              if (ADMIN_PASSWORD_HASH !== null && passwordHash === ADMIN_PASSWORD_HASH) {
                 profile.isAdmin = true;
                 room.profileManager.updateProfile(accountId, { isAdmin: true });
                 ws.send(JSON.stringify(S2C_EVENT_SCHEMA.parse({ type: 'S2C_EVENT', tick: room.tick, timestamp: Date.now(), message: '✅ 管理员权限已激活' })));
@@ -2244,11 +2292,14 @@ setInterval(() => {
   }
 }, SNAPSHOT_INTERVAL_MS);
 
+httpServer.listen(PORT, HOST);
+
 log('Server listening', {
   room: room.id,
   tick: 0,
   host: HOST,
   port: PORT.toString(),
+  clientDir: CLIENT_DIR,
   mapTemplate: activeMapTemplateId ?? 'random',
   mapTemplateId: room.mapTemplateId ?? 'N/A',
   seed: room.seed.toString(),

@@ -1,0 +1,12 @@
+node_modules
+**/node_modules
+.git
+.github
+shared/dist
+server/dist
+client/dist
+**/*.tsbuildinfo
+docs
+tools
+server/data/profiles.json
+*.md

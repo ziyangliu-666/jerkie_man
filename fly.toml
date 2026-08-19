@@ -1,0 +1,42 @@
+# Fly.io 部署配置 —— 单域名全栈：静态资源与 WebSocket 共用 8080 端口
+app = 'jerkie-man'
+primary_region = 'sin'
+
+[build]
+
+[env]
+  PORT = '8080'
+  HOST = '0.0.0.0'
+  NODE_ENV = 'production'
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  # 有状态游戏服务器：房间状态在内存中，必须常驻且只能单实例，
+  # 否则玩家会被负载均衡分到不同进程、看不到彼此。
+  auto_stop_machines = false
+  auto_start_machines = true
+  min_machines_running = 1
+  processes = ['app']
+
+  [http_service.concurrency]
+    type = 'connections'
+    soft_limit = 150
+    hard_limit = 250
+
+  [[http_service.checks]]
+    interval = '30s'
+    timeout = '5s'
+    grace_period = '20s'
+    method = 'GET'
+    path = '/healthz'
+
+# 玩家档案 profiles.json 的持久化存储，避免重启丢档
+[mounts]
+  source = 'jerkie_data'
+  destination = '/app/server/data'
+
+[[vm]]
+  memory = '512mb'
+  cpu_kind = 'shared'
+  cpus = 1

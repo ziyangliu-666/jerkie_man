@@ -3614,15 +3614,21 @@ let inputSeq = 0;
 let selectedEntity: PLAYER_STATE | null = null;
 
 // 动态构建 WebSocket 服务器地址
-// 总是根据当前页面访问的 Hostname 加上固定的 18723 端口
+// 协议跟随页面：HTTPS 页面必须用 wss://，否则浏览器会以混合内容拦截
 function getDefaultWebSocketUrl(): string {
-  const hostname = window.location.hostname;
-  // 如果是 HTTPS 页面则尝试 WSS（但在私有部署没有证书时可能需要回退到 WS，这里先保持协议跟随）
-  // 注意：如果页面是 HTTP，这里就是 ws://
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-  
-  // 假设服务器始终在同一主机名的 18723 端口运行
-  return `${protocol}//${hostname}:18723`;
+
+  // 1. 构建期显式指定（前后端分离部署时使用）
+  const configured = import.meta.env.VITE_SERVER_URL?.trim();
+  if (configured) return configured;
+
+  // 2. 开发环境：Vite dev server 在 5173，游戏服务端单独跑在 18723
+  if (import.meta.env.DEV) {
+    return `${protocol}//${window.location.hostname}:18723`;
+  }
+
+  // 3. 生产环境：服务端与静态资源同源同端口，直接复用当前 host（含端口）
+  return `${protocol}//${window.location.host}`;
 }
 
 // 动态构建 WebSocket 服务器地址（支持内网穿透）

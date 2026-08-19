@@ -1,105 +1,28 @@
-name: Deploy Client and Server
+name: Deploy to Fly.io
 
 on:
   push:
     branches: [ main ]
   workflow_dispatch:
 
+# 有状态游戏服务器：同一时间只允许一个部署在跑，避免机器被并发替换
+concurrency:
+  group: fly-deploy
+  cancel-in-progress: false
+
 jobs:
   deploy:
+    name: Deploy app
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-          cache: 'npm'
+      - name: Setup flyctl
+        uses: superfly/flyctl-actions/setup-flyctl@master
 
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Build Shared
-        run: npm run build --workspace=shared
-
-      - name: Build Server
-        run: npm run build --workspace=server
-
-      - name: Build Client
-        run: npm run build --workspace=client
-
-      - name: Prepare Deployment Files
-        run: |
-          # Create strict directory structure for deployment
-          mkdir -p deployment/server
-          mkdir -p deployment/client
-
-          # Prepare Server Artifacts
-          # We copy the root package files and the workspaces needed for the server
-          cp package.json deployment/server/
-          cp package-lock.json deployment/server/
-
-          # Copy Shared workspace (dist + package.json)
-          mkdir -p deployment/server/shared
-          cp shared/package.json deployment/server/shared/
-          cp -r shared/dist deployment/server/shared/
-          cp -r shared/maps deployment/server/shared/
-
-          # Copy Server workspace (dist + package.json)
-          mkdir -p deployment/server/server
-          cp server/package.json deployment/server/server/
-          cp -r server/dist deployment/server/server/
-          
-          # Copy Client package.json just to satisfy npm workspaces during install
-          mkdir -p deployment/server/client
-          cp client/package.json deployment/server/client/
-
-          # Prepare Client Artifacts (Static Files)
-          cp -r client/dist/* deployment/client/
-
-      - name: Deploy to Server via SCP
-        uses: appleboy/scp-action@v0.1.7
-        with:
-          host: ${{ secrets.SSH_HOST }}
-          username: ${{ secrets.SSH_USER }}
-          key: ${{ secrets.SSH_KEY }}
-          target: ${{ vars.DEPLOY_PATH }}
-          source: "deployment/*"
-          strip_components: 1
-
-      - name: Start Server via SSH
-        uses: appleboy/ssh-action@v1.0.3
-        with:
-          host: ${{ secrets.SSH_HOST }}
-          username: ${{ secrets.SSH_USER }}
-          key: ${{ secrets.SSH_KEY }}
-          script: |
-            # Go to server directory
-            cd ${{ vars.DEPLOY_PATH }}/server
-            
-            echo "Installing dependencies..."
-            # Install production dependencies for all workspaces
-            # Using 'npm install' instead of 'ci' for better compatibility with older Node/NPM versions (e.g. Node 17)
-            npm install --no-save --omit=dev
-            
-            echo "Starting server..."
-            # Use PM2 if available, otherwise fallback to node
-            if command -v pm2 &> /dev/null; then
-              # Check if process exists and restart, else start
-              if pm2 list | grep -q "jerkie-server"; then
-                 pm2 restart jerkie-server
-              else
-                 pm2 start server/dist/main.js --name jerkie-server
-              fi
-              pm2 save
-            else
-              echo "PM2 not found. It is recommended to install PM2 (npm install -g pm2)."
-              echo "Attempting to start with node in background..."
-              # Simple kill for previous instance if running plainly
-              pkill -f "node server/dist/main.js" || true
-              nohup node server/dist/main.js > server.log 2>&1 &
-            fi
-            
-            echo "Deployment finished!"
+      # --ha=false：房间状态存在内存里，必须保持单实例
+      - name: Deploy
+        run: flyctl deploy --remote-only --ha=false
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
