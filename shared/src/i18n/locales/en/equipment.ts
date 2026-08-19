@@ -57,4 +57,18 @@ export const EQUIPMENT: Record<string, string> = {
   'unit.hps': '{value} HP/s',
   'unit.sec': '{value}s',
   'unit.px': '{value} px',
+
+  // 属性条的短标签。空间极窄，英文 3-5 个大写字母，中文 2 字。
+  'stat.short.damage': 'DMG',
+  'stat.short.rpm': 'RPM',
+  'stat.short.mag': 'MAG',
+  'stat.short.range': 'RNG',
+  'stat.short.reach': 'REACH',
+  'stat.short.armor': 'PROT',
+  'stat.short.capacity': 'SLOTS',
+  'stat.short.speed': 'SPD',
+  'stat.short.heal': 'HEAL',
+  'stat.short.radius': 'AREA',
+  'stat.short.duration': 'TIME',
+  'stat.short.dps': 'DPS',
 };

@@ -142,7 +142,7 @@ admin.showPlayers()  // 查看所有玩家的详细信息
 
 ### 客户端
 
-- **账号ID**: 存储在 `localStorage.jerkie_man_account_id`
+- **账号ID**: 存储在 `localStorage.zp_account_id`
 - **清空方法**: `__admin.resetAccount()` 或 `Alt+Shift+R`
 
 ### 服务端

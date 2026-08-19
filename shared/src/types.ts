@@ -16,6 +16,9 @@ export type ItemType = {
   weight?: number;   // optional future use
   // 消耗品属性（可选）
   consumableProps?: {
+    // 投掷标记。有实际爆炸/烟雾/致盲/燃烧半径的道具会被自动识别为可投掷；
+    // 像全息诱饵这种「靠投掷部署但没有任何半径」的，用这个字段显式声明。
+    throwable?: boolean;
     // 医疗包属性
     healAmount?: number;  // 回复的生命值
     // Buff 属性

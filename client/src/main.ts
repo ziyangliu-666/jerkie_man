@@ -31,6 +31,9 @@ import {
   getItemType,
   getAllItemTypes,
   getWeaponDef,
+  WEAPONS,
+  ARMORS,
+  BAGS,
   getBagDef,
   getArmorDef,
   msToTicks,
@@ -2972,16 +2975,13 @@ function createItemCard(mergedItem: MergedItem, itemType: ItemType, source: 'pre
     card.appendChild(descEl);
   }
   
-  // 创建数值统计元素（如果有）
-  if (statsText) {
+  // 装备走属性条，消耗品/材料没有可比维度，仍旧用一行文字
+  const statBars = renderStatBars(getItemStatBars(mergedItem.typeId));
+  if (statBars) {
+    card.appendChild(statBars);
+  } else if (statsText) {
     const statsEl = document.createElement('div');
     statsEl.className = 'stash-card-stats';
-    statsEl.style.color = '#0ff';
-    statsEl.style.fontSize = '11px';
-    statsEl.style.fontWeight = 'bold';
-    statsEl.style.fontFamily = "var(--font-mono)";
-    statsEl.style.letterSpacing = '0.5px';
-    statsEl.style.textShadow = '0 0 8px rgba(0, 255, 255, 0.3)';
     statsEl.textContent = statsText;
     card.appendChild(statsEl);
   }
@@ -3091,6 +3091,175 @@ function createItemCard(mergedItem: MergedItem, itemType: ItemType, source: 'pre
 // 新增: 获取物品简短描述
 // 返回值仍然是"描述\n属性行"两段式，调用方按 \n 拆。
 // 属性标签一律走 stat.* key（由 locales/*/equipment.ts 提供），这里只负责拼装顺序。
+// ===== 装备属性条 ===================================================
+// 物品卡原本把属性拼成一行文字（"Damage: 25 | Mag: 6 | Range: 960 px"），
+// 在窄卡片里会折行，同一排卡片高度就参差不齐；而且纯数字没有横向可比性 ——
+// 玩家看不出 25 伤害到底算高还是低。改成按全表最大值归一化的横条。
+
+type StatBar = {
+  label: string;
+  display: string;
+  ratio: number; // 0..1
+  tone?: 'buff' | 'debuff';
+};
+
+/**
+ * 归一化基准，模块加载时算一次。
+ *
+ * 填充比例走平方根而不是线性：射程从 150（双管霰弹）到 6000（反器材狙）跨了 40 倍，
+ * 线性归一化会让除了狙击枪之外的所有武器都趴在最左边，条就失去了比较意义。
+ */
+const STAT_SCALE = (() => {
+  const all = Object.values(WEAPONS);
+  const guns = all.filter((w) => w.weaponKind !== 'melee');
+  const melee = all.filter((w) => w.weaponKind === 'melee');
+  // 榴弹类的直伤只有个位数，杀伤全在爆炸上（榴弹发射器直伤 12、爆炸 400）。
+  // 只看 damage 会让全场最猛的爆炸武器在条上垫底，所以取两者较大值。
+  const burstDamage = (w: (typeof all)[number]) =>
+    Math.max(w.damage * (w.pelletCount ?? 1), w.explosionDamage ?? 0);
+  const rangeOf = (w: (typeof all)[number]) => Math.floor((w.bulletSpeed * w.bulletLifeMs) / 1000);
+  const max = (xs: number[]) => (xs.length ? Math.max(...xs) : 0);
+  return {
+    damage: max(all.map(burstDamage)),
+    rpm: max(all.map((w) => 60000 / w.fireIntervalMs)),
+    mag: max(guns.map((w) => w.magSize)),
+    range: max(guns.map(rangeOf)),
+    reach: max(melee.map((w) => w.meleeRange ?? 0)),
+    armor: max(Object.values(ARMORS).map((a) => a.damageReduction)),
+    capacity: max(Object.values(BAGS).map((b) => b.bagCap)),
+  };
+})();
+
+const barRatio = (value: number, max: number): number =>
+  max > 0 ? Math.min(1, Math.sqrt(Math.max(0, value) / max)) : 0;
+
+/** 移速加成/减益。范围两侧对称，用 ±40% 作满格。 */
+function speedBar(multiplier: number | undefined): StatBar | null {
+  if (!multiplier || multiplier === 1) return null;
+  const pct = Math.round((multiplier - 1) * 100);
+  if (pct === 0) return null;
+  return {
+    label: t('stat.short.speed'),
+    display: pct > 0 ? `+${pct}%` : `${pct}%`,
+    ratio: Math.min(1, Math.abs(pct) / 40),
+    tone: pct > 0 ? 'buff' : 'debuff',
+  };
+}
+
+/** 返回该物品适合画成条的属性；消耗品与材料返回空数组，仍走文字描述。 */
+function getItemStatBars(typeId: string): StatBar[] {
+  try {
+    const w = getWeaponDef(typeId);
+    const bars: StatBar[] = [];
+    const pellets = w.pelletCount ?? 1;
+    const direct = w.damage * pellets;
+    const blast = w.explosionDamage ?? 0;
+    const impact = Math.max(direct, blast);
+    bars.push({
+      label: t('stat.short.damage'),
+      display:
+        blast > direct
+          ? String(blast)
+          : pellets > 1
+            ? `${direct} (${pellets}×${w.damage})`
+            : String(direct),
+      ratio: barRatio(impact, STAT_SCALE.damage),
+    });
+    const rpm = Math.floor(60000 / w.fireIntervalMs);
+    bars.push({
+      label: t('stat.short.rpm'),
+      display: String(rpm),
+      ratio: barRatio(rpm, STAT_SCALE.rpm),
+    });
+    if (w.weaponKind === 'melee') {
+      const reach = w.meleeRange ?? 0;
+      bars.push({
+        label: t('stat.short.reach'),
+        display: String(reach),
+        ratio: barRatio(reach, STAT_SCALE.reach),
+      });
+    } else {
+      bars.push({
+        label: t('stat.short.mag'),
+        display: String(w.magSize),
+        ratio: barRatio(w.magSize, STAT_SCALE.mag),
+      });
+      const range = Math.floor((w.bulletSpeed * w.bulletLifeMs) / 1000);
+      bars.push({
+        label: t('stat.short.range'),
+        display: String(range),
+        ratio: barRatio(range, STAT_SCALE.range),
+      });
+    }
+    const speed = speedBar(w.buffs?.speedMultiplier);
+    if (speed) bars.push(speed);
+    return bars;
+  } catch {
+    /* 不是武器 */
+  }
+
+  try {
+    const a = getArmorDef(typeId);
+    const bars: StatBar[] = [
+      {
+        label: t('stat.short.armor'),
+        display: `${Math.round(a.damageReduction * 100)}%`,
+        ratio: barRatio(a.damageReduction, STAT_SCALE.armor),
+      },
+    ];
+    const speed = speedBar(a.buffs?.speedMultiplier);
+    if (speed) bars.push(speed);
+    return bars;
+  } catch {
+    /* 不是护甲 */
+  }
+
+  try {
+    const b = getBagDef(typeId);
+    return [
+      {
+        label: t('stat.short.capacity'),
+        display: String(b.bagCap),
+        ratio: barRatio(b.bagCap, STAT_SCALE.capacity),
+      },
+    ];
+  } catch {
+    /* 不是背包 */
+  }
+
+  return [];
+}
+
+/** 把属性条渲染成 DOM。数值全部走 textContent，不拼 HTML。 */
+function renderStatBars(bars: StatBar[]): HTMLElement | null {
+  if (bars.length === 0) return null;
+  const wrap = document.createElement('div');
+  wrap.className = 'stat-bars';
+  for (const bar of bars) {
+    const row = document.createElement('div');
+    row.className = bar.tone ? `stat-bar stat-bar--${bar.tone}` : 'stat-bar';
+
+    const label = document.createElement('span');
+    label.className = 'stat-bar-label';
+    label.textContent = bar.label;
+
+    const track = document.createElement('span');
+    track.className = 'stat-bar-track';
+    const fill = document.createElement('i');
+    fill.className = 'stat-bar-fill';
+    fill.style.width = `${Math.round(bar.ratio * 100)}%`;
+    track.appendChild(fill);
+
+    const value = document.createElement('span');
+    value.className = 'stat-bar-value';
+    value.textContent = bar.display;
+
+    row.append(label, track, value);
+    wrap.appendChild(row);
+  }
+  return wrap;
+}
+
 function getItemDescription(typeId: string, itemType: ItemType): string {
   const parts: string[] = [];
 
@@ -3103,7 +3272,9 @@ function getItemDescription(typeId: string, itemType: ItemType): string {
   /** 速度 buff/debuff：正负号在数值里，句子结构不变。 */
   const speedStat = (multiplier: number | undefined): string | null => {
     if (!multiplier) return null;
-    const change = Math.floor((multiplier - 1) * 100);
+    // 用 round 不用 floor：1.4 - 1 在浮点里是 0.3999…，floor 会把 +40% 显示成 +39%，
+    // 而属性条那边用的是 round，两个数字会自相矛盾。
+    const change = Math.round((multiplier - 1) * 100);
     if (change === 0) return null;
     return statLine('stat.speed', change > 0 ? `+${change}%` : `${change}%`);
   };
@@ -3179,7 +3350,7 @@ function getItemDescription(typeId: string, itemType: ItemType): string {
       stats.push(statLine('stat.dps', t('unit.hps', { value: props.fireDamagePerSecond })));
     }
     if (props.buffDurationMs && props.speedMultiplier) {
-      stats.push(statLine('stat.speedBonus', `+${Math.floor((props.speedMultiplier - 1) * 100)}%`));
+      stats.push(statLine('stat.speedBonus', `+${Math.round((props.speedMultiplier - 1) * 100)}%`));
       stats.push(statLine('stat.duration', seconds(props.buffDurationMs)));
     }
     if (props.buffDurationMs && props.hpPerSecond) {
@@ -3239,14 +3410,21 @@ function createShopRow(itemType: ItemType): HTMLElement {
   const meta = document.createElement('div');
   meta.className = 'shop-card-meta';
   
-  let metaHtml = '';
   if (descText) {
-    metaHtml += `<div style="margin-bottom: 4px; color: rgba(255,255,255,0.7);">${escapeHtml(descText)}</div>`;
+    const descEl = document.createElement('div');
+    descEl.className = 'shop-card-desc';
+    descEl.textContent = descText;
+    meta.appendChild(descEl);
   }
-  if (statsText) {
-    metaHtml += `<div style="color: #0ff; font-family: var(--font-mono); font-weight: bold; letter-spacing: 0.5px;">${escapeHtml(statsText)}</div>`;
+  const shopStatBars = renderStatBars(getItemStatBars(itemType.id));
+  if (shopStatBars) {
+    meta.appendChild(shopStatBars);
+  } else if (statsText) {
+    const statsEl = document.createElement('div');
+    statsEl.className = 'shop-card-stats';
+    statsEl.textContent = statsText;
+    meta.appendChild(statsEl);
   }
-  meta.innerHTML = metaHtml;
   row.appendChild(meta);
   
   // 3. Actions (Buttons)

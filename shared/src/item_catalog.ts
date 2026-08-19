@@ -320,9 +320,10 @@ export const ITEM_CATALOG: Record<string, ItemType> = {
     value: 100,
     stackMax: 3,
     consumableProps: {
-      // 诱饵不需要很多属性，由服务器逻辑处理生成实体
-      // 借用 explosionRadius 作为"触发"标记
-      explosionRadius: 1, 
+      // 诱饵没有任何作用半径，落地后由服务端直接生成实体。
+      // 以前这里写 explosionRadius: 1 只是为了骗过 isThrowableItem，
+      // 结果物品卡真的会显示一条「爆炸半径 1 像素」。
+      throwable: true,
     },
   },
   i_sentry_turret: {
@@ -485,5 +486,5 @@ export function isThrowableItem(typeId: string): boolean {
   const itemType = ITEM_CATALOG[typeId];
   if (!itemType?.consumableProps) return false;
   const props = itemType.consumableProps;
-  return !!(props.explosionRadius || props.smokeRadius || props.flashRadius || props.fireRadius);
+  return !!(props.throwable || props.explosionRadius || props.smokeRadius || props.flashRadius || props.fireRadius);
 }

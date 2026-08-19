@@ -1707,7 +1707,9 @@
       align-items: center;
       justify-content: center;
       gap: 30px;
-      margin: 0 24px;
+      /* 右侧留白避开 #bgmControl —— 它是 position:fixed 的悬浮控件（top:10px;
+         right:320px），会浮在顶栏上方。装饰层缩回来，免得文字被音乐按钮压住。 */
+      margin: 0 230px 0 24px;
       overflow: hidden;
       pointer-events: none;
     }
@@ -2782,6 +2784,99 @@
       color: rgba(255, 255, 255, 0.6);
       line-height: 1.4;
       min-height: 32px;
+      /* 卡片在网格里并排，靠 meta 撑高。让它吃掉剩余空间，
+         按钮就始终贴在卡片底部，一排卡片的按钮才会对齐。 */
+      flex: 1 1 auto;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* 描述夹到两行。原本长短不一的描述会把同一排卡片撑成不同高度。 */
+    .shop-card-desc,
+    .stash-card-desc {
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      line-clamp: 2;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+      color: rgba(255, 255, 255, 0.62);
+      margin-bottom: 6px;
+    }
+
+    /* ===== 装备属性条 =====
+       替代原来一行挤在一起的 "Damage: 25 | Mag: 6 | Range: 960 px"：
+       那行在窄卡里会折行、把卡片撑歪，而且纯数字看不出强弱。
+       条长按全表最大值归一化，横向一扫就能比较。 */
+    .stat-bars {
+      display: grid;
+      gap: 3px;
+      margin-top: auto;
+      padding-top: 6px;
+    }
+
+    .stat-bar {
+      display: grid;
+      grid-template-columns: 40px 1fr auto;
+      align-items: center;
+      gap: 8px;
+      font-family: var(--font-mono);
+      font-size: 10px;
+      line-height: 1;
+    }
+
+    .stat-bar-label {
+      color: rgba(255, 255, 255, 0.42);
+      letter-spacing: 0.5px;
+    }
+
+    .stat-bar-track {
+      height: 4px;
+      background: rgba(255, 255, 255, 0.07);
+      border-radius: 2px;
+      overflow: hidden;
+    }
+
+    .stat-bar-fill {
+      display: block;
+      height: 100%;
+      border-radius: 2px;
+      background: linear-gradient(90deg, rgba(0, 255, 255, 0.35), rgba(0, 255, 255, 0.95));
+      box-shadow: 0 0 6px rgba(0, 255, 255, 0.35);
+    }
+
+    .stat-bar-value {
+      color: #0ff;
+      font-weight: bold;
+      text-align: right;
+      min-width: 30px;
+      white-space: nowrap;
+    }
+
+    /* 移速加成/减益单独着色，正负一眼可辨 */
+    .stat-bar--buff .stat-bar-fill {
+      background: linear-gradient(90deg, rgba(74, 222, 128, 0.35), rgba(74, 222, 128, 0.95));
+      box-shadow: 0 0 6px rgba(74, 222, 128, 0.35);
+    }
+
+    .stat-bar--buff .stat-bar-value { color: #4ade80; }
+
+    .stat-bar--debuff .stat-bar-fill {
+      background: linear-gradient(90deg, rgba(248, 113, 113, 0.35), rgba(248, 113, 113, 0.95));
+      box-shadow: 0 0 6px rgba(248, 113, 113, 0.35);
+    }
+
+    .stat-bar--debuff .stat-bar-value { color: #f87171; }
+
+    /* 消耗品/材料没有可比维度，保留一行文字 */
+    .shop-card-stats,
+    .stash-card-stats {
+      margin-top: auto;
+      padding-top: 6px;
+      color: #0ff;
+      font-family: var(--font-mono);
+      font-size: 10px;
+      font-weight: bold;
+      letter-spacing: 0.5px;
     }
 
     .shop-card-actions {
