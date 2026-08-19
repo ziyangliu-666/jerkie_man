@@ -154,7 +154,7 @@ export function warmupAllFields(): void {
     'inventory', 'bagCap',
     'inBush', 'inBushId', 'inSmoke', 'inSmokeId',
     'isFlashed', 'flashEndTime', 'isStunned', 'stunnedEndTime',
-    'killedBy', 'killedByWeaponName',
+    'killedBy', 'killedByWeapon',
     'usingItemTypeId', 'usingItemRemainingMs', 'usingItemTotalMs',
     'disguisedAsAiBehavior', 'disguisedAsAiRole', 'disguisedAimRad',
     
@@ -196,6 +196,10 @@ export function warmupAllFields(): void {
     // 世界初始化
     'staticObstacles', 'extractZones', 'bushZones', 'spawnPoints',
     'width', 'height', 'tileSize', 'tiles',
+
+    // ⚠️ 只能往下追加，绝不能在上面插入或删除（短名按索引分配）。
+    // 结构化击杀归因（killedBy / killedByWeapon 的内层字段）
+    'enemyKind', 'ownerName', 'itemTypeId', 'specialId',
   ];
   
   for (const field of allFields) {

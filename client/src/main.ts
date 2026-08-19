@@ -8,6 +8,7 @@ import { BulletTrackManager } from './bulletTracks.js'; // 子弹轨迹管理器
 import { UIOverlay } from './uiOverlay.js'; // 新增: 屏幕 HUD 层
 import { ThrowingAim } from './throwingAim.js'; // 新增: 投掷瞄准系统
 import { AudioManager } from './audioManager.js'; // 新增: BGM 系统
+import { initTutorial } from './tutorial.js'; // 新手引导：自包含模块，自注入样式
 import type {
   S2C_SNAPSHOT,
   PLAYER_STATE,
@@ -17,10 +18,13 @@ import type {
   LootBag,
   PlayerInventory,
   ItemInstance,
+  ItemType,
   MAP_CONFIG,
   PlayerProfile,
   S2C_KILL_FEED, // 新增: 导入 Kill Feed 类型
-} from '@jerkie-man/shared';
+  COMBAT_ACTOR,
+  COMBAT_WEAPON,
+} from '@ziyang-protocol/shared';
 import {
   loadMapConfig,
   simulatePlayerMove,
@@ -29,7 +33,6 @@ import {
   getWeaponDef,
   getBagDef,
   getArmorDef,
-  rarityToZh,
   msToTicks,
   getEquippedWeaponDef,
   getFireSchedule,
@@ -44,7 +47,233 @@ import {
   isThrowableItem,
   PLAYER_HIT_RADIUS,
   EXTRACT_DURATION_MS,
-} from '@jerkie-man/shared';
+  t,
+  hasKey,
+  setLocale,
+  getLocale,
+  onLocaleChange,
+  resolveLocale,
+  isLocale,
+  LOCALE_LABELS,
+  SUPPORTED_LOCALES,
+  itemName,
+  itemDesc,
+  itemShortName,
+  rarityLabel,
+  combatActorName,
+  combatWeaponName,
+} from '@ziyang-protocol/shared';
+import type { Locale, Rarity } from '@ziyang-protocol/shared';
+
+// ===== 本地化引导 =====================================================
+// 必须在任何 t() 调用之前跑：locale 决定了模块初始化阶段生成的所有文案。
+const LOCALE_STORAGE_KEY = 'ziyang_locale';
+
+function readStoredLocale(): Locale | null {
+  try {
+    const raw = localStorage.getItem(LOCALE_STORAGE_KEY);
+    return isLocale(raw) ? raw : null;
+  } catch {
+    return null;
+  }
+}
+
+function storeLocale(locale: Locale): void {
+  try {
+    localStorage.setItem(LOCALE_STORAGE_KEY, locale);
+  } catch {
+    /* private mode / storage disabled — locale just won't persist */
+  }
+}
+
+const storedLocale = readStoredLocale();
+// 首次访问（localStorage 无记录）时用浏览器语言智能预选，并弹语言选择框。
+const isFirstVisit = storedLocale === null;
+const browserLanguages: readonly string[] =
+  navigator.languages && navigator.languages.length > 0
+    ? navigator.languages
+    : [navigator.language || 'en'];
+setLocale(storedLocale ?? resolveLocale(browserLanguages));
+
+/**
+ * 把 data-i18n / data-i18n-placeholder / data-i18n-title 标记的元素刷成当前语言。
+ * 启动时和每次切换语言后调用。
+ */
+function applyI18n(root: ParentNode = document): void {
+  const self = root as Partial<Element>;
+  const hasAttr = typeof self.getAttribute === 'function';
+
+  const textKey = hasAttr ? (root as Element).getAttribute('data-i18n') : null;
+  if (textKey) (root as HTMLElement).textContent = t(textKey);
+  root.querySelectorAll<HTMLElement>('[data-i18n]').forEach((el) => {
+    const key = el.getAttribute('data-i18n');
+    if (key) el.textContent = t(key);
+  });
+
+  const phKey = hasAttr ? (root as Element).getAttribute('data-i18n-placeholder') : null;
+  if (phKey) (root as HTMLInputElement).placeholder = t(phKey);
+  root.querySelectorAll<HTMLElement>('[data-i18n-placeholder]').forEach((el) => {
+    const key = el.getAttribute('data-i18n-placeholder');
+    if (key) (el as HTMLInputElement).placeholder = t(key);
+  });
+
+  const titleKey = hasAttr ? (root as Element).getAttribute('data-i18n-title') : null;
+  if (titleKey) (root as HTMLElement).title = t(titleKey);
+  root.querySelectorAll<HTMLElement>('[data-i18n-title]').forEach((el) => {
+    const key = el.getAttribute('data-i18n-title');
+    if (key) el.title = t(key);
+  });
+}
+
+/** 语言选择控件：设置面板里的 select、启动屏上的 select、以及任意 data-locale 按钮。 */
+const LANGUAGE_SELECT_SELECTOR =
+  '#languageSelect, #startLanguageSelect, [data-locale-select]';
+
+function syncLanguageControls(): void {
+  const locale = getLocale();
+  document.querySelectorAll<HTMLSelectElement>(LANGUAGE_SELECT_SELECTOR).forEach((select) => {
+    // 选项可能由 HTML 提供，也可能没有——没有就补齐，保证任何一版 HTML 都能用。
+    if (select.options.length !== SUPPORTED_LOCALES.length) {
+      select.innerHTML = '';
+      for (const code of SUPPORTED_LOCALES) {
+        const option = document.createElement('option');
+        option.value = code;
+        option.textContent = LOCALE_LABELS[code];
+        select.appendChild(option);
+      }
+    }
+    select.value = locale;
+  });
+  document.querySelectorAll<HTMLElement>('[data-locale]').forEach((el) => {
+    el.classList.toggle('active', el.getAttribute('data-locale') === locale);
+  });
+}
+
+/** 切换语言的唯一入口：持久化 + 通知订阅者（订阅者负责重刷 UI）。 */
+function changeLocale(next: string): void {
+  if (!isLocale(next)) return;
+  storeLocale(next);
+  if (next === getLocale()) {
+    // setLocale 对同值是 no-op，这里手动同步一次控件状态。
+    syncLanguageControls();
+    return;
+  }
+  setLocale(next);
+}
+
+function bindLanguageControls(): void {
+  document.querySelectorAll<HTMLSelectElement>(LANGUAGE_SELECT_SELECTOR).forEach((select) => {
+    if (select.dataset.localeBound === '1') return;
+    select.dataset.localeBound = '1';
+    select.addEventListener('change', () => {
+      changeLocale(select.value);
+      select.blur(); // 立即失焦，避免干扰游戏输入
+    });
+  });
+  document.querySelectorAll<HTMLElement>('[data-locale]').forEach((el) => {
+    if (el.dataset.localeBound === '1') return;
+    el.dataset.localeBound = '1';
+    el.addEventListener('click', () => {
+      const code = el.getAttribute('data-locale');
+      if (code) changeLocale(code);
+      if (el instanceof HTMLElement) el.blur();
+    });
+  });
+}
+
+function closeLanguageModal(): void {
+  const modal = document.getElementById('languageModal');
+  if (modal) modal.style.display = 'none';
+}
+
+/** 首次访问询问一次语言；之后只能从设置面板改。 */
+function maybePromptLanguage(): void {
+  if (!isFirstVisit) return;
+  const modal = document.getElementById('languageModal');
+  if (!modal) {
+    // HTML 还没提供弹窗——直接落盘浏览器预选值，避免每次刷新都重新猜。
+    storeLocale(getLocale());
+    return;
+  }
+  modal.style.display = 'flex';
+  const confirmBtn = document.getElementById('languageConfirm');
+  const dismiss = () => {
+    storeLocale(getLocale());
+    closeLanguageModal();
+  };
+  confirmBtn?.addEventListener('click', dismiss, { once: true });
+  // 直接点语言按钮（而不是 select + 确认）也算选完了。
+  modal.querySelectorAll<HTMLElement>('[data-locale]').forEach((el) => {
+    el.addEventListener('click', dismiss, { once: true });
+  });
+}
+
+/**
+ * 切换语言后重刷所有动态 UI。
+ * 静态文案走 applyI18n，JS 生成的部分必须整块重建（它们的文本是在生成时定死的）。
+ */
+function refreshLocalizedUI(): void {
+  document.documentElement.lang = getLocale();
+  // <title> 在 <head> 里，data-i18n 对它不生效，必须在 JS 里设。
+  document.title = t('app.title');
+  applyI18n(document);
+  syncLanguageControls();
+
+  // 服务器地址输入框的 placeholder 带插值，applyI18n 覆盖不到。
+  const serverInput = document.getElementById('serverUrlInput') as HTMLInputElement | null;
+  if (serverInput && !serverInput.value) {
+    serverInput.placeholder = t('start.server.placeholder', { url: getDefaultWebSocketUrl() });
+  }
+
+  // 物品卡是按 typeId 复用的（reconcileItemList 只更新数量和 iid，不碰文案），
+  // 所以换语言必须先整个丢掉，让下面的 update* 重新生成。
+  for (const list of [prepList, stashList, shopList]) {
+    if (!list) continue;
+    list.innerHTML = '';
+    delete list.dataset.empty;
+  }
+
+  updateHideoutUI();
+  updateEquipmentSlots();
+  updateStashList();
+  if (hideoutShop && hideoutShop.classList.contains('active')) {
+    // 保留"已购买 N 个"的计数——换语言只是重绘，不该把玩家的操作记录清零。
+    updateShopList(true);
+  }
+
+  // 局内 HUD：背包列表有内容签名缓存，必须作废才会重建。
+  lastRaidBagSignature = '';
+  updateRaidEquipmentUI(raidLocalPlayer);
+  updateHotbarHud(raidLocalPlayer);
+  updateWeaponHud(raidLocalPlayer);
+  updateResultUI();
+
+  // 打开着的装备选择弹窗要跟着换语言。
+  if (equipSelectModal && equipSelectModal.classList.contains('active') && currentSelectSlot) {
+    showEquipSelectModal(currentSelectSlot);
+  }
+
+  // 聊天命令补全列表是即时生成的，重刷一次就够。
+  if (chatInput && chatInput.value.startsWith('/')) {
+    updateSuggestions(chatInput.value);
+  }
+
+  // Canvas 在 renderLoop 里每帧重绘，不需要显式失效；这里只把缓存的
+  // canvas 布局矩形刷一遍，避免换语言引起的 layout shift 让坐标换算错位。
+  renderer.refreshRect();
+}
+
+onLocaleChange(() => refreshLocalizedUI());
+
+function initLocalizationUI(): void {
+  document.documentElement.lang = getLocale();
+  document.title = t('app.title');
+  applyI18n(document);
+  bindLanguageControls();
+  syncLanguageControls();
+  maybePromptLanguage();
+}
+
 
 // 本地发射 ID 计数器（用于客户端预测子弹对齐）
 let localShotIdCounter = 0;
@@ -343,7 +572,7 @@ inputManager.setStaminaShakeCallback(() => shakeStaminaHud());
 
 // 初始化HUD（使用 debugPanel 作为容器，右侧调试面板）
 const hud = new HUD('debugPanel');
-hud.addEvent('客户端已启动');
+hud.addEvent(t('event.client.started'));
 
 // 初始化 BGM 系统
 const audioManager = AudioManager.getInstance();
@@ -472,7 +701,7 @@ if (startScreen && startGameBtn) {
   // Initialize Server Input from storage or default
   const serverInput = document.getElementById('serverUrlInput') as HTMLInputElement;
   if (serverInput) {
-    const savedUrl = localStorage.getItem('jerkie_man_server_url');
+    const savedUrl = localStorage.getItem('zp_server_url');
     const defaultUrl = getDefaultWebSocketUrl();
     
     // If user has manually set a URL, show it. Otherwise show placeholder.
@@ -480,7 +709,7 @@ if (startScreen && startGameBtn) {
       serverInput.value = savedUrl;
     } else {
       serverInput.value = '';
-      serverInput.placeholder = `Default: ${defaultUrl}`;
+      serverInput.placeholder = t('start.server.placeholder', { url: defaultUrl });
     }
     
     serverInput.addEventListener('input', () => {
@@ -488,9 +717,9 @@ if (startScreen && startGameBtn) {
        let targetUrl = rawVal;
        
        if (rawVal.length > 0) {
-         localStorage.setItem('jerkie_man_server_url', rawVal);
+         localStorage.setItem('zp_server_url', rawVal);
        } else {
-         localStorage.removeItem('jerkie_man_server_url');
+         localStorage.removeItem('zp_server_url');
          targetUrl = defaultUrl;
        }
        
@@ -936,7 +1165,15 @@ function playHideoutExitAnimation(): void {
 }
 
 // 新增: 战局结果数据
-let raidResult: { result: 'EXTRACTED' | 'DIED'; loot: ItemInstance[]; moneyGained: number; moneyLost: number; killedBy?: string; killedByWeaponName?: string } | null = null;
+let raidResult: {
+  result: 'EXTRACTED' | 'DIED';
+  loot: ItemInstance[];
+  moneyGained: number;
+  moneyLost: number;
+  // 结构化 actor/weapon：文案在渲染时才解析，切换语言后结算页会跟着变。
+  killedBy?: COMBAT_ACTOR | null;
+  killedByWeapon?: COMBAT_WEAPON | null;
+} | null = null;
 
 // 新增: 结果页面 DOM 元素
 // 新增: 结果页面 DOM 元素
@@ -999,9 +1236,9 @@ function updateResultUI(): void {
     container.classList.add(isSuccess ? 'result-success' : 'result-fail');
   }
 
-  if (resultTitle) resultTitle.textContent = isSuccess ? 'OPERATION SUCCESS' : 'OPERATION FAILED';
-  if (resultStatusBadge) resultStatusBadge.textContent = isSuccess ? 'EXTRACTED' : 'K.I.A';
-  if (resultStatusText) resultStatusText.textContent = isSuccess ? 'Evacuation Complete' : 'Killed in Action';
+  if (resultTitle) resultTitle.textContent = t(isSuccess ? 'debrief.title.success' : 'debrief.title.failure');
+  if (resultStatusBadge) resultStatusBadge.textContent = t(isSuccess ? 'debrief.status.extracted' : 'debrief.status.kia');
+  if (resultStatusText) resultStatusText.textContent = t(isSuccess ? 'debrief.status.survived' : 'debrief.status.dead');
   
   // 2. Money & Value Calculation
   let lootValue = 0;
@@ -1017,15 +1254,20 @@ function updateResultUI(): void {
   if (resultMoney) resultMoney.textContent = totalValue.toLocaleString();
   if (resultMoneyDetail) {
     const cashTxt = raidResult.moneyGained > 0 ? `+${raidResult.moneyGained}` : `-${raidResult.moneyLost}`;
-    resultMoneyDetail.textContent = `Loot: $${lootValue.toLocaleString()} | Cash: ${cashTxt}`;
+    resultMoneyDetail.textContent = t('debrief.moneyDetail', {
+      loot: `$${lootValue.toLocaleString()}`,
+      cash: cashTxt,
+    });
   }
 
   // 3. Killer Info (Only if failed)
   if (resultDeathInfo) {
-    if (!isSuccess && (raidResult.killedBy || raidResult.killedByWeaponName)) {
+    if (!isSuccess && (raidResult.killedBy || raidResult.killedByWeapon)) {
       resultDeathInfo.style.display = 'flex';
-      if (resultKiller) resultKiller.textContent = raidResult.killedBy || 'Unknown';
-      if (resultKillerWeapon) resultKillerWeapon.textContent = raidResult.killedByWeaponName || '-';
+      if (resultKiller) resultKiller.textContent = combatActorLabel(raidResult.killedBy);
+      if (resultKillerWeapon) {
+        resultKillerWeapon.textContent = combatWeaponLabel(raidResult.killedByWeapon) ?? '-';
+      }
     } else {
       resultDeathInfo.style.display = 'none';
     }
@@ -1043,6 +1285,7 @@ function updateResultUI(): void {
       for (const item of raidResult.loot) {
         try {
           const type = getItemType(item.typeId);
+          const label = itemName(item.typeId);
           const el = document.createElement('div');
           el.className = 'result-item';
           // Determine simple icon
@@ -1051,11 +1294,11 @@ function updateResultUI(): void {
           else if (item.typeId.startsWith('a_')) icon = '🛡️'; // armor
           else if (item.typeId.includes('med')) icon = '💊';
           else if (item.typeId.includes('bag')) icon = '🎒';
-          else if (type.name.includes('Key')) icon = '🔑';
-          
+          else if (item.typeId.includes('key')) icon = '🔑';
+
           el.innerHTML = `
             <div class="result-item-icon">${icon}</div>
-            <div class="result-item-name" title="${type.name}">${type.name}</div>
+            <div class="result-item-name" title="${escapeHtml(label)}">${escapeHtml(label)}</div>
             <div class="result-item-qty">x${item.qty}</div>
             <div class="result-item-val">$${(type.value * item.qty).toLocaleString()}</div>
           `;
@@ -1104,13 +1347,13 @@ function updateHideoutUI(): void {
   
   // 更新顶部栏
   if (hideoutName) {
-    hideoutName.textContent = playerProfile.displayName || '未设置';
+    hideoutName.textContent = playerProfile.displayName || t('hideout.name.unset');
     // 新增: 添加点击改名功能（只在第一次设置）
     if (!hideoutName.dataset.clickHandlerAdded) {
       hideoutName.style.cursor = 'pointer';
       hideoutName.style.textDecoration = 'underline';
       hideoutName.style.color = '#4CAF50';
-      hideoutName.title = '点击改名';
+      hideoutName.title = t('hideout.name.editHint');
       hideoutName.style.pointerEvents = 'auto'; // 确保可以点击
       hideoutName.style.userSelect = 'none'; // 防止选中文本
       hideoutName.style.position = 'relative'; // 确保元素在层级上
@@ -1125,12 +1368,12 @@ function updateHideoutUI(): void {
         e.preventDefault();
         e.stopPropagation();
         e.stopImmediatePropagation();
-        console.log('[hideoutName] 点击事件触发', e);
+        console.log('[hideoutName] name click handler fired', e);
         
         // 显示改名弹窗
         getModalElements();
         if (!renameModal || !renameInput || !renameSubmit || !renameCancel) {
-          console.error('[hideoutName] 改名弹窗元素未找到');
+          console.error('[hideoutName] rename modal elements not found');
           return;
         }
         
@@ -1144,16 +1387,16 @@ function updateHideoutUI(): void {
           if (!renameInput || !renameModal || !renameSubmit || !renameCancel) return;
           const trimmedName = renameInput.value.trim();
           if (trimmedName.length === 0) {
-            alert('昵称不能为空');
+            alert(t('error.callsign.empty'));
             return;
           }
           if (trimmedName.length > 32) {
-            alert('昵称不能超过 32 字符');
+            alert(t('error.callsign.tooLong'));
             return;
           }
           // 发送设置昵称消息
           network.sendSetName(trimmedName);
-          hud.addEvent(`改名: ${trimmedName}`);
+          hud.addEvent(t('event.callsign.set', { name: trimmedName }));
           // 关闭弹窗
           renameModal.style.display = 'none';
           // 移除事件监听器（避免重复添加）
@@ -1202,7 +1445,7 @@ function updateHideoutUI(): void {
         clickHandler(e as MouseEvent);
       }, true);
       hideoutName.dataset.clickHandlerAdded = 'true';
-      console.log('[updateHideoutUI] 已添加名字点击事件监听器', hideoutName);
+      console.log('[updateHideoutUI] name click listener attached', hideoutName);
     }
   }
   if (hideoutMoney) {
@@ -1210,7 +1453,7 @@ function updateHideoutUI(): void {
   }
   if (hideoutStatus) {
     const connState = network.getConnectionState();
-    hideoutStatus.textContent = connState.connected ? '已连接' : '未连接';
+    hideoutStatus.textContent = t(connState.connected ? 'hideout.status.online' : 'hideout.status.offline');
     hideoutStatus.style.color = connState.connected ? '#0ff' : '#f44';
   }
   
@@ -1244,9 +1487,78 @@ function findItemByIid(profile: PlayerProfile, iid: string): ItemInstance | null
   return pool.find(item => item.iid === iid) ?? null;
 }
 
+// ===== 装备属性文案 ===================================================
+// 三个槽位的 meta 行在多处复用（装备槽、选择弹窗、局内 HUD），统一走这里，
+// 保证同一条属性在任何地方都是同一个 key、同一个分隔符。
+
+type EquipSlot = 'weapon' | 'bag' | 'armor';
+
+/**
+ * 击杀播报 / 结算里的「谁」和「用什么」。
+ *
+ * 解析逻辑在 shared/i18n/helpers 里，HUD、名牌、结算三处共用同一份，
+ * 这里只补上「字段可能缺失」的包装 —— 结算页在没有击杀者时要留空而不是显示 Unknown。
+ */
+function combatActorLabel(actor: COMBAT_ACTOR | null | undefined): string {
+  return actor ? combatActorName(actor) : t('killfeed.unknown');
+}
+
+function combatWeaponLabel(weapon: COMBAT_WEAPON | null | undefined): string | null {
+  return weapon ? combatWeaponName(weapon) : null;
+}
+
+/** 稀有度配色。文案一律走 rarityLabel()，颜色是纯视觉，不进 i18n。 */
+const RARITY_COLORS: Record<Rarity, string> = {
+  COMMON: '#aaa',
+  RARE: '#4CAF50',
+  EPIC: '#9d4edd',
+  LEGENDARY: '#ffaa00',
+};
+
+/** 商店/仓库的稀有度分组顺序。 */
+const RARITY_ORDER: readonly Rarity[] = ['COMMON', 'RARE', 'EPIC', 'LEGENDARY'];
+
+// 槽位名是 screens.ts 的 gear.slot.*，别在 ui.ts 里再定义一份。
+const SLOT_LABEL_KEYS: Record<EquipSlot, string> = {
+  weapon: 'gear.slot.weapon',
+  bag: 'gear.slot.backpack',
+  armor: 'gear.slot.armor',
+};
+
+/** 槽位名，用于"选择要装备的X"这类带插值的句子。 */
+function slotLabel(slot: EquipSlot): string {
+  return t(SLOT_LABEL_KEYS[slot]);
+}
+
+/**
+ * equipment.ts 的约定：`stat.*` 是裸标签，调用方渲染成 `标签: 值`，
+ * 多条属性用 ` | ` 连接。带单位的值先过 `unit.*` 模板。
+ */
+function statLine(labelKey: string, value: string | number): string {
+  return `${t(labelKey)}: ${value}`;
+}
+
+/** 抛出 = 该 typeId 不是武器。调用方按原有 try/catch 语义处理。 */
+function weaponMetaText(typeId: string): string {
+  const weaponDef = getWeaponDef(typeId);
+  return [
+    statLine('stat.mag', weaponDef.magSize),
+    statLine('stat.damage', weaponDef.damage),
+  ].join(' | ');
+}
+
+function bagMetaText(typeId: string): string {
+  // stat.capacity 带 count 时解析成整句（Capacity: 8 slots）
+  return t('stat.capacity', { count: getBagDef(typeId).bagCap });
+}
+
+function armorMetaText(typeId: string): string {
+  return statLine('stat.armor', `${Math.floor(getArmorDef(typeId).damageReduction * 100)}%`);
+}
+
 // 新增: 从仓库自动查找并装备对应类型的物品
 // 新增: 显示装备选择列表
-function showEquipSelectModal(slot: 'weapon' | 'bag' | 'armor'): void {
+function showEquipSelectModal(slot: EquipSlot): void {
   getHideoutElements();
   
   if (!playerProfile || !equipSelectModal || !equipSelectList || !equipSelectTitle) {
@@ -1254,8 +1566,9 @@ function showEquipSelectModal(slot: 'weapon' | 'bag' | 'armor'): void {
   }
   
   currentSelectSlot = slot;
-  const slotName = slot === 'weapon' ? '武器' : slot === 'bag' ? '背包' : '防具';
-  equipSelectTitle.textContent = `选择要装备的${slotName}`;
+  const slotName = slotLabel(slot);
+  // 语序陷阱：英文是 "Select a {slot} to equip"，变量在中间，不能拼接。
+  equipSelectTitle.textContent = t('equip.select.titleSlot', { slot: slotName });
   equipSelectList.innerHTML = '';
   
   // 收集所有对应类型的物品
@@ -1286,45 +1599,38 @@ function showEquipSelectModal(slot: 'weapon' | 'bag' | 'armor'): void {
   }
   
   if (availableItems.length === 0) {
-    equipSelectList.innerHTML = `<div style="color: #666; padding: 20px; text-align: center;">仓库和整备区中都没有可装备的${slotName}</div>`;
+    // 语序陷阱：英文是 "No {slot} available in stash or loadout"，整句重写过。
+    renderEmptyState(equipSelectList, 'equip.select.empty', { slot: slotName });
   } else {
+    clearEmptyState(equipSelectList);
     for (const { item, source } of availableItems) {
       const itemType = getItemType(item.typeId);
+      const label = itemName(item.typeId);
       const itemEl = document.createElement('div');
       itemEl.className = 'equip-select-item';
-      
+
       let metaText = '';
-      if (slot === 'weapon') {
-        try {
-          const weaponDef = getWeaponDef(item.typeId);
-          metaText = `弹匣: ${weaponDef.magSize} | 伤害: ${weaponDef.damage}`;
-        } catch {}
-      } else if (slot === 'bag') {
-        try {
-          const bagDef = getBagDef(item.typeId);
-          metaText = `容量: ${bagDef.bagCap}`;
-        } catch {}
-      } else if (slot === 'armor') {
-        try {
-          const armorDef = getArmorDef(item.typeId);
-          metaText = `减伤: ${Math.floor(armorDef.damageReduction * 100)}%`;
-        } catch {}
-      }
-      
+      try {
+        if (slot === 'weapon') metaText = weaponMetaText(item.typeId);
+        else if (slot === 'bag') metaText = bagMetaText(item.typeId);
+        else if (slot === 'armor') metaText = armorMetaText(item.typeId);
+      } catch {}
+
+      const sourceLabel = t(source === 'stash' ? 'equip.source.stash' : 'equip.source.loadout');
       itemEl.innerHTML = `
         <div class="equip-select-item-info">
-          <div class="equip-select-item-name">${itemType.name}</div>
-          <div class="equip-select-item-meta">${metaText} | 价值: ${itemType.value}</div>
+          <div class="equip-select-item-name">${escapeHtml(label)}</div>
+          <div class="equip-select-item-meta">${escapeHtml(metaText)} | ${escapeHtml(statLine('stat.value', itemType.value))}</div>
         </div>
-        <div class="equip-select-item-source">${source === 'stash' ? '仓库' : '整备区'}</div>
+        <div class="equip-select-item-source">${escapeHtml(sourceLabel)}</div>
       `;
-      
+
       itemEl.onclick = () => {
         network.sendEquip(slot, item.iid);
-        hud.addEvent(`装备: ${itemType.name}`);
+        hud.addEvent(t('event.equip.done', { item: label }));
         closeEquipSelectModal();
       };
-      
+
       equipSelectList.appendChild(itemEl);
     }
   }
@@ -1350,7 +1656,7 @@ function showRaidWeaponSelectModal(): void {
     return;
   }
 
-  equipSelectTitle.textContent = '选择要切换的武器';
+  equipSelectTitle.textContent = t('equip.swap.title');
   equipSelectList.innerHTML = '';
 
   const localPlayer = raidLocalPlayer;
@@ -1361,29 +1667,29 @@ function showRaidWeaponSelectModal(): void {
   const availableItems = weaponItems.filter((item: ItemInstance) => currentWeaponTypeId === 'w_fists' || item.typeId !== currentWeaponTypeId);
 
   if (availableItems.length === 0) {
-    equipSelectList.innerHTML = '<div style="color: #666; padding: 20px; text-align: center;">背包里没有可切换的武器</div>';
+    renderEmptyState(equipSelectList, 'equip.swap.empty');
   } else {
+    clearEmptyState(equipSelectList);
     for (const item of availableItems) {
-      const itemType = getItemType(item.typeId);
+      const label = itemName(item.typeId);
       const itemEl = document.createElement('div');
       itemEl.className = 'equip-select-item';
 
       let metaText = '';
       try {
-        const weaponDef = getWeaponDef(item.typeId);
-        metaText = `弹匣: ${weaponDef.magSize} | 伤害: ${weaponDef.damage}`;
+        metaText = weaponMetaText(item.typeId);
       } catch {}
 
       itemEl.innerHTML = `
         <div class="equip-select-item-info">
-          <div class="equip-select-item-name">${itemType.name}</div>
-          <div class="equip-select-item-meta">${metaText}</div>
+          <div class="equip-select-item-name">${escapeHtml(label)}</div>
+          <div class="equip-select-item-meta">${escapeHtml(metaText)}</div>
         </div>
       `;
 
       itemEl.onclick = () => {
         network.sendRaidEquip('weapon', item.iid);
-        hud.addEvent(`切换武器: ${itemType.name}`);
+        hud.addEvent(t('event.weapon.swapped', { item: label }));
         closeEquipSelectModal();
       };
 
@@ -1443,6 +1749,19 @@ function addButtonFeedback(btn: HTMLButtonElement, success: boolean, message?: s
   }, duration);
 }
 
+/** 装备槽的空/无效占位。文本走 textContent，不再拼 HTML 字符串。 */
+function renderSlotPlaceholder(
+  container: HTMLElement,
+  key: string,
+  params?: Record<string, string | number>,
+): void {
+  container.innerHTML = '';
+  const el = document.createElement('div');
+  el.className = 'slot-empty';
+  el.textContent = t(key, params);
+  container.appendChild(el);
+}
+
 // 新增: 更新装备槽位显示
 function updateEquipmentSlots(): void {
   getHideoutElements();
@@ -1456,17 +1775,16 @@ function updateEquipmentSlots(): void {
       const weaponItem = findItemByIid(playerProfile!, playerProfile!.equipment.weaponIid);
       if (weaponItem) {
         try {
-          const weaponDef = getWeaponDef(weaponItem.typeId);
-          const itemType = getItemType(weaponItem.typeId);
+          const metaText = weaponMetaText(weaponItem.typeId);
           const slotItem = document.createElement('div');
           slotItem.className = 'slot-item';
           slotItem.innerHTML = `
             <div class="slot-item-info">
-              <div class="slot-item-name">${itemType.name}</div>
-              <div class="slot-item-meta">弹匣: ${weaponDef.magSize} | 伤害: ${weaponDef.damage}</div>
+              <div class="slot-item-name">${escapeHtml(itemName(weaponItem.typeId))}</div>
+              <div class="slot-item-meta">${escapeHtml(metaText)}</div>
             </div>
             <div class="slot-item-actions">
-              <button class="item-btn unequip-weapon">卸下</button>
+              <button class="item-btn unequip-weapon">${escapeHtml(t('ui.btn.unequip'))}</button>
             </div>
           `;
           const unequipBtn = slotItem.querySelector('.unequip-weapon') as HTMLButtonElement;
@@ -1474,10 +1792,10 @@ function updateEquipmentSlots(): void {
             unequipBtn.onclick = () => {
               unequipBtn.classList.add('loading');
               network.sendEquip('weapon', null);
-              hud.addEvent('卸下武器');
+              hud.addEvent(t('event.unequipped', { slot: slotLabel('weapon') }));
               setTimeout(() => {
                 unequipBtn.classList.remove('loading');
-                addButtonFeedback(unequipBtn, true, '已卸下');
+                addButtonFeedback(unequipBtn, true, t('ui.btn.unequipped'));
               }, 300);
               // 立即失焦，避免干扰游戏输入
               unequipBtn.blur();
@@ -1485,13 +1803,13 @@ function updateEquipmentSlots(): void {
           }
           equipmentWeapon.appendChild(slotItem);
         } catch {
-          equipmentWeapon.innerHTML = '<div class="slot-empty">无效武器</div>';
+          renderSlotPlaceholder(equipmentWeapon, 'slot.invalid', { slot: slotLabel('weapon') });
         }
       } else {
-        equipmentWeapon.innerHTML = '<div class="slot-empty">未装备</div>';
+        renderSlotPlaceholder(equipmentWeapon, 'gear.slot.empty');
       }
     } else {
-      equipmentWeapon.innerHTML = '<div class="slot-empty">未装备</div>';
+      renderSlotPlaceholder(equipmentWeapon, 'gear.slot.empty');
     }
   }
   
@@ -1502,17 +1820,16 @@ function updateEquipmentSlots(): void {
       const bagItem = findItemByIid(playerProfile!, playerProfile!.equipment.bagIid);
       if (bagItem) {
         try {
-          const bagDef = getBagDef(bagItem.typeId);
-          const itemType = getItemType(bagItem.typeId);
+          const metaText = bagMetaText(bagItem.typeId);
           const slotItem = document.createElement('div');
           slotItem.className = 'slot-item';
           slotItem.innerHTML = `
             <div class="slot-item-info">
-              <div class="slot-item-name">${itemType.name}</div>
-              <div class="slot-item-meta">容量: ${bagDef.bagCap}</div>
+              <div class="slot-item-name">${escapeHtml(itemName(bagItem.typeId))}</div>
+              <div class="slot-item-meta">${escapeHtml(metaText)}</div>
             </div>
             <div class="slot-item-actions">
-              <button class="item-btn unequip-bag">卸下</button>
+              <button class="item-btn unequip-bag">${escapeHtml(t('ui.btn.unequip'))}</button>
             </div>
           `;
           const unequipBtn = slotItem.querySelector('.unequip-bag') as HTMLButtonElement;
@@ -1520,10 +1837,10 @@ function updateEquipmentSlots(): void {
             unequipBtn.onclick = () => {
               unequipBtn.classList.add('loading');
               network.sendEquip('bag', null);
-              hud.addEvent('卸下背包');
+              hud.addEvent(t('event.unequipped', { slot: slotLabel('bag') }));
               setTimeout(() => {
                 unequipBtn.classList.remove('loading');
-                addButtonFeedback(unequipBtn, true, '已卸下');
+                addButtonFeedback(unequipBtn, true, t('ui.btn.unequipped'));
               }, 300);
               // 立即失焦，避免干扰游戏输入
               unequipBtn.blur();
@@ -1531,13 +1848,13 @@ function updateEquipmentSlots(): void {
           }
           equipmentBag.appendChild(slotItem);
         } catch {
-          equipmentBag.innerHTML = '<div class="slot-empty">无效背包</div>';
+          renderSlotPlaceholder(equipmentBag, 'slot.invalid', { slot: slotLabel('bag') });
         }
       } else {
-        equipmentBag.innerHTML = '<div class="slot-empty">未装备</div>';
+        renderSlotPlaceholder(equipmentBag, 'gear.slot.empty');
       }
     } else {
-      equipmentBag.innerHTML = '<div class="slot-empty">未装备</div>';
+      renderSlotPlaceholder(equipmentBag, 'gear.slot.empty');
     }
   }
   
@@ -1548,17 +1865,16 @@ function updateEquipmentSlots(): void {
       const armorItem = findItemByIid(playerProfile!, playerProfile!.equipment.armorIid);
       if (armorItem) {
         try {
-          const armorDef = getArmorDef(armorItem.typeId);
-          const itemType = getItemType(armorItem.typeId);
+          const metaText = armorMetaText(armorItem.typeId);
           const slotItem = document.createElement('div');
           slotItem.className = 'slot-item';
           slotItem.innerHTML = `
             <div class="slot-item-info">
-              <div class="slot-item-name">${itemType.name}</div>
-              <div class="slot-item-meta">减伤: ${Math.floor(armorDef.damageReduction * 100)}%</div>
+              <div class="slot-item-name">${escapeHtml(itemName(armorItem.typeId))}</div>
+              <div class="slot-item-meta">${escapeHtml(metaText)}</div>
             </div>
             <div class="slot-item-actions">
-              <button class="item-btn unequip-armor">卸下</button>
+              <button class="item-btn unequip-armor">${escapeHtml(t('ui.btn.unequip'))}</button>
             </div>
           `;
           const unequipBtn = slotItem.querySelector('.unequip-armor') as HTMLButtonElement;
@@ -1566,10 +1882,10 @@ function updateEquipmentSlots(): void {
             unequipBtn.onclick = () => {
               unequipBtn.classList.add('loading');
               network.sendEquip('armor', null);
-              hud.addEvent('卸下防具');
+              hud.addEvent(t('event.unequipped', { slot: slotLabel('armor') }));
               setTimeout(() => {
                 unequipBtn.classList.remove('loading');
-                addButtonFeedback(unequipBtn, true, '已卸下');
+                addButtonFeedback(unequipBtn, true, t('ui.btn.unequipped'));
               }, 300);
               // 立即失焦，避免干扰游戏输入
               unequipBtn.blur();
@@ -1577,13 +1893,13 @@ function updateEquipmentSlots(): void {
           }
           equipmentArmor.appendChild(slotItem);
         } catch {
-          equipmentArmor.innerHTML = '<div class="slot-empty">无效防具</div>';
+          renderSlotPlaceholder(equipmentArmor, 'slot.invalid', { slot: slotLabel('armor') });
         }
       } else {
-        equipmentArmor.innerHTML = '<div class="slot-empty">未装备</div>';
+        renderSlotPlaceholder(equipmentArmor, 'gear.slot.empty');
       }
     } else {
-      equipmentArmor.innerHTML = '<div class="slot-empty">未装备</div>';
+      renderSlotPlaceholder(equipmentArmor, 'gear.slot.empty');
     }
   }
 }
@@ -1623,9 +1939,8 @@ function updateHotbarHud(localPlayer: PLAYER_STATE | null): void {
       // 有物品
       slot.className = 'hotbar-slot has-item';
       
-      // 获取物品类型定义
-      const itemType = getItemType(item.typeId);
-      const shortName = itemType.shortName || itemType.name;
+      // 快捷栏空间很窄，优先用短名
+      const shortName = itemShortName(item.typeId);
       
       // 根据物品类型添加样式类
       if (item.typeId === 'medkit' || item.typeId === 'advanced_medkit') {
@@ -1687,7 +2002,7 @@ function updateRaidEquipmentUI(localPlayer: PLAYER_STATE | null): void {
   showRaidHUD();
 
   if (!localPlayer || localPlayer.status !== 'ALIVE') {
-    if (raidWeaponName) raidWeaponName.textContent = '未就绪';
+    if (raidWeaponName) raidWeaponName.textContent = t('raid.weapon.notReady');
     if (raidWeaponMeta) raidWeaponMeta.textContent = '-';
     if (raidBagName) raidBagName.textContent = '-';
     if (raidBagMeta) raidBagMeta.textContent = '-';
@@ -1710,11 +2025,15 @@ function updateRaidEquipmentUI(localPlayer: PLAYER_STATE | null): void {
   let weaponMeta = '-';
   try {
     const weaponDef = getWeaponDef(weaponTypeId);
-    weaponName = weaponDef.name;
+    weaponName = itemName(weaponTypeId);
+    // HUD 空间紧，用"标签 值"而不是"标签: 值"，但标签本身还是复用 stat.*
     if (weaponDef.magSize > 0 && localPlayer.weaponRuntime) {
-      weaponMeta = `弹匣 ${localPlayer.weaponRuntime.ammoInMag}/${weaponDef.magSize} | 伤害 ${weaponDef.damage}`;
+      weaponMeta = [
+        `${t('stat.mag')} ${localPlayer.weaponRuntime.ammoInMag}/${weaponDef.magSize}`,
+        `${t('stat.damage')} ${weaponDef.damage}`,
+      ].join(' | ');
     } else {
-      weaponMeta = `伤害 ${weaponDef.damage}`;
+      weaponMeta = `${t('stat.damage')} ${weaponDef.damage}`;
     }
   } catch {}
 
@@ -1729,23 +2048,25 @@ function updateRaidEquipmentUI(localPlayer: PLAYER_STATE | null): void {
   const equippedBagIid = localPlayer.raidEquipment?.bagIid ?? null;
   const equippedArmorIid = localPlayer.raidEquipment?.armorIid ?? null;
   const bagTypeId = localPlayer.raidEquipment?.bagTypeId ?? null;
-  let bagName = bagTypeId ? bagTypeId : '基础背包';
+  let bagName = bagTypeId ? bagTypeId : t('raid.bag.default');
   if (bagTypeId) {
     try {
-      bagName = getBagDef(bagTypeId).name;
+      getBagDef(bagTypeId);
+      bagName = itemName(bagTypeId);
     } catch {}
   }
   if (raidBagName) raidBagName.textContent = bagName;
-  if (raidBagMeta) raidBagMeta.textContent = `容量 ${bagUsed}/${bagCap} | 总数 ${totalQty}`;
+  if (raidBagMeta) {
+    raidBagMeta.textContent = t('raid.bag.meta', { used: bagUsed, cap: bagCap, total: totalQty });
+  }
 
   const armorTypeId = localPlayer.raidEquipment?.armorTypeId ?? null;
-  let armorName = armorTypeId ? armorTypeId : '无防具';
-  let armorMeta = '减伤 0%';
+  let armorName = armorTypeId ? armorTypeId : t('raid.armor.none');
+  let armorMeta = statLine('stat.armor', '0%');
   if (armorTypeId) {
     try {
-      const armorDef = getArmorDef(armorTypeId);
-      armorName = armorDef.name;
-      armorMeta = `减伤 ${Math.floor(armorDef.damageReduction * 100)}%`;
+      armorMeta = armorMetaText(armorTypeId);
+      armorName = itemName(armorTypeId);
     } catch {}
   }
   if (raidArmorName) raidArmorName.textContent = armorName;
@@ -1768,7 +2089,7 @@ function updateRaidEquipmentUI(localPlayer: PLAYER_STATE | null): void {
   }
 
   if (raidBagToggle) {
-    raidBagToggle.textContent = raidBagExpanded ? '收起' : '展开';
+    raidBagToggle.textContent = t(raidBagExpanded ? 'ui.btn.collapse' : 'ui.btn.expand');
   }
 
   if (raidBagList) {
@@ -1789,45 +2110,39 @@ function updateRaidEquipmentUI(localPlayer: PLAYER_STATE | null): void {
       if (needsRebuild) {
         raidBagList.classList.add('expanded');
         if (inventoryItems.length === 0) {
-          raidBagList.innerHTML = '<div class="raid-bag-empty">空</div>';
+          raidBagList.innerHTML = '';
+          const empty = document.createElement('div');
+          empty.className = 'raid-bag-empty';
+          empty.textContent = t('raid.bag.empty');
+          raidBagList.appendChild(empty);
         } else {
           raidBagList.innerHTML = '';
           for (const item of inventoryItems) {
-            let itemName = item.typeId;
-            let rarityLabel = '';
+            let label = item.typeId;
+            let rarityText = '';
             let rarityColor = '#888';
             let itemValue = 0;
             try {
               const itemType = getItemType(item.typeId);
-              itemName = itemType.name;
+              label = itemName(item.typeId);
               itemValue = itemType.value * item.qty;
-              if (itemType.rarity === 'COMMON') {
-                rarityLabel = '常见';
-                rarityColor = '#aaa';
-              } else if (itemType.rarity === 'RARE') {
-                rarityLabel = '稀有';
-                rarityColor = '#4CAF50';
-              } else if (itemType.rarity === 'EPIC') {
-                rarityLabel = '史诗';
-                rarityColor = '#9d4edd';
-              } else if (itemType.rarity === 'LEGENDARY') {
-                rarityLabel = '传说';
-                rarityColor = '#ffaa00';
-              }
+              rarityText = rarityLabel(itemType.rarity);
+              rarityColor = RARITY_COLORS[itemType.rarity] ?? '#888';
             } catch {}
             const isEquipped =
               item.iid === equippedWeaponIid ||
               item.iid === equippedBagIid ||
               item.iid === equippedArmorIid;
 
+            const equippedTag = isEquipped ? ` | ${escapeHtml(t('raid.bag.equipped'))}` : '';
             const row = document.createElement('div');
             row.className = 'raid-bag-item';
             row.innerHTML = `
               <div>
-                <div class="raid-bag-item-name">${itemName}</div>
-                <div class="raid-bag-item-meta">x${item.qty}${isEquipped ? ' | 已装备' : ''} | <span style="color: ${rarityColor};">${rarityLabel}</span> | <span style="color: #ffd700;">$${itemValue}</span></div>
+                <div class="raid-bag-item-name">${escapeHtml(label)}</div>
+                <div class="raid-bag-item-meta">x${item.qty}${equippedTag} | <span style="color: ${rarityColor};">${escapeHtml(rarityText)}</span> | <span style="color: #ffd700;">$${itemValue}</span></div>
               </div>
-              <button class="item-btn raid-bag-drop" data-iid="${item.iid}" data-qty="${item.qty}" ${isEquipped ? 'disabled' : ''}>丢弃</button>
+              <button class="item-btn raid-bag-drop" data-iid="${item.iid}" data-qty="${item.qty}" ${isEquipped ? 'disabled' : ''}>${escapeHtml(t('ui.btn.drop'))}</button>
             `;
             raidBagList.appendChild(row);
           }
@@ -1858,7 +2173,7 @@ function updateWeaponHud(localPlayer: PLAYER_STATE | null): void {
   let reloadMs = 0;
   try {
     const weaponDef = getWeaponDef(localPlayer.weaponRuntime.weaponTypeId);
-    weaponName = weaponDef.name;
+    weaponName = itemName(localPlayer.weaponRuntime.weaponTypeId);
     magSize = weaponDef.magSize;
     reloadMs = weaponDef.reloadMs;
   } catch {}
@@ -1876,7 +2191,7 @@ function updateWeaponHud(localPlayer: PLAYER_STATE | null): void {
   if (weaponHudName) weaponHudName.textContent = weaponName;
   if (weaponHudAmmo) weaponHudAmmo.textContent = magSize > 0 ? String(ammoInMag) : '-';
   if (weaponHudMag) weaponHudMag.textContent = magSize > 0 ? String(magSize) : '-';
-  if (weaponHudState) weaponHudState.textContent = reloading ? '换弹中' : '';
+  if (weaponHudState) weaponHudState.textContent = reloading ? t('raid.weapon.reloading') : '';
   
   // 设置换弹进度（整个block从左到右填充）
   const reloadProgressPercent = reloading ? `${Math.floor(reloadProgress * 100)}%` : '0%';
@@ -2008,7 +2323,7 @@ function updateStaminaHud(localPlayer: PLAYER_STATE | null): void {
   
   // 更新状态显示
   if (staminaHudState) {
-    staminaHudState.textContent = isSprinting ? 'SPRINTING' : '';
+    staminaHudState.textContent = isSprinting ? t('hud.sprinting') : '';
   }
   
   // 更新进度条
@@ -2075,6 +2390,39 @@ function isItemEquipped(item: ItemInstance): boolean {
          item.iid === equipment.armorIid;
 }
 
+// ===== 列表空态 =====================================================
+// 以前这里靠比对 innerText / innerHTML 里的中文来判断"列表是不是空的"，
+// 一做 i18n 就会静默失效。改成在容器上打 data-empty 标记，值里带 key 和
+// 当前语言，这样切换语言时空态文案也会自动重建。
+
+/** 渲染空态占位。文案没变且占位还在时不重建，避免闪烁。 */
+function renderEmptyState(
+  container: HTMLElement,
+  key: string,
+  params?: Record<string, string | number>,
+): void {
+  const text = t(key, params);
+  const stamp = `${key}|${text}`;
+  if (container.dataset.empty === stamp && container.childElementCount === 1) return;
+  container.dataset.empty = stamp;
+  container.innerHTML = '';
+  const el = document.createElement('div');
+  el.className = 'list-empty';
+  el.style.color = '#666';
+  el.style.padding = '20px';
+  el.style.textAlign = 'center';
+  el.textContent = text;
+  container.appendChild(el);
+}
+
+/** 清掉空态占位。返回是否真的清了东西。 */
+function clearEmptyState(container: HTMLElement): boolean {
+  if (container.dataset.empty === undefined) return false;
+  delete container.dataset.empty;
+  container.innerHTML = '';
+  return true;
+}
+
 // 新增: 更新物品列表显示
 function updateItemLists(): void {
   if (!playerProfile) return;
@@ -2085,14 +2433,9 @@ function updateItemLists(): void {
       const availablePrepItems = playerProfile.prep.filter((item: ItemInstance) => !isItemEquipped(item));
       
       if (availablePrepItems.length === 0) {
-        if (prepList.innerHTML.indexOf('整备区为空') === -1) {
-             prepList.innerHTML = '<div style="color: #666; padding: 20px; text-align: center;">整备区为空</div>';
-        }
+        renderEmptyState(prepList, 'loadout.empty');
       } else {
-         // Clear empty message if present
-         if (prepList.firstChild && (prepList.firstChild as HTMLElement).innerText === '整备区为空') {
-             prepList.innerHTML = '';
-         }
+         clearEmptyState(prepList);
 
         // 合并相同typeId的物品
         const mergedItems = mergeItemsByTypeId(availablePrepItems);
@@ -2108,15 +2451,17 @@ function updateItemLists(): void {
 }
 
 // 更新商店列表（按当前选中的分类和稀有度组织）
-function updateShopList(): void {
+function updateShopList(preserveBuyCounts = false): void {
     if (shopList) {
       shopList.innerHTML = '';
-      // 重置购买计数（切换分类或刷新时重置）
-      shopBuyCounts.clear();
+      delete shopList.dataset.empty;
+      // 重置购买计数（切换分类或刷新时重置）。
+      // 切换语言只是重绘，计数要留着，否则玩家的"已购买 N 个"会莫名归零。
+      if (!preserveBuyCounts) shopBuyCounts.clear();
       const allItemTypes = getAllItemTypes();
-      
+
       // 按分类分组
-      const categories: Record<string, Array<{ id: string; name: string; rarity: string; value: number; stackMax: number }>> = {
+      const categories: Record<string, ItemType[]> = {
         weapon: [],
         armor: [],
         bag: [],
@@ -2134,12 +2479,12 @@ function updateShopList(): void {
       // 只显示当前选中的分类
       const items = categories[currentShopCategory] || [];
       if (items.length === 0) {
-        shopList.innerHTML = '<div style="color: #666; padding: 20px; text-align: center;">该分类暂无物品</div>';
+        renderEmptyState(shopList, 'list.emptyCategory');
         return;
       }
-      
+
       // 按稀有度分组
-      const rarityGroups: Record<string, typeof items> = {
+      const rarityGroups: Record<string, ItemType[]> = {
         COMMON: [],
         RARE: [],
         EPIC: [],
@@ -2154,8 +2499,7 @@ function updateShopList(): void {
       }
       
       // 为每个稀有度创建区域
-      const rarityOrder = ['COMMON', 'RARE', 'EPIC', 'LEGENDARY'];
-      for (const rarity of rarityOrder) {
+      for (const rarity of RARITY_ORDER) {
         const rarityItems = rarityGroups[rarity];
         if (rarityItems.length === 0) continue;
         
@@ -2166,15 +2510,15 @@ function updateShopList(): void {
         // 稀有度标题
         const rarityHeader = document.createElement('div');
         rarityHeader.className = `shop-rarity-header ${rarity.toLowerCase()}`;
-        rarityHeader.textContent = rarity === 'COMMON' ? '普通' : rarity === 'RARE' ? '稀有' : rarity === 'EPIC' ? '史诗' : '传说';
+        rarityHeader.textContent = rarityLabel(rarity);
         raritySection.appendChild(rarityHeader);
         
         // 物品列表
         const rarityItemsDiv = document.createElement('div');
         rarityItemsDiv.className = 'shop-rarity-items shop-rarity-items-wide';
         
-        // 按名称排序
-        rarityItems.sort((a, b) => a.name.localeCompare(b.name));
+        // 按当前语言的显示名排序（换语言后顺序会跟着变，这是对的）
+        rarityItems.sort((a, b) => itemName(a.id).localeCompare(itemName(b.id)));
         
         for (const itemType of rarityItems) {
           const row = createShopRow(itemType);
@@ -2221,16 +2565,11 @@ function updateStashList(): void {
   const availableStashItems = playerProfile.stash.filter(item => !isItemEquipped(item));
   
   if (availableStashItems.length === 0) {
-    if (stashList.innerHTML.indexOf('仓库为空') === -1) {
-       stashList.innerHTML = '<div style="color: #666; padding: 20px; text-align: center;">仓库为空</div>';
-    }
+    renderEmptyState(stashList, 'stash.empty');
     return;
   }
-  
-  // Clear empty message if present
-  if (stashList.firstChild && (stashList.firstChild as HTMLElement).innerText === '仓库为空') {
-     stashList.innerHTML = '';
-  }
+
+  clearEmptyState(stashList);
 
   // 按分类分组
   const categories: Record<string, ItemInstance[]> = {
@@ -2252,18 +2591,10 @@ function updateStashList(): void {
   const selectedCategory = (typeof currentStashCategory !== 'undefined' ? currentStashCategory : 'weapon');
   const items = categories[selectedCategory] || [];
   if (items.length === 0) {
-      // 检查当前是否已经显示了"暂无物品"
-      const currentContent = stashList.textContent || '';
-      if (currentContent.includes('暂无物品') && stashList.children.length === 1) {
-          return; 
-      }
-    stashList.innerHTML = '<div style="color: #666; padding: 20px; text-align: center;">该分类暂无物品</div>';
+    renderEmptyState(stashList, 'list.emptyCategory');
     return;
   } else {
-     // Clear empty category message
-     if (stashList.firstChild && (stashList.firstChild as HTMLElement).innerText === '该分类暂无物品') {
-         stashList.innerHTML = '';
-     }
+    clearEmptyState(stashList);
   }
   
   // 按稀有度分组
@@ -2287,7 +2618,6 @@ function updateStashList(): void {
     }
   }
   
-  const rarityOrder = ['COMMON', 'RARE', 'EPIC', 'LEGENDARY'];
   
   // 按照稀有度顺序管理 DOM 结构
   // 注意：这里我们假设稀有度分区的顺序不会变，只需管理内容
@@ -2297,7 +2627,7 @@ function updateStashList(): void {
   
   // 使用一个简单的 diff 策略：遍历 rarityOrder，如果该稀有度有物品，则查找或创建 section 并 reconcile 列表
   
-    rarityOrder.forEach(rarity => {
+    RARITY_ORDER.forEach(rarity => {
         const rarityItems = rarityGroups[rarity];
         const sectionId = `stash-section-${rarity}`;
         let raritySection = document.getElementById(sectionId);
@@ -2317,7 +2647,6 @@ function updateStashList(): void {
             
             const rarityHeader = document.createElement('div');
             rarityHeader.className = `shop-rarity-header ${rarity.toLowerCase()}`;
-            rarityHeader.textContent = rarity === 'COMMON' ? '普通' : rarity === 'RARE' ? '稀有' : rarity === 'EPIC' ? '史诗' : '传说';
             raritySection.appendChild(rarityHeader);
             
             const listDiv = document.createElement('div');
@@ -2332,19 +2661,15 @@ function updateStashList(): void {
 
         raritySection.style.display = 'block';
 
+        // 标题每次都重写：切换语言后这个 section 是复用的，不重写就还是旧语言。
+        const header = raritySection.querySelector('.shop-rarity-header') as HTMLElement | null;
+        if (header) header.textContent = rarityLabel(rarity);
+
         const listDiv = raritySection.querySelector('.stash-rarity-items') as HTMLElement;
         if (listDiv) {
              // 合并 + 排序
             const mergedItems = mergeItemsByTypeId(rarityItems);
-            mergedItems.sort((a, b) => {
-                try {
-                    const aType = getItemType(a.typeId);
-                    const bType = getItemType(b.typeId);
-                    return aType.name.localeCompare(bType.name);
-                } catch {
-                    return a.typeId.localeCompare(b.typeId);
-                }
-            });
+            mergedItems.sort((a, b) => itemName(a.typeId).localeCompare(itemName(b.typeId)));
             
             reconcileItemList(listDiv, mergedItems, 'stash');
         }
@@ -2424,8 +2749,8 @@ function getItemCategory(typeId: string): string {
       const bRarity = getRarityOrder(bType?.rarity);
       if (aRarity !== bRarity) return aRarity - bRarity;
 
-      const aName = aType?.name ?? a.typeId;
-      const bName = bType?.name ?? b.typeId;
+      const aName = aType ? itemName(a.typeId) : a.typeId;
+      const bName = bType ? itemName(b.typeId) : b.typeId;
       if (aName !== bName) return aName.localeCompare(bName);
 
       const aStackable = (aType?.stackMax ?? 1) > 1;
@@ -2437,7 +2762,7 @@ function getItemCategory(typeId: string): string {
     });
   }
 
-  function sortItemTypes(items: Array<{ id: string; rarity?: string; name?: string; stackMax?: number }>): Array<{ id: string; rarity?: string; name?: string; stackMax?: number }> {
+  function sortItemTypes(items: Array<{ id: string; rarity?: string; stackMax?: number }>): Array<{ id: string; rarity?: string; stackMax?: number }> {
     return [...items].sort((a, b) => {
       const aCategory = getItemCategoryOrder(a.id);
       const bCategory = getItemCategoryOrder(b.id);
@@ -2447,9 +2772,7 @@ function getItemCategory(typeId: string): string {
       const bRarity = getRarityOrder(b.rarity);
       if (aRarity !== bRarity) return aRarity - bRarity;
 
-      const aName = a.name ?? a.id;
-      const bName = b.name ?? b.id;
-      return aName.localeCompare(bName);
+      return itemName(a.id).localeCompare(itemName(b.id));
     });
   }
 
@@ -2595,7 +2918,7 @@ function reconcileItemList(container: HTMLElement, mergedItems: MergedItem[], so
 const pendingActionItems = new Set<string>();
 
 // 新增: 创建物品卡片 (Replacing Row)
-function createItemCard(mergedItem: MergedItem, itemType: any, source: 'prep' | 'stash'): HTMLElement {
+function createItemCard(mergedItem: MergedItem, itemType: ItemType, source: 'prep' | 'stash'): HTMLElement {
   const card = document.createElement('div');
   card.className = 'stash-card';
   card.setAttribute('data-type-id', mergedItem.typeId); // Important for reconciliation
@@ -2609,7 +2932,7 @@ function createItemCard(mergedItem: MergedItem, itemType: any, source: 'prep' | 
   
   const title = document.createElement('div');
   title.className = 'stash-card-title';
-  title.textContent = itemType.name;
+  title.textContent = itemName(mergedItem.typeId);
   
   const price = document.createElement('div');
   price.className = 'stash-card-price';
@@ -2632,7 +2955,7 @@ function createItemCard(mergedItem: MergedItem, itemType: any, source: 'prep' | 
   card.appendChild(countBadge);
   
   // 获取并分割描述
-  const description = getItemDescription(itemType);
+  const description = getItemDescription(mergedItem.typeId, itemType);
   const descParts = description.split('\n');
   const descText = descParts[0] || ''; // 第一行是描述文本
   const statsText = descParts[1] || ''; // 第二行是数值统计
@@ -2697,7 +3020,7 @@ function createItemCard(mergedItem: MergedItem, itemType: any, source: 'prep' | 
           return;
       }
       
-      console.log(`[DEBUG] ${actionName}: ${itemType.name} (iid: ${iid})`);
+      console.log(`[DEBUG] ${actionName}: ${mergedItem.typeId} (iid: ${iid})`);
       
       // Mark as pending
       pendingActionItems.add(iid);
@@ -2713,7 +3036,7 @@ function createItemCard(mergedItem: MergedItem, itemType: any, source: 'prep' | 
     // 整备区 -> 仓库
     const moveBtn = document.createElement('button');
     moveBtn.className = 'stash-btn';
-    moveBtn.textContent = '移回仓库';
+    moveBtn.textContent = t('ui.btn.moveToStash');
     moveBtn.onclick = () => {
         executeAction('Move Prep->Stash', (iid) => network.sendMovePrepToStash(iid, 1));
         // No disabled state!
@@ -2723,7 +3046,7 @@ function createItemCard(mergedItem: MergedItem, itemType: any, source: 'prep' | 
     if (slot) {
         const equipBtn = document.createElement('button');
         equipBtn.className = 'stash-btn primary';
-        equipBtn.textContent = '装备';
+        equipBtn.textContent = t('ui.btn.equip');
         equipBtn.onclick = () => {
             executeAction('Equip from Prep', (iid) => network.sendEquip(slot, iid));
         };
@@ -2734,7 +3057,7 @@ function createItemCard(mergedItem: MergedItem, itemType: any, source: 'prep' | 
     // 仓库 -> 整备区 / 卖出
     const moveBtn = document.createElement('button');
     moveBtn.className = 'stash-btn';
-    moveBtn.textContent = '带入';
+    moveBtn.textContent = t('ui.btn.addToLoadout');
     moveBtn.onclick = () => {
         executeAction('Move Stash->Prep', (iid) => network.sendMoveStashToPrep(iid, 1));
         // No disabled state!
@@ -2743,7 +3066,7 @@ function createItemCard(mergedItem: MergedItem, itemType: any, source: 'prep' | 
 
     const sellBtn = document.createElement('button');
     sellBtn.className = 'stash-btn';
-    sellBtn.textContent = '卖出';
+    sellBtn.textContent = t('ui.btn.sell');
     sellBtn.onclick = () => {
         executeAction('Sell Stash', (iid) => network.sendSellFromStash(iid, 1));
     };
@@ -2752,7 +3075,7 @@ function createItemCard(mergedItem: MergedItem, itemType: any, source: 'prep' | 
       if (slot) {
         const equipBtn = document.createElement('button');
         equipBtn.className = 'stash-btn primary';
-        equipBtn.textContent = '装备';
+        equipBtn.textContent = t('ui.btn.equip');
         equipBtn.onclick = () => {
              executeAction('Equip from Stash', (iid) => network.sendEquip(slot, iid));
         };
@@ -2766,128 +3089,128 @@ function createItemCard(mergedItem: MergedItem, itemType: any, source: 'prep' | 
 }
 
 // 新增: 获取物品简短描述
-function getItemDescription(itemType: any): string {
-  const typeId = itemType.id || itemType.typeId;
-  const parts = [];
-  
-  // 添加物品目录中的描述（如果有）
-  if (itemType.description) {
-    parts.push(itemType.description);
+// 返回值仍然是"描述\n属性行"两段式，调用方按 \n 拆。
+// 属性标签一律走 stat.* key（由 locales/*/equipment.ts 提供），这里只负责拼装顺序。
+function getItemDescription(typeId: string, itemType: ItemType): string {
+  const parts: string[] = [];
+
+  // 物品目录中的描述（items.ts 里没有这条 key 就跳过，不显示裸 key）
+  const descKey = `item.${typeId}.desc`;
+  if (hasKey(descKey)) {
+    parts.push(itemDesc(typeId));
   }
-  
+
+  /** 速度 buff/debuff：正负号在数值里，句子结构不变。 */
+  const speedStat = (multiplier: number | undefined): string | null => {
+    if (!multiplier) return null;
+    const change = Math.floor((multiplier - 1) * 100);
+    if (change === 0) return null;
+    return statLine('stat.speed', change > 0 ? `+${change}%` : `${change}%`);
+  };
+
   // 武器 - 添加具体数值
   try {
     const weaponDef = getWeaponDef(typeId);
-    const stats = [];
-    stats.push(`伤害: ${weaponDef.damage}`);
+    const stats: string[] = [];
+    stats.push(statLine('stat.damage', weaponDef.damage));
     if (weaponDef.pelletCount && weaponDef.pelletCount > 1) {
-      stats.push(`弹丸: ${weaponDef.pelletCount}`);
+      stats.push(statLine('stat.pellets', weaponDef.pelletCount));
     }
-    stats.push(`弹匣: ${weaponDef.magSize}`);
+    stats.push(statLine('stat.mag', weaponDef.magSize));
     // 计算射程（bulletSpeed * bulletLifeMs / 1000）
     const range = Math.floor(weaponDef.bulletSpeed * weaponDef.bulletLifeMs / 1000);
     if (range > 0) {
-      stats.push(`射程: ${range}`);
+      stats.push(statLine('stat.range', t('unit.px', { value: range })));
     }
-    const fireRatePerMin = Math.floor(60000 / weaponDef.fireIntervalMs);
-    stats.push(`射速: ${fireRatePerMin}/分`);
-    // 添加速度buff/debuff显示
-    if (weaponDef.buffs?.speedMultiplier) {
-      const speedChange = Math.floor((weaponDef.buffs.speedMultiplier - 1) * 100);
-      if (speedChange > 0) {
-        stats.push(`速度: +${speedChange}%`);
-      } else if (speedChange < 0) {
-        stats.push(`速度: ${speedChange}%`);
-      }
-    }
+    // stat.rpm 有 .fmt 变体（英文是 "900 RPM"，不是 "RPM: 900"），优先用它
+    stats.push(t('stat.rpm.fmt', { value: Math.floor(60000 / weaponDef.fireIntervalMs) }));
+    const speed = speedStat(weaponDef.buffs?.speedMultiplier);
+    if (speed) stats.push(speed);
     parts.push(stats.join(' | '));
     return parts.join('\n');
   } catch {}
-  
+
   // 防具 - 添加具体数值
   try {
     const armorDef = getArmorDef(typeId);
-    const stats = [];
-    stats.push(`减伤: ${Math.floor(armorDef.damageReduction * 100)}%`);
-    if (armorDef.buffs?.speedMultiplier) {
-      const speedChange = Math.floor((armorDef.buffs.speedMultiplier - 1) * 100);
-      if (speedChange > 0) {
-        stats.push(`速度: +${speedChange}%`);
-      } else if (speedChange < 0) {
-        stats.push(`速度: ${speedChange}%`);
-      }
-    }
+    const stats: string[] = [];
+    stats.push(statLine('stat.armor', `${Math.floor(armorDef.damageReduction * 100)}%`));
+    const speed = speedStat(armorDef.buffs?.speedMultiplier);
+    if (speed) stats.push(speed);
     parts.push(stats.join(' | '));
     return parts.join('\n');
   } catch {}
-  
+
   // 背包 - 添加具体数值
   try {
     const bagDef = getBagDef(typeId);
-    parts.push(`容量: ${bagDef.bagCap} 格`);
+    parts.push(t('stat.capacity', { count: bagDef.bagCap }));
     return parts.join('\n');
   } catch {}
-  
+
   // 消耗品 - 添加具体数值
   if (itemType.consumableProps) {
     const props = itemType.consumableProps;
-    const stats = [];
-    
+    const stats: string[] = [];
+
+    /** 毫秒 -> "5s" / "5秒"。单位模板由 equipment.ts 提供。 */
+    const seconds = (ms: number): string => t('unit.sec', { value: Math.floor(ms / 1000) });
+
     if (props.healAmount) {
-      stats.push(`恢复: ${props.healAmount}HP`);
+      stats.push(statLine('stat.heal', t('unit.hp', { value: props.healAmount })));
     }
     if (props.damage) {
-      stats.push(`伤害: ${props.damage}`);
+      stats.push(statLine('stat.damage', props.damage));
     }
     if (props.explosionRadius) {
-      stats.push(`爆炸半径: ${props.explosionRadius}像素`);
+      stats.push(statLine('stat.radius', t('unit.px', { value: props.explosionRadius })));
     }
     if (props.flashRadius && props.flashDurationMs) {
-      stats.push(`致盲范围: ${props.flashRadius}像素`);
-      stats.push(`致盲时长: ${Math.floor(props.flashDurationMs / 1000)}秒`);
+      stats.push(statLine('stat.blindRadius', t('unit.px', { value: props.flashRadius })));
+      stats.push(statLine('stat.blindDuration', seconds(props.flashDurationMs)));
     }
     if (props.smokeRadius && props.smokeDurationMs) {
-      stats.push(`烟雾范围: ${props.smokeRadius}像素`);
-      stats.push(`持续时间: ${Math.floor(props.smokeDurationMs / 1000)}秒`);
+      stats.push(statLine('stat.smokeRadius', t('unit.px', { value: props.smokeRadius })));
+      stats.push(statLine('stat.duration', seconds(props.smokeDurationMs)));
     }
     if (props.fireRadius && props.fireDurationMs && props.fireDamagePerSecond) {
-      stats.push(`火焰范围: ${props.fireRadius}像素`);
-      stats.push(`持续时间: ${Math.floor(props.fireDurationMs / 1000)}秒`);
-      stats.push(`伤害: ${props.fireDamagePerSecond}HP/秒`);
+      stats.push(statLine('stat.fireRadius', t('unit.px', { value: props.fireRadius })));
+      stats.push(statLine('stat.duration', seconds(props.fireDurationMs)));
+      stats.push(statLine('stat.dps', t('unit.hps', { value: props.fireDamagePerSecond })));
     }
     if (props.buffDurationMs && props.speedMultiplier) {
-      stats.push(`速度加成: +${Math.floor((props.speedMultiplier - 1) * 100)}%`);
-      stats.push(`持续时间: ${Math.floor(props.buffDurationMs / 1000)}秒`);
+      stats.push(statLine('stat.speedBonus', `+${Math.floor((props.speedMultiplier - 1) * 100)}%`));
+      stats.push(statLine('stat.duration', seconds(props.buffDurationMs)));
     }
     if (props.buffDurationMs && props.hpPerSecond) {
-      stats.push(`回复: ${props.hpPerSecond}HP/秒`);
-      stats.push(`持续时间: ${Math.floor(props.buffDurationMs / 1000)}秒`);
+      stats.push(statLine('stat.regen', t('unit.hps', { value: props.hpPerSecond })));
+      stats.push(statLine('stat.duration', seconds(props.buffDurationMs)));
     }
     if (props.disguiseDurationMs) {
-      stats.push(`伪装时长: ${Math.floor(props.disguiseDurationMs / 1000)}秒`);
+      stats.push(statLine('stat.disguiseDuration', seconds(props.disguiseDurationMs)));
     }
-    if (props.durationMs && itemType.id === 'i_sentry_turret') {
-      stats.push(`持续时间: ${Math.floor(props.durationMs / 1000)}秒`);
+    if (props.durationMs && typeId === 'i_sentry_turret') {
+      stats.push(statLine('stat.duration', seconds(props.durationMs)));
     }
-    
+
     if (stats.length > 0) {
       parts.push(stats.join(' | '));
     }
-    
+
     return parts.join('\n');
   }
-  
+
   // 材料或其他 - 显示堆叠上限
   if (itemType.stackMax && itemType.stackMax > 1) {
-    parts.push(`最大堆叠: ${itemType.stackMax}`);
+    parts.push(statLine('stat.stackMax', itemType.stackMax));
   }
-  
+
   return parts.join('\n');
 }
 
 // 新增: 创建商店物品行
 // 新增: 创建商店物品行 - Refactored to match Stash Card style
-function createShopRow(itemType: any): HTMLElement {
+function createShopRow(itemType: ItemType): HTMLElement {
   const row = document.createElement('div');
   row.className = 'shop-card'; // Use new consolidated style
   
@@ -2897,7 +3220,7 @@ function createShopRow(itemType: any): HTMLElement {
   
   const title = document.createElement('div');
   title.className = 'shop-card-title';
-  title.textContent = itemType.name;
+  title.textContent = itemName(itemType.id);
   
   const price = document.createElement('div');
   price.className = 'shop-card-price';
@@ -2908,7 +3231,7 @@ function createShopRow(itemType: any): HTMLElement {
   row.appendChild(header);
 
   // 2. Meta Info (Description + Stats)
-  const description = getItemDescription(itemType);
+  const description = getItemDescription(itemType.id, itemType);
   const descParts = description.split('\n');
   const descText = descParts[0] || '';
   const statsText = descParts[1] || '';
@@ -2918,10 +3241,10 @@ function createShopRow(itemType: any): HTMLElement {
   
   let metaHtml = '';
   if (descText) {
-    metaHtml += `<div style="margin-bottom: 4px; color: rgba(255,255,255,0.7);">${descText}</div>`;
+    metaHtml += `<div style="margin-bottom: 4px; color: rgba(255,255,255,0.7);">${escapeHtml(descText)}</div>`;
   }
   if (statsText) {
-    metaHtml += `<div style="color: #0ff; font-family: var(--font-mono); font-weight: bold; letter-spacing: 0.5px;">${statsText}</div>`;
+    metaHtml += `<div style="color: #0ff; font-family: var(--font-mono); font-weight: bold; letter-spacing: 0.5px;">${escapeHtml(statsText)}</div>`;
   }
   meta.innerHTML = metaHtml;
   row.appendChild(meta);
@@ -2937,12 +3260,12 @@ function createShopRow(itemType: any): HTMLElement {
 
   const buyEquipBtn = document.createElement('button');
   buyEquipBtn.className = 'item-btn secondary';
-  buyEquipBtn.textContent = '购买并装备';
+  buyEquipBtn.textContent = t('ui.btn.buyEquip');
   buyEquipBtn.style.flex = '1';
 
   const buyPrepBtn = document.createElement('button');
   buyPrepBtn.className = 'item-btn secondary';
-  buyPrepBtn.textContent = '购买并带入';
+  buyPrepBtn.textContent = t('ui.btn.buyLoadout');
   buyPrepBtn.style.flex = '1';
 
   // 获取当前购买数量
@@ -2951,7 +3274,7 @@ function createShopRow(itemType: any): HTMLElement {
   // 更新按钮文本
   const updateButtonText = (count: number, animate: boolean = false) => {
     if (count > 0) {
-      buyBtn.textContent = `已购买 ${count} 个`;
+      buyBtn.textContent = t('market.bought', { count });
       buyBtn.classList.add('success');
       buyBtn.classList.remove('primary');
       if (animate) {
@@ -2965,7 +3288,7 @@ function createShopRow(itemType: any): HTMLElement {
       buyBtn.classList.remove('success');
       buyBtn.classList.add('primary');
       buyBtn.style.animation = 'none';
-      buyBtn.textContent = `购买`;
+      buyBtn.textContent = t('ui.btn.buy');
     }
   };
 
@@ -2995,16 +3318,16 @@ function createShopRow(itemType: any): HTMLElement {
        playerProfile.money -= itemType.value;
        const moneyEl = document.getElementById('hideoutMoney');
        if (moneyEl) moneyEl.innerText = playerProfile.money.toLocaleString();
-       hud.addEvent(`购买成功: ${itemType.name}`);
+       hud.addEvent(t('event.market.bought', { item: itemName(itemType.id) }));
     } else {
          buyBtn.classList.add('error');
          const originalText = buyBtn.textContent;
-         buyBtn.textContent = '余额不足';
+         buyBtn.textContent = t('error.market.notEnoughCredits');
          setTimeout(() => {
              buyBtn.classList.remove('error');
              buyBtn.textContent = originalText;
          }, 1000);
-         hud.addEvent(`金钱不足: 需要 ${itemType.value}`);
+         hud.addEvent(t('event.market.insufficient', { value: itemType.value }));
     }
   };
 
@@ -3018,11 +3341,11 @@ function createShopRow(itemType: any): HTMLElement {
             playerProfile.money -= itemType.value;
             const moneyEl = document.getElementById('hideoutMoney');
             if (moneyEl) moneyEl.innerText = playerProfile.money.toLocaleString();
-            addButtonFeedback(buyEquipBtn, true, '已装备');
-            hud.addEvent(`购买并装备: ${itemType.name}`);
+            addButtonFeedback(buyEquipBtn, true, t('ui.btn.equipped'));
+            hud.addEvent(t('event.market.boughtEquip', { item: itemName(itemType.id) }));
       } else {
-           addButtonFeedback(buyEquipBtn, false, '金钱不足');
-           hud.addEvent(`金钱不足: 需要 ${itemType.value}`);
+           addButtonFeedback(buyEquipBtn, false, t('error.market.notEnoughCredits'));
+           hud.addEvent(t('event.market.insufficient', { value: itemType.value }));
       }
   };
 
@@ -3036,11 +3359,11 @@ function createShopRow(itemType: any): HTMLElement {
             playerProfile.money -= itemType.value;
             const moneyEl = document.getElementById('hideoutMoney');
             if (moneyEl) moneyEl.innerText = playerProfile.money.toLocaleString();
-            addButtonFeedback(buyPrepBtn, true, '已带入');
-            hud.addEvent(`购买并带入: ${itemType.name}`);
+            addButtonFeedback(buyPrepBtn, true, t('ui.btn.added'));
+            hud.addEvent(t('event.market.boughtLoadout', { item: itemName(itemType.id) }));
        } else {
-           addButtonFeedback(buyPrepBtn, false, '金钱不足');
-           hud.addEvent(`金钱不足: 需要 ${itemType.value}`);
+           addButtonFeedback(buyPrepBtn, false, t('error.market.notEnoughCredits'));
+           hud.addEvent(t('event.market.insufficient', { value: itemType.value }));
        }
   };
 
@@ -3110,7 +3433,7 @@ function initHideoutUI(): void {
       
       // 检查是否已装备
       if (!playerProfile) {
-        hud.addEvent('无法装备：未加载玩家数据');
+        hud.addEvent(t('event.equip.noProfile'));
         return;
       }
       
@@ -3148,14 +3471,14 @@ function initHideoutUI(): void {
   if (enterRaidBtn) {
     enterRaidBtn.onclick = () => {
       if (network.sendEnterRaid()) {
-        hud.addEvent('正在进入战局...');
+        hud.addEvent(t('event.raid.deploying'));
         // 直接显示 raid HUD，不播放动画
         getRaidElements();
         if (raidEquipment && currentPhase === 'RAID' && raidLocalPlayer) {
           updateRaidEquipmentUI(raidLocalPlayer);
         }
       } else {
-        hud.addEvent('进入战局失败：连接未就绪');
+        hud.addEvent(t('event.raid.deployFailed'));
       }
     };
   }
@@ -3169,7 +3492,7 @@ function initHideoutUI(): void {
         return;
       }
       if (currentPhase !== 'RAID' || !raidLocalPlayer || raidLocalPlayer.status !== 'ALIVE') {
-        hud.addEvent('当前无法丢弃物品');
+        hud.addEvent(t('event.drop.unavailable'));
         return;
       }
       const iid = target.getAttribute('data-iid');
@@ -3182,9 +3505,9 @@ function initHideoutUI(): void {
         return;
       }
       if (network.sendDropItem(iid, qty)) {
-        hud.addEvent('已丢弃物品');
+        hud.addEvent(t('event.drop.done'));
       } else {
-        hud.addEvent('丢弃失败：连接未就绪');
+        hud.addEvent(t('event.drop.failed'));
       }
     });
   }
@@ -3243,9 +3566,9 @@ function animateEquipmentToRaid(): void {
     
     // 获取装备信息
     const slots = [
-      { source: weaponSlot, target: raidWeaponSlot, label: '武器', slot: equipmentWeapon },
-      { source: bagSlot, target: raidBagSlot, label: '背包', slot: equipmentBag },
-      { source: armorSlot, target: raidArmorSlot, label: '防具', slot: equipmentArmor }
+      { source: weaponSlot, target: raidWeaponSlot, label: slotLabel('weapon'), slot: equipmentWeapon },
+      { source: bagSlot, target: raidBagSlot, label: slotLabel('bag'), slot: equipmentBag },
+      { source: armorSlot, target: raidArmorSlot, label: slotLabel('armor'), slot: equipmentArmor }
     ];
     let completed = 0;
     const total = slots.length;
@@ -3278,14 +3601,14 @@ function animateEquipmentToRaid(): void {
       flyEl.className = 'equipment-fly-animation';
       
       // 复制内容
-      const slotLabel = slotEl.querySelector('.slot-label')?.textContent || label;
+      const slotLabelText = slotEl.querySelector('.slot-label')?.textContent || label;
       const slotItemName = slotItem.querySelector('.slot-item-name')?.textContent || '';
       const slotItemMeta = slotItem.querySelector('.slot-item-meta')?.textContent || '';
       
       flyEl.innerHTML = `
-        <div class="slot-label">${slotLabel}</div>
-        <div class="slot-item-name">${slotItemName}</div>
-        <div class="slot-item-meta">${slotItemMeta}</div>
+        <div class="slot-label">${escapeHtml(slotLabelText)}</div>
+        <div class="slot-item-name">${escapeHtml(slotItemName)}</div>
+        <div class="slot-item-meta">${escapeHtml(slotItemMeta)}</div>
       `;
       
       // 设置初始位置和大小
@@ -3362,12 +3685,12 @@ function initRaidUI(): void {
 
   if (raidArmorUnequip) {
     raidArmorUnequip.onclick = () => {
-      console.log('[RAID] 点击卸下防具按钮');
+      console.log('[RAID] unequip armor button clicked');
       const sent = network.sendRaidEquip('armor', null);
       if (sent) {
-        hud.addEvent('卸下防具');
+        hud.addEvent(t('event.unequipped', { slot: slotLabel('armor') }));
       } else {
-        hud.addEvent('卸下防具失败：连接未就绪');
+        hud.addEvent(t('event.unequip.failed'));
       }
     };
   }
@@ -3390,7 +3713,7 @@ function initRaidUI(): void {
         target.blur();
       }
       if (!raidLocalPlayer || raidLocalPlayer.status !== 'ALIVE') {
-        hud.addEvent('当前无法丢弃物品');
+        hud.addEvent(t('event.drop.unavailable'));
         return;
       }
       const iid = target.getAttribute('data-iid');
@@ -3403,9 +3726,9 @@ function initRaidUI(): void {
         return;
       }
       if (network.sendDropItem(iid, qty)) {
-        hud.addEvent('已丢弃物品');
+        hud.addEvent(t('event.drop.done'));
       } else {
-        hud.addEvent('丢弃失败：连接未就绪');
+        hud.addEvent(t('event.drop.failed'));
       }
     });
   }
@@ -3418,16 +3741,16 @@ function initNameModal(): void {
     nameSubmit.addEventListener('click', () => {
       const name = nameInput!.value.trim();
       if (name.length === 0) {
-        alert('昵称不能为空');
+        alert(t('error.callsign.empty'));
         return;
       }
       if (name.length > 32) {
-        alert('昵称不能超过 32 字符');
+        alert(t('error.callsign.tooLong'));
         return;
       }
       // 发送设置昵称消息
       network.sendSetName(name);
-      hud.addEvent(`设置昵称: ${name}`);
+      hud.addEvent(t('event.callsign.set', { name }));
     });
     
     // 按 Enter 键提交
@@ -3442,12 +3765,14 @@ function initNameModal(): void {
 // 初始化 NAME Modal 和 Hideout UI（DOM 加载完成后）
 if (document.readyState === 'loading') {
   document.addEventListener('DOMContentLoaded', () => {
+    initLocalizationUI(); // 先本地化静态 DOM，再让各模块生成动态内容
     initNameModal();
     initHideoutUI();
     initRaidUI();
     updatePhaseUI(); // ✅ 启动时先把 NAME/Hideout UI 挂出来
   });
 } else {
+  initLocalizationUI();
   initNameModal();
   initHideoutUI();
   initRaidUI();
@@ -3514,10 +3839,10 @@ window.addEventListener('keydown', (e) => {
   // Alt+Shift+R: 重置账号并重新连接
   if (e.altKey && e.shiftKey && e.key === 'R') {
     e.preventDefault();
-    const confirm = window.confirm('重置账号并重新连接？这将清空当前账号的所有进度（金钱、仓库等）。');
+    const confirm = window.confirm(t('admin.confirm.resetAccount'));
     if (confirm) {
       console.log('[ADMIN] Resetting account via hotkey...');
-      localStorage.removeItem('jerkie_man_account_id');
+      localStorage.removeItem('zp_account_id');
       location.reload();
     }
   }
@@ -3526,7 +3851,7 @@ window.addEventListener('keydown', (e) => {
   if (e.altKey && e.shiftKey && e.key === 'D') {
     e.preventDefault();
     console.log('=== Debug Info ===');
-    console.log('Account ID:', localStorage.getItem('jerkie_man_account_id'));
+    console.log('Account ID:', localStorage.getItem('zp_account_id'));
     console.log('Player ID:', localPlayerId);
     console.log('Profile:', playerProfile);
     console.log('Type __admin.help() for more commands');
@@ -3536,16 +3861,16 @@ window.addEventListener('keydown', (e) => {
   if (e.altKey && e.shiftKey && e.key === 'S') {
     e.preventDefault();
     network.sendAdminCommand('show_status');
-    hud.addEvent('[管理员] 正在请求服务器状态...');
+    hud.addEvent(t('event.admin.requestingStatus'));
   }
   
   // Alt+Shift+W: 重置世界（需要二次确认）
   if (e.altKey && e.shiftKey && e.key === 'W') {
     e.preventDefault();
-    const confirm = window.confirm('重置服务端世界？这将断开所有玩家连接并重新生成地图。\n\n你的账号数据（金钱、仓库）不会丢失。');
+    const confirm = window.confirm(t('admin.confirm.resetWorld'));
     if (confirm) {
       network.sendAdminCommand('reset_world');
-      hud.addEvent('[管理员] 正在重置世界...');
+      hud.addEvent(t('event.admin.resettingWorld'));
     }
   }
 });
@@ -3575,8 +3900,8 @@ function findNearestInteractable(
     const dist = Math.hypot(item.x - playerX, item.y - playerY);
     if (dist < minDist) {
       try {
-        const itemType = getItemType(item.typeId);
-        nearest = { type: 'worldItem', name: `${itemType.name} x${item.qty}`, distance: dist };
+        getItemType(item.typeId);
+        nearest = { type: 'worldItem', name: `${itemName(item.typeId)} x${item.qty}`, distance: dist };
         minDist = dist;
       } catch {
         nearest = { type: 'worldItem', name: `${item.typeId} x${item.qty}`, distance: dist };
@@ -3590,7 +3915,7 @@ function findNearestInteractable(
     const dist = Math.hypot(bag.x - playerX, bag.y - playerY);
     if (dist < minDist) {
       const itemCount = bag.items?.length ?? 0;
-      nearest = { type: 'lootBag', name: `${itemCount} items`, distance: dist };
+      nearest = { type: 'lootBag', name: t('count.items', { count: itemCount }), distance: dist };
       minDist = dist;
     }
   }
@@ -3601,7 +3926,7 @@ function findNearestInteractable(
   const closestY = Math.max(extractZone.y, Math.min(playerY, extractZone.y + extractZone.h));
   const zoneDist = Math.hypot(closestX - playerX, closestY - playerY);
   if (zoneDist < minDist) {
-    nearest = { type: 'extractZone', name: 'Extract Zone', distance: zoneDist };
+    nearest = { type: 'extractZone', name: t('hud.nearby.extractZone'), distance: zoneDist };
     minDist = zoneDist;
   }
 
@@ -3635,7 +3960,7 @@ function getDefaultWebSocketUrl(): string {
 // 根据当前访问的地址自动确定服务器地址
 function getWebSocketUrl(): string {
   // 0. (New) Check localStorage for manual override
-  const savedUrl = localStorage.getItem('jerkie_man_server_url');
+  const savedUrl = localStorage.getItem('zp_server_url');
   if (savedUrl && savedUrl.trim().length > 0) {
      console.log('[Network] Using manual server URL:', savedUrl);
      return savedUrl;
@@ -3648,12 +3973,12 @@ function getWebSocketUrl(): string {
 network = new Network(getWebSocketUrl(), 'local', {
   onConnect: () => {
     console.log('Connected to server');
-    hud.addEvent('已连接到服务器');
+    hud.addEvent(t('event.net.connected'));
   },
   onDisconnect: () => {
     console.log('Disconnected from server');
-    hud.addEvent('已断开服务器连接');
-    hud.addEvent('世界已清空'); // P0-2 修复: 提示世界已清空
+    hud.addEvent(t('event.net.disconnected'));
+    hud.addEvent(t('event.net.worldCleared')); // P0-2 修复: 提示世界已清空
     // 清理重连状态
     localPlayerId = null;
     selectedEntity = null;
@@ -3672,8 +3997,8 @@ network = new Network(getWebSocketUrl(), 'local', {
     // 设置子弹轨迹管理器的本地玩家 ID（用于本地预测对齐）
     bulletTracks.setLocalPlayerId(playerId);
     console.log(`Received welcome, local player ID: ${localPlayerId}, accountId: ${accountId}`);
-    hud.addEvent(`玩家ID：${localPlayerId.substring(0, 12)}...`);
-    hud.addEvent(`账号ID：${accountId.substring(0, 8)}...`);
+    hud.addEvent(t('event.net.playerId', { id: `${localPlayerId.substring(0, 12)}...` }));
+    hud.addEvent(t('event.net.accountId', { id: `${accountId.substring(0, 8)}...` }));
     
     // 清空子弹轨迹（重连时）
     bulletTracks.clear();
@@ -3686,10 +4011,10 @@ network = new Network(getWebSocketUrl(), 'local', {
     if (roomInfo?.mapConfig) {
       serverMapConfig = roomInfo.mapConfig;
       serverSeed = roomInfo.seed ?? null;
-      hud.addEvent(`服务器地图配置已接收（种子：${serverSeed ?? 'N/A'}）`);
+      hud.addEvent(t('event.net.mapConfig', { seed: serverSeed ?? 'N/A' }));
     } else {
       // Day4-1: 兼容模式：server 未下发 mapConfig，使用 fallback 并警告
-      hud.addEvent('警告：服务器未提供地图配置，使用本地配置');
+      hud.addEvent(t('event.net.mapConfigMissing'));
       serverMapConfig = null;
       serverSeed = null;
     }
@@ -3833,105 +4158,47 @@ network = new Network(getWebSocketUrl(), 'local', {
       }
     }
   },
-  onError: (error: string) => {
-    console.error('Network error:', error);
-    hud.addEvent(`错误：${error}`);
-    // 背包已满时显示红色提示
-    if (error === 'Inventory full' || error.includes('Inventory full')) {
-      uiOverlay.showText('背包已满', '255, 0, 0');
+  onError: (code, params) => {
+    console.error('Network error:', code, params ?? '');
+    hud.addEvent(t('event.error', { reason: t(`error.${code}`, params) }));
+    if (code === 'inventory.full') {
+      uiOverlay.showText(t('error.inventory.full'), '255, 0, 0');
     }
   },
-  // 游戏化增强: 接收服务端事件并显示在 HUD
-  onEvent: (message: string) => {
-    // Check for special messages (MAP_LIST for autocomplete)
-    if (message.startsWith('MAP_LIST|')) {
-      const maps = message.substring(9).split('|').filter(m => m.length > 0);
-      console.log(`[onEvent] Received MAP_LIST with ${maps.length} maps`);
-      if ((window as any).updateAvailableMaps) {
-        (window as any).updateAvailableMaps(maps);
-      }
-      return; // Don't show this in chat
+  // /maps 与 /maplist：以前靠解析 "MAP_LIST|a|b|c" 字符串，现在是独立消息
+  onMapList: (maps) => {
+    (window as any).updateAvailableMaps?.(maps);
+  },
+  // /players 与 /playerlist：同上，且不再需要用正则从中文里抠玩家名
+  onPlayerList: (players) => {
+    (window as any).updateOnlinePlayers?.(
+      players.map((p) => ({ name: p.name, status: p.alive ? 'ALIVE' : 'DEAD' }))
+    );
+  },
+  // 自动装备。服务端现在只单播给当事人，所以不必再判断是不是自己。
+  onAutoEquip: (_playerId, slot, itemTypeId) => {
+    const text = t(`event.autoEquip.${slot}`, { item: itemName(itemTypeId) });
+    uiOverlay.showText(text);
+    hud.addEvent(text);
+  },
+  // 服务端事件：只发 key + params，句子在这里按当前语言拼。
+  // 以前这里靠中文前缀（'可用地图:'、'管理员权限已激活' …）判断消息类型和是否进聊天框，
+  // 文案一改就会静默失效。现在按 key 的命名空间分流：cmd.* 是命令回执，event.* 是世界事件。
+  onEvent: (key, params) => {
+    const resolved: Record<string, string | number> = { ...(params ?? {}) };
+    // 约定：名为 item 的参数一律是物品 typeId，先转成当前语言的物品名
+    if (typeof resolved.item === 'string') {
+      resolved.item = itemName(resolved.item);
     }
-    
-    // Check for PLAYER_LIST for autocomplete
-    if (message.startsWith('PLAYER_LIST|')) {
-      const names = message.substring(12).split('|').filter(n => n.length > 0);
-      console.log(`[onEvent] Received PLAYER_LIST with ${names.length} players`);
-      if ((window as any).updateOnlinePlayers) {
-        (window as any).updateOnlinePlayers(names.map(name => ({ name, status: 'ALIVE' })));
-      }
-      return; // Don't show this in chat
-    }
-    
-    // Parse player list from /players response for autocomplete
-    if (message.startsWith('在线玩家')) {
-      const lines = message.split('\n');
-      const playerNames = lines.slice(1)
-        .map(line => {
-          const match = line.match(/^[✅💀]\s+(.+?)\s+\(HP:/);
-          return match ? match[1] : null;
-        })
-        .filter(name => name !== null) as string[];
-      
-      if ((window as any).updateOnlinePlayers && playerNames.length > 0) {
-        (window as any).updateOnlinePlayers(playerNames.map(name => ({ name, status: 'ALIVE' })));
-      }
-    }
-    
-    // Detect admin authentication success
-    if (message.includes('管理员权限已激活')) {
-      if ((window as any).updateAdminStatus) {
-        (window as any).updateAdminStatus(true);
-      }
-    }
+    const text = t(key, resolved);
 
-    // Filter out internal messages that shouldn't be shown in chat
-    const shouldShowInChat = (msg: string): boolean => {
-      // Skip AUTO_EQUIP messages
-      if (msg.startsWith('AUTO_EQUIP|')) return false;
-      
-      // Skip player action logs (picked up, hit, etc.)
-      if (msg.includes('picked up')) return false;
-      if (msg.includes('hit AI')) return false;
-      if (msg.includes('hit player')) return false;
-      
-      // Show emoji messages (✅, ❌, etc.)
-      if (msg.startsWith('✅') || msg.startsWith('❌')) return true;
-      
-      // Show command responses and server messages
-      if (msg.startsWith('可用地图:')) return true;
-      if (msg.startsWith('地图未找到:')) return true;
-      if (msg.startsWith('用法:')) return true;
-      if (msg.startsWith('命令:')) return true;
-      if (msg.startsWith('未知命令:')) return true;
-      if (msg.includes('需要管理员权限')) return true;
-      if (msg.includes('管理员权限已激活')) return true;
-      if (msg.includes('密码错误')) return true;
-      if (msg === 'Pong!') return true;
-      
-      // Default: don't show in chat (it's probably a game log)
-      return false;
-    };
-
-    // Add to Chat Log (only user-facing messages)
-    if (shouldShowInChat(message) && (window as any).addChatMessage) {
-       (window as any).addChatMessage(message);
+    if (key === 'cmd.admin.granted') {
+      (window as any).updateAdminStatus?.(true);
     }
-
-    if (message.startsWith('AUTO_EQUIP|')) {
-      const parts = message.split('|');
-      const targetId = parts[1] ?? '';
-      const text = parts.slice(2).join('|') || message;
-
-      if (localPlayerId && targetId === localPlayerId) {
-        uiOverlay.showText(text);
-        hud.addEvent(text);
-      } else {
-        hud.addEvent(`${targetId}: ${text}`);
-      }
-      return;
+    if (key.startsWith('cmd.')) {
+      (window as any).addChatMessage?.(text);
     }
-    hud.addEvent(message);
+    hud.addEvent(text);
   },
   onWorldInit: (world) => {
     // 修复: 接收并缓存静态世界数据
@@ -3959,7 +4226,15 @@ network = new Network(getWebSocketUrl(), 'local', {
     const worldItemsCount = world.worldItems?.length ?? 0;
     const roomsCount = world.rooms?.length ?? 0;
     console.log(`Received world init: seed=${world.seed}, obstacles=${world.obstacles.length} (first ID: ${world.obstacles[0]?.id}), items=${itemsCount}, worldItems=${worldItemsCount}, rooms=${roomsCount}`);
-    hud.addEvent(`世界已初始化：${world.obstacles.length} 个障碍物，${itemsCount} 个物品，${worldItemsCount} 个世界物品，${roomsCount} 个房间`);
+    // 一句话里有四个计数，t() 一次只能解一个 count，所以拆成四个片段再拼。
+    hud.addEvent(
+      t('event.world.init', {
+        obstacles: t('count.obstacles', { count: world.obstacles.length }),
+        items: t('count.items', { count: itemsCount }),
+        worldItems: t('count.worldItems', { count: worldItemsCount }),
+        rooms: t('count.rooms', { count: roomsCount }),
+      }),
+    );
   },
   // P1-1 新增: 接收 Profile 消息并更新 HUD
   onProfile: (profile) => {
@@ -4009,9 +4284,13 @@ network = new Network(getWebSocketUrl(), 'local', {
       moneyGained: result.moneyGained,
       moneyLost: result.moneyLost,
       killedBy: result.killedBy,
-      killedByWeaponName: result.killedByWeaponName,
+      killedByWeapon: result.killedByWeapon,
     };
-    hud.addEvent(`战局结束: ${result.result === 'EXTRACTED' ? '成功撤离' : '死亡'}`);
+    hud.addEvent(
+      t('event.raid.ended', {
+        result: t(result.result === 'EXTRACTED' ? 'debrief.status.extracted' : 'debrief.status.kia'),
+      }),
+    );
 
     // ✅ 关键：立刻切到 RESULT，不要等 onProfile
     currentPhase = 'RESULT';
@@ -4032,7 +4311,7 @@ network = new Network(getWebSocketUrl(), 'local', {
     // 新增: 处理战斗事件
     if (event.kind === 'DRY_FIRE') {
       // 干火反馈：屏幕中央显示"没子弹"提示
-      uiOverlay.showText('NO AMMO');
+      uiOverlay.showText(t('raid.noAmmo'));
     } else if (event.kind === 'HIT') {
       // 命中反馈
       uiOverlay.triggerHitMarker();
@@ -4159,10 +4438,10 @@ worldCanvas.addEventListener('contextmenu', (e) => {
 
   if (hit) {
     selectedEntity = hit;
-    hud.addEvent(`已选中实体：${hit.id}`);
+    hud.addEvent(t('event.entity.selected', { id: hit.id }));
   } else {
     selectedEntity = null;
-    hud.addEvent('已取消选中实体');
+    hud.addEvent(t('event.entity.deselected'));
   }
 });
 
@@ -4715,7 +4994,7 @@ function renderLoop(): void {
                 throwingState.targetY,
                 throwingItemType!
               );
-              console.log('本地预测手雷已创建:', throwingState.targetX, throwingState.targetY);
+              console.log('Local predicted grenade spawned:', throwingState.targetX, throwingState.targetY);
             } else {
               dbg.push('THROWING_SEND_FAILED', {});
             }
@@ -4891,7 +5170,7 @@ function renderLoop(): void {
               }
             }
           } else if (!hasAmmo && weaponDef?.weaponKind !== 'melee') {
-            uiOverlay.showText('NO AMMO');
+            uiOverlay.showText(t('raid.noAmmo'));
           }
 
           if (canShoot) {
@@ -5162,21 +5441,33 @@ function renderLoop(): void {
 // 修复: HMR/多实例防护 - 防止多个 renderLoop 同时运行导致重影
 const g = window as any;
 
-if (g.__jerkieCleanup) {
-  try { g.__jerkieCleanup(); } catch {}
+if (g.__zpCleanup) {
+  try { g.__zpCleanup(); } catch {}
 }
 
 let rafId = 0;
+
+// 新手引导。轮询只读访问器驱动，不注册键盘监听，因此不会和 InputManager 抢输入。
+// 首次进入（服务端 profile 的 displayName 为 null）时自动开启，可随时跳过。
+const tutorial = initTutorial({
+  getPhase: () => currentPhase,
+  getProfile: () => playerProfile,
+  getLocalPlayer: () => predictedLocalPlayer ?? renderLocalPlayer ?? raidLocalPlayer,
+  getRaidResult: () => raidResult,
+  getInput: () => inputManager,
+});
+(window as any).zpTutorial = tutorial; // 控制台入口：zpTutorial.replay() / .openFieldGuide()
 
 function cleanup() {
   if (rafId) cancelAnimationFrame(rafId);
   if (resizeRafId !== null) cancelAnimationFrame(resizeRafId);
   // 断网，避免旧实例还在收包/发包
   network.disconnect();
+  tutorial.destroy();
   console.log('[CLEANUP] old instance stopped');
 }
 
-g.__jerkieCleanup = cleanup;
+g.__zpCleanup = cleanup;
 
 // Vite HMR：模块被替换时调用 cleanup（没有也不影响）
 const meta: any = import.meta as any;
@@ -5205,14 +5496,14 @@ rafId = requestAnimationFrame(renderLoop);
   // 清空本地 accountId（下次连接会创建新账号）
   resetAccount: () => {
     console.log('[ADMIN] Resetting account ID...');
-    localStorage.removeItem('jerkie_man_account_id');
+    localStorage.removeItem('zp_account_id');
     console.log('[ADMIN] Account ID cleared. Reload page to create new account.');
     console.log('[ADMIN] Run: __admin.reconnect()');
   },
   
   // 显示当前 accountId
   showAccount: () => {
-    const accountId = localStorage.getItem('jerkie_man_account_id');
+    const accountId = localStorage.getItem('zp_account_id');
     console.log('[ADMIN] Current accountId:', accountId);
     console.log('[ADMIN] Local playerId:', localPlayerId);
     console.log('[ADMIN] Profile:', playerProfile);
@@ -5251,7 +5542,7 @@ rafId = requestAnimationFrame(renderLoop);
   
   // 重置服务端世界
   resetServerWorld: () => {
-    const confirm = window.confirm('重置服务端世界？这将断开所有玩家连接并重新生成地图。');
+    const confirm = window.confirm(t('admin.confirm.resetWorld'));
     if (confirm) {
       console.log('[ADMIN] Resetting server world...');
       network.sendAdminCommand('reset_world');
@@ -5259,29 +5550,30 @@ rafId = requestAnimationFrame(renderLoop);
   },
   
   // 帮助信息
+  // 控制台/调试输出按 docs/LOCALIZATION.md §7 一律保持英文，不进 i18n。
   help: () => {
     console.log(`
-=== 管理员命令 ===
-调用方式：在控制台输入 __admin.命令名()
+=== ADMIN CONSOLE ===
+Usage: type __admin.<command>() in the console
 
-可用命令：
-  reconnect()            - 重新连接服务器（清空本地状态）
-  resetAccount()         - 清空本地账号ID（下次连接创建新账号）
-  showAccount()          - 显示当前账号信息
-  showPlayer()           - 显示当前玩家状态
-  showAllPlayers()       - 显示所有玩家和世界物品
-  showMap()              - 显示地图配置
-  requestServerStatus()  - 请求服务器状态（通过网络）
-  resetServerWorld()     - 重置服务端世界（需确认）
-  help()                 - 显示此帮助信息
+Commands:
+  reconnect()            - reconnect to the server (clears local state)
+  resetAccount()         - clear the local account id (next connect creates a new account)
+  showAccount()          - print the current account info
+  showPlayer()           - print the local player state
+  showAllPlayers()       - print all players and world items
+  showMap()              - print the map config
+  requestServerStatus()  - request server status over the network
+  resetServerWorld()     - reset the server world (asks for confirmation)
+  help()                 - print this help
 
-快捷键：
-  Alt+Shift+R - 重置账号并重新连接
-  Alt+Shift+D - 显示调试信息
-  Alt+Shift+S - 请求服务器状态
-  Alt+Shift+W - 重置服务端世界（需确认）
+Hotkeys:
+  Alt+Shift+R - reset account and reconnect
+  Alt+Shift+D - print debug info
+  Alt+Shift+S - request server status
+  Alt+Shift+W - reset the server world (asks for confirmation)
 
-例如：
+Examples:
   __admin.showAccount()
   __admin.requestServerStatus()
     `);
@@ -5300,19 +5592,20 @@ let isChatFocused = false;
 let selectedSuggestionIndex = -1;
 let currentSuggestions: Array<{ text: string; desc: string }> = [];
 
-// Available commands
+// Available commands.
+// 存 key 而不是文案：这张表是模块级常量，只求值一次，存文案就锁死在启动时的语言。
 const COMMANDS = [
-  { cmd: '/admin ', desc: '激活管理员权限', adminOnly: false },
-  { cmd: '/help', desc: '显示所有命令', adminOnly: false },
-  { cmd: '/maps', desc: '查看所有可用地图', adminOnly: false },
-  { cmd: '/players', desc: '查看在线玩家列表', adminOnly: false },
-  { cmd: '/ping', desc: '测试连接延迟', adminOnly: false },
-  { cmd: '/map ', desc: '切换地图 (需要管理员)', adminOnly: true },
-  { cmd: '/reset', desc: '重置当前房间 (需要管理员)', adminOnly: true },
-  { cmd: '/give ', desc: '给玩家加钱 (需要管理员)', adminOnly: true },
-  { cmd: '/heal ', desc: '治疗玩家 (需要管理员)', adminOnly: true },
-  { cmd: '/kill ', desc: '击杀玩家 (需要管理员)', adminOnly: true },
-  { cmd: '/kick ', desc: '踢出玩家 (需要管理员)', adminOnly: true },
+  { cmd: '/admin ', descKey: 'chat.cmd.admin', adminOnly: false },
+  { cmd: '/help', descKey: 'chat.cmd.help', adminOnly: false },
+  { cmd: '/maps', descKey: 'chat.cmd.maps', adminOnly: false },
+  { cmd: '/players', descKey: 'chat.cmd.players', adminOnly: false },
+  { cmd: '/ping', descKey: 'chat.cmd.ping', adminOnly: false },
+  { cmd: '/map ', descKey: 'chat.cmd.map', adminOnly: true },
+  { cmd: '/reset', descKey: 'chat.cmd.reset', adminOnly: true },
+  { cmd: '/give ', descKey: 'chat.cmd.give', adminOnly: true },
+  { cmd: '/heal ', descKey: 'chat.cmd.heal', adminOnly: true },
+  { cmd: '/kill ', descKey: 'chat.cmd.kill', adminOnly: true },
+  { cmd: '/kick ', descKey: 'chat.cmd.kick', adminOnly: true },
 ];
 
 // Track admin status
@@ -5494,21 +5787,22 @@ function updateSuggestions(input: string): void {
         // Show map suggestions
         currentSuggestions = availableMaps
           .filter(m => m.toLowerCase().includes(paramInput))
-          .map(m => ({ text: `/map ${m}`, desc: `切换到地图: ${m}` }));
+          .map(m => ({ text: `/map ${m}`, desc: t('chat.suggest.map', { map: m }) }));
         console.log(`[Chat] Map suggestions found: ${currentSuggestions.length}`);
       } else if (cmd === 'give' || cmd === 'heal' || cmd === 'kill' || cmd === 'kick') {
         // Show player suggestions
         currentSuggestions = onlinePlayers
           .filter(name => name.toLowerCase().includes(paramInput))
           .map(name => {
+            // 语序陷阱：中文"给 X 加钱"里变量在中间，英文 "Give credits to X" 在末尾。
             if (cmd === 'give') {
-              return { text: `/give ${name} `, desc: `给 ${name} 加钱` };
+              return { text: `/give ${name} `, desc: t('chat.suggest.give', { name }) };
             } else if (cmd === 'heal') {
-              return { text: `/heal ${name}`, desc: `治疗 ${name}` };
+              return { text: `/heal ${name}`, desc: t('chat.suggest.heal', { name }) };
             } else if (cmd === 'kill') {
-              return { text: `/kill ${name}`, desc: `击杀 ${name}` };
+              return { text: `/kill ${name}`, desc: t('chat.suggest.kill', { name }) };
             } else {
-              return { text: `/kick ${name}`, desc: `踢出 ${name}` };
+              return { text: `/kick ${name}`, desc: t('chat.suggest.kick', { name }) };
             }
           });
         console.log(`[Chat] Player suggestions found: ${currentSuggestions.length}`);
@@ -5522,7 +5816,7 @@ function updateSuggestions(input: string): void {
     currentSuggestions = COMMANDS
       .filter(c => !c.adminOnly || isCurrentUserAdmin) // Only show permitted commands
       .filter(c => c.cmd.toLowerCase().startsWith(input.toLowerCase()))
-      .map(c => ({ text: c.cmd, desc: c.desc }));
+      .map(c => ({ text: c.cmd, desc: t(c.descKey) }));
     console.log(`[Chat] Command suggestions found: ${currentSuggestions.length}`);
   }
   
@@ -5660,26 +5954,27 @@ function renderKillFeed(feed: S2C_KILL_FEED): void {
   // Killer
   const killerSpan = document.createElement('span');
   killerSpan.className = 'kill-killer';
-  killerSpan.textContent = feed.killer;
+  killerSpan.textContent = combatActorLabel(feed.killer);
   feedEl.appendChild(killerSpan);
 
   // Icon (or text "killed")
   const iconSpan = document.createElement('span');
   iconSpan.className = 'kill-icon';
-  iconSpan.textContent = 'KILLED'; 
+  iconSpan.textContent = t('hud.killfeed.killed');
   feedEl.appendChild(iconSpan);
 
   // Victim
   const victimSpan = document.createElement('span');
   victimSpan.className = 'kill-victim';
-  victimSpan.textContent = feed.victim;
+  victimSpan.textContent = combatActorLabel(feed.victim);
   feedEl.appendChild(victimSpan);
 
   // Weapon
-  if (feed.weapon) {
+  const weaponLabel = combatWeaponLabel(feed.weapon);
+  if (weaponLabel) {
     const weaponSpan = document.createElement('span');
     weaponSpan.className = 'kill-weapon';
-    weaponSpan.textContent = `[${feed.weapon}]`;
+    weaponSpan.textContent = `[${weaponLabel}]`;
     feedEl.appendChild(weaponSpan);
   }
 

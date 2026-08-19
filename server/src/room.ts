@@ -1,8 +1,8 @@
 
 import { Player } from './player.js';
 import { ProfileManager } from './profile.js';
-import type { PLAYER_STATE, BULLET_STATE, ITEM_STATE, C2S_INPUT, MAP_CONFIG, OBSTACLE_STATE, WorldItem, LootBag, ItemInstance, WeaponRuntime, WeaponDef, MapTemplate, SpawnPoint, AI_STATE, AISpawn, DECOY_STATE, TURRET_STATE, S2C_MESSAGE } from '@jerkie-man/shared';
-import { loadMapConfig, loadItemTypes, circleVsAABB, createRng, rectIntersects, segmentIntersectsCircle, segmentPointDistanceSquared, getItemType, getAllItemTypes, getItemTypesByRarity, getWeaponDef, getArmorDef, getBagDef, applySpread, msToTicks, getFireSchedule, shouldStartBurst, canFireTick, advanceFireCooldown, PLAYER_HIT_RADIUS, getBulletPenetration, isObstacleDestructible, isUsableItem, doesObstacleBlockPlayer, AI_ROLE_PRESETS, ticksToMs, ItemType, EXTRACT_DURATION_MS, CLIENT_INTERPOLATION_DELAY_MS } from '@jerkie-man/shared';
+import type { PLAYER_STATE, BULLET_STATE, ITEM_STATE, C2S_INPUT, MAP_CONFIG, OBSTACLE_STATE, WorldItem, LootBag, ItemInstance, WeaponRuntime, WeaponDef, MapTemplate, SpawnPoint, AI_STATE, AISpawn, DECOY_STATE, TURRET_STATE, S2C_MESSAGE, COMBAT_ACTOR, COMBAT_WEAPON, ENEMY_KIND, ActionResult, AIRole } from '@ziyang-protocol/shared';
+import { loadMapConfig, loadItemTypes, circleVsAABB, createRng, rectIntersects, segmentIntersectsCircle, segmentPointDistanceSquared, getItemType, getAllItemTypes, getItemTypesByRarity, getWeaponDef, getArmorDef, getBagDef, applySpread, msToTicks, getFireSchedule, shouldStartBurst, canFireTick, advanceFireCooldown, PLAYER_HIT_RADIUS, getBulletPenetration, isObstacleDestructible, isUsableItem, doesObstacleBlockPlayer, AI_ROLE_PRESETS, ticksToMs, ItemType, EXTRACT_DURATION_MS, CLIENT_INTERPOLATION_DELAY_MS } from '@ziyang-protocol/shared';
 import { log } from './logger.js';
 import { AI, type PatrolConfig, type GuardConfig } from './ai.js';
 import { NavigationGrid, Pathfinder } from './pathfinding.js';
@@ -24,6 +24,53 @@ type Bullet = BULLET_STATE & {
   spawnX: number;
   spawnY: number;
 };
+
+/** 服务端事件：只带 key + params，文本由客户端渲染。 */
+export type RoomEvent = {
+  tick: number;
+  timestamp: number;
+  key: string;
+  params?: Record<string, string | number>;
+};
+
+/** 局内自动装备回执（单播给当事玩家）。 */
+export type AutoEquipNotice = {
+  playerId: string;
+  slot: 'weapon' | 'bag' | 'armor';
+  itemTypeId: string;
+};
+
+/** 结构化击杀播报。 */
+export type KillFeedEntry = {
+  killer: COMBAT_ACTOR;
+  victim: COMBAT_ACTOR;
+  weapon: COMBAT_WEAPON;
+};
+
+/** AI role -> catalog enemy kind (`enemy.<kind>`). */
+export function enemyKindForRole(role: AIRole | undefined): ENEMY_KIND {
+  switch (role) {
+    case 'scout': return 'scout';
+    case 'sniper': return 'sniper';
+    case 'heavy_gunner': return 'heavy';
+    default: return 'feral';
+  }
+}
+
+/** Weapon type id -> wire form. `w_fists` has no catalog entry. */
+export function weaponFromTypeId(weaponTypeId: string | undefined): COMBAT_WEAPON {
+  if (!weaponTypeId) return { kind: 'special', specialId: 'unknown' };
+  if (weaponTypeId === 'w_fists') return { kind: 'special', specialId: 'fists' };
+  return { kind: 'item', itemTypeId: weaponTypeId };
+}
+
+const UNARMED: COMBAT_WEAPON = { kind: 'special', specialId: 'fists' };
+const UNKNOWN_WEAPON: COMBAT_WEAPON = { kind: 'special', specialId: 'unknown' };
+
+/** True when the weapon carries no useful attribution (explosion fallbacks). */
+function isUnattributedWeapon(weapon: COMBAT_WEAPON): boolean {
+  return weapon.kind === 'special' && (weapon.specialId === 'fists' || weapon.specialId === 'unknown');
+}
 
 export class Room {
   public id: string;
@@ -47,12 +94,13 @@ export class Room {
   private smokeIdCounter = 0; // 新增: 烟雾ID计数器
   private fireIdCounter = 0; // 新增: 燃烧ID计数器
   private lootBagIdCounter = 0;
-  private events: Array<{ tick: number; timestamp: number; message: string }> = [];
-  private killFeeds: Array<{ killer: string; victim: string; weapon: string; tick: number }> = [];
+  private events: RoomEvent[] = [];
+  private autoEquips: AutoEquipNotice[] = [];
+  private killFeeds: Array<KillFeedEntry & { tick: number }> = [];
   private readonly MAX_EVENTS = 50;
 
   private readonly PICKUP_RADIUS = 40;
-  public raidResults: Map<string, { result: 'EXTRACTED' | 'DIED'; accountId: string; loot?: ItemInstance[]; moneyGained?: number; moneyLost?: number; killedBy?: string; killedByWeaponName?: string }> = new Map();
+  public raidResults: Map<string, { result: 'EXTRACTED' | 'DIED'; accountId: string; loot?: ItemInstance[]; moneyGained?: number; moneyLost?: number; killedBy?: COMBAT_ACTOR; killedByWeapon?: COMBAT_WEAPON }> = new Map();
   public combatEvents: Map<string, Array<{ kind: 'DRY_FIRE' | 'HIT' | 'DAMAGE_TAKEN'; direction?: number }>> = new Map();
   public meleeSwings: Array<{ playerId: string; x: number; y: number; aimRad: number; range: number; arcRad: number; side?: number; weaponTypeId?: string }> = [];
   public explosions: Array<{ x: number; y: number; radius: number }> = [];
@@ -708,28 +756,38 @@ export class Room {
     return x >= zone.x && x <= zone.x + zone.w && y >= zone.y && y <= zone.y + zone.h;
   }
 
-  // 游戏化增强: 推送事件到队列
-  private pushEvent(message: string): void {
-    const event = {
-      tick: this.tick,
-      timestamp: Date.now(),
-      message,
-    };
-    this.events.push(event);
+  // 游戏化增强: 推送事件到队列（只带 key + params，文本由客户端渲染）
+  private pushEvent(key: string, params?: Record<string, string | number>): void {
+    this.events.push({ tick: this.tick, timestamp: Date.now(), key, params });
     // Ring buffer: 超过最大数量时移除最旧的
     if (this.events.length > this.MAX_EVENTS) {
       this.events.shift();
     }
   }
 
-  public pushKillFeed(killer: string, victim: string, weapon: string): void {
+  /** 玩家显示名：优先昵称，没有昵称时退回实体 ID。 */
+  private displayName(playerId: string, player?: Player): string {
+    return (player ?? this.players.get(playerId))?.name || playerId;
+  }
+
+  private pushAutoEquip(playerId: string, slot: 'weapon' | 'bag' | 'armor', itemTypeId: string): void {
+    this.autoEquips.push({ playerId, slot, itemTypeId });
+  }
+
+  public drainAutoEquips(): AutoEquipNotice[] {
+    const notices = this.autoEquips;
+    this.autoEquips = [];
+    return notices;
+  }
+
+  public pushKillFeed(killer: COMBAT_ACTOR, victim: COMBAT_ACTOR, weapon: COMBAT_WEAPON): void {
     this.killFeeds.push({ killer, victim, weapon, tick: this.tick });
     if (this.killFeeds.length > 50) {
       this.killFeeds.shift();
     }
   }
 
-  public drainKillFeeds(): Array<{ killer: string; victim: string; weapon: string }> {
+  public drainKillFeeds(): KillFeedEntry[] {
     const feeds = this.killFeeds.map(f => ({ killer: f.killer, victim: f.victim, weapon: f.weapon }));
     this.killFeeds = [];
     return feeds;
@@ -793,7 +851,7 @@ export class Room {
         const weaponDef = getWeaponDef(item.typeId);
         if (this.setPlayerWeaponRuntime(player, weaponDef.typeId)) {
           player.equippedWeaponItem = { ...item, qty: 1 };
-          this.pushEvent(`AUTO_EQUIP|${playerId}|自动装备：${weaponDef.name}`);
+          this.pushAutoEquip(playerId, 'weapon', weaponDef.typeId);
           return true;
         }
       } catch {
@@ -812,7 +870,7 @@ export class Room {
         if (oldBag) {
           this.addInventoryItemInstance(player, oldBag);
         }
-        this.pushEvent(`AUTO_EQUIP|${playerId}|自动装备：${bagDef.name}（容量 ${bagDef.bagCap}）`);
+        this.pushAutoEquip(playerId, 'bag', bagDef.typeId);
         return true;
       }
       return false;
@@ -831,7 +889,7 @@ export class Room {
         if (oldArmor && !this.addInventoryItemInstance(player, oldArmor)) {
           this.dropItemAtPlayer(player, oldArmor);
         }
-        this.pushEvent(`AUTO_EQUIP|${playerId}|自动装备：${armorDef.name}（减伤 ${Math.floor(armorDef.damageReduction * 100)}%）`);
+        this.pushAutoEquip(playerId, 'armor', armorDef.typeId);
         return true;
       }
     } catch {
@@ -842,7 +900,7 @@ export class Room {
   }
 
   // 游戏化增强: 获取并清空事件队列（供 server 广播使用）
-  drainEvents(): Array<{ tick: number; timestamp: number; message: string }> {
+  drainEvents(): RoomEvent[] {
     const events = [...this.events];
     this.events = [];
     return events;
@@ -1272,8 +1330,6 @@ export class Room {
               tick: this.tick,
             });
 
-            // 游戏化增强: 推送撤离事件
-            this.pushEvent(`${playerId} extracted with loot=${player.lootCount}`);
           }
         } else {
           // 不在撤离区内，重置进度
@@ -1443,7 +1499,6 @@ export class Room {
       // ✅ 修复：使用 updatePhase 而不是 updateProfile 来更新 phase
       this.profileManager.updatePhase(accountId, 'HIDEOUT');
       
-      this.pushEvent(`${playerId} returned to lobby`);
       log('EXIT_RESULT', { playerId, accountId, phase: 'HIDEOUT' });
     }
   }
@@ -1454,10 +1509,10 @@ export class Room {
     slot: 'weapon' | 'bag' | 'armor',
     iid: string | null,
     typeId?: string | null
-  ): { success: boolean; message?: string } {
+  ): ActionResult {
     const player = this.players.get(playerId);
     if (!player || player.status !== 'ALIVE') {
-      return { success: false, message: 'Player not alive' };
+      return { success: false, errorCode: 'raid.notAlive' };
     }
 
     if (slot === 'weapon') {
@@ -1466,36 +1521,36 @@ export class Room {
           return { success: true };
         }
         if (player.inventory.items.length >= player.inventory.bagCap) {
-          return { success: false, message: 'Bag is full' };
+          return { success: false, errorCode: 'inventory.full' };
         }
         this.addInventoryItemInstance(player, player.equippedWeaponItem);
         player.equippedWeaponItem = null;
         const ok = this.setPlayerWeaponRuntime(player, 'w_fists');
-        return ok ? { success: true } : { success: false, message: 'Failed to unequip weapon' };
+        return ok ? { success: true } : { success: false, errorCode: 'equip.unequipFailed' };
       }
 
       const weaponItem = player.inventory.items.find(item => item.iid === iid) ??
         (typeId ? player.inventory.items.find(item => item.typeId === typeId) : undefined);
       if (!weaponItem) {
-        return { success: false, message: 'Weapon not in inventory' };
+        return { success: false, errorCode: 'equip.weaponMissing' };
       }
       try {
         getWeaponDef(weaponItem.typeId);
       } catch {
-        return { success: false, message: 'Invalid weapon type' };
+        return { success: false, errorCode: 'equip.invalidWeapon' };
       }
 
       const oldWeapon = player.equippedWeaponItem;
       // 修复：武器只移除1个，不是全部数量
       const removed = player.removeItem(weaponItem.iid, 1);
       if (!removed) {
-        return { success: false, message: 'Failed to remove item' };
+        return { success: false, errorCode: 'inventory.removeFailed' };
       }
       const ok = this.setPlayerWeaponRuntime(player, weaponItem.typeId);
       if (!ok) {
         // 回滚：如果设置失败，把武器加回背包
         this.addInventoryItemInstance(player, { ...weaponItem, qty: 1 });
-        return { success: false, message: 'Invalid weapon type' };
+        return { success: false, errorCode: 'equip.invalidWeapon' };
       }
       // 修复：装备的武器数量应该是1
       player.equippedWeaponItem = { ...weaponItem, qty: 1 };
@@ -1509,12 +1564,12 @@ export class Room {
 
     if (slot === 'bag') {
       if (!iid) {
-        return { success: false, message: 'Bag item required' };
+        return { success: false, errorCode: 'equip.backpackRequired' };
       }
       const bagItem = player.inventory.items.find(item => item.iid === iid) ??
         (typeId ? player.inventory.items.find(item => item.typeId === typeId) : undefined);
       if (!bagItem) {
-        return { success: false, message: 'Bag not in inventory' };
+        return { success: false, errorCode: 'equip.backpackMissing' };
       }
       try {
         const bagDef = getBagDef(bagItem.typeId);
@@ -1522,13 +1577,13 @@ export class Room {
         const willAddOldBag = !!player.equippedBagItem;
         const targetCount = currentCount - 1 + (willAddOldBag ? 1 : 0);
         if (bagDef.bagCap < targetCount) {
-          return { success: false, message: 'Bag capacity too small' };
+          return { success: false, errorCode: 'equip.backpackTooSmall' };
         }
         const oldBag = player.equippedBagItem;
         // 修复：背包只移除1个，不是全部数量
         const removed = player.removeItem(bagItem.iid, 1);
         if (!removed) {
-          return { success: false, message: 'Failed to remove item' };
+          return { success: false, errorCode: 'inventory.removeFailed' };
         }
         player.inventory.bagCap = bagDef.bagCap;
         player.equippedBagTypeId = bagDef.typeId;
@@ -1539,7 +1594,7 @@ export class Room {
         }
         return { success: true };
       } catch {
-        return { success: false, message: 'Invalid bag type' };
+        return { success: false, errorCode: 'equip.invalidBackpack' };
       }
     }
 
@@ -1550,7 +1605,7 @@ export class Room {
           return { success: true };
         }
         if (player.inventory.items.length >= player.inventory.bagCap) {
-          return { success: false, message: 'Bag is full' };
+          return { success: false, errorCode: 'inventory.full' };
         }
         this.addInventoryItemInstance(player, player.equippedArmorItem);
         player.equippedArmorItem = null;
@@ -1561,7 +1616,7 @@ export class Room {
       const armorItem = player.inventory.items.find(item => item.iid === iid) ??
         (typeId ? player.inventory.items.find(item => item.typeId === typeId) : undefined);
       if (!armorItem) {
-        return { success: false, message: 'Armor not in inventory' };
+        return { success: false, errorCode: 'equip.armorMissing' };
       }
       try {
         const armorDef = getArmorDef(armorItem.typeId);
@@ -1569,7 +1624,7 @@ export class Room {
         // 修复：护甲只移除1个，不是全部数量
         const removed = player.removeItem(armorItem.iid, 1);
         if (!removed) {
-          return { success: false, message: 'Failed to remove item' };
+          return { success: false, errorCode: 'inventory.removeFailed' };
         }
         player.armorReduction = armorDef.damageReduction;
         player.equippedArmorTypeId = armorDef.typeId;
@@ -1580,43 +1635,43 @@ export class Room {
         }
         return { success: true };
       } catch {
-        return { success: false, message: 'Invalid armor type' };
+        return { success: false, errorCode: 'equip.invalidArmor' };
       }
     }
 
-    return { success: false, message: 'Unknown slot' };
+    return { success: false, errorCode: 'equip.unknownSlot' };
   }
 
   // 新增: 丢弃背包物品到地面
-  public handleDropItem(playerId: string, iid: string, qty: number): { success: boolean; message?: string } {
+  public handleDropItem(playerId: string, iid: string, qty: number): ActionResult {
     const player = this.players.get(playerId);
     if (!player || player.status !== 'ALIVE') {
-      return { success: false, message: 'Player not alive' };
+      return { success: false, errorCode: 'raid.notAlive' };
     }
 
     const item = player.inventory.items.find(entry => entry.iid === iid);
     if (!item) {
-      return { success: false, message: 'Item not found' };
+      return { success: false, errorCode: 'inventory.itemMissing' };
     }
 
     const dropQty = Math.min(item.qty, qty);
     if (dropQty <= 0) {
-      return { success: false, message: 'Invalid quantity' };
+      return { success: false, errorCode: 'inventory.invalidQuantity' };
     }
 
     if (player.equippedWeaponItem?.iid === item.iid) {
-      return { success: false, message: 'Cannot drop equipped weapon' };
+      return { success: false, errorCode: 'drop.weaponEquipped' };
     }
     if (player.equippedBagItem?.iid === item.iid) {
-      return { success: false, message: 'Cannot drop equipped bag' };
+      return { success: false, errorCode: 'drop.backpackEquipped' };
     }
     if (player.equippedArmorItem?.iid === item.iid) {
-      return { success: false, message: 'Cannot drop equipped armor' };
+      return { success: false, errorCode: 'drop.armorEquipped' };
     }
 
     const removed = player.removeItem(iid, dropQty);
     if (!removed) {
-      return { success: false, message: 'Failed to remove item' };
+      return { success: false, errorCode: 'inventory.removeFailed' };
     }
 
     const wid = `wid_${this.seed}_${this.worldItemIdCounter++}_${Date.now().toString(36)}`;
@@ -1635,11 +1690,11 @@ export class Room {
       wid: wid,
     });
 
-    let itemName = item.typeId;
-    try {
-      itemName = getItemType(item.typeId).name;
-    } catch {}
-    this.pushEvent(`Player ${playerId} dropped ${itemName} x${dropQty}`);
+    this.pushEvent('event.item.dropped', {
+      name: this.displayName(playerId, player),
+      item: item.typeId,
+      qty: dropQty,
+    });
 
     return { success: true };
   }
@@ -1688,14 +1743,19 @@ export class Room {
         log('TURRET_REMOVED', {
           room: this.id,
           turretId: id,
-          killedBy: turret.killedBy || '过期',
-          killedByWeaponName: turret.killedByWeaponName || '自然消失',
+          killedBy: turret.killedBy?.kind ?? 'expired',
+          killedByWeapon: turret.killedByWeapon?.kind ?? 'none',
           tick: this.tick
         });
 
         // 击杀播报
-        if (turret.killedBy && turret.killedByWeaponName) {
-           this.pushKillFeed(turret.killedBy, '自动哨兵', turret.killedByWeaponName);
+        if (turret.killedBy && turret.killedByWeapon) {
+           const owner = this.players.get(turret.ownerId);
+           this.pushKillFeed(
+             turret.killedBy,
+             { kind: 'turret', ownerName: owner?.name ?? null },
+             turret.killedByWeapon,
+           );
         }
       }
       this.turrets.delete(id);
@@ -1891,8 +1951,6 @@ export class Room {
           pos: `(${player.x.toFixed(1)},${player.y.toFixed(1)})`,
           tick: this.tick,
         });
-        // 游戏化增强: 推送撤离事件
-        this.pushEvent(`${playerId} extracted with loot=${player.lootCount}`);
       }
     }
     
@@ -2082,8 +2140,8 @@ export class Room {
               const isDead = hitPlayer.hp <= 0;
               
               if (isDead) {
-                hitPlayer.killedBy = player.name || playerId;
-                hitPlayer.killedByWeaponName = weaponDef.name;
+                hitPlayer.killedBy = { kind: 'player', name: player.name || playerId };
+                hitPlayer.killedByWeapon = weaponFromTypeId(weaponDef.typeId);
                 this.handlePlayerDeath(hitPlayer.id);
               }
               
@@ -2104,8 +2162,13 @@ export class Room {
                 this.combatEvents.get(playerId)!.push({ kind: 'HIT' });
               }
               
-              // 推送命中事件
-              this.pushEvent(`${playerId} melee hit ${hitPlayer.id} (-${damage})`);
+              log('MELEE_HIT_PLAYER', {
+                room: this.id,
+                attacker: playerId,
+                target: hitPlayer.id,
+                damage,
+                tick: this.tick,
+              });
             } else if (hitAI) {
               // 攻击AI
               hitAI.takeDamage(damage, player.x, player.y);
@@ -2114,9 +2177,6 @@ export class Room {
               if (isDead) {
                 this.handleAIDeath(hitAI.id);
               }
-              
-              // 推送命中事件
-              this.pushEvent(`${playerId} melee hit AI ${hitAI.id} (-${damage})`);
               
               log('AI_MELEE_HIT', {
                 room: this.id,
@@ -2137,8 +2197,6 @@ export class Room {
             } else if (hitTurret) {
               // 攻击炮塔
               hitTurret.takeDamage(damage);
-              this.pushEvent(`${playerId} melee hit turret ${hitTurret.id} (-${damage})`);
-              
               log('TURRET_MELEE_HIT', {
                 room: this.id,
                 turret: hitTurret.id,
@@ -2182,8 +2240,13 @@ export class Room {
                 this.combatEvents.get(playerId)!.push({ kind: 'HIT' });
               }
 
-              // 推送命中事件
-              this.pushEvent(`${playerId} melee hit decoy ${hitDecoy.id} (-${damage})`);
+              log('MELEE_HIT_DECOY', {
+                room: this.id,
+                attacker: playerId,
+                decoyId: hitDecoy.id,
+                damage,
+                tick: this.tick,
+              });
             }
             
             // 给攻击者发送命中事件
@@ -2389,8 +2452,8 @@ export class Room {
       if (isDead) {
         const attacker = this.players.get(bullet.ownerId);
         if (attacker) {
-          player.killedBy = attacker.name || bullet.ownerId;
-          player.killedByWeaponName = weaponDef.name;
+          player.killedBy = { kind: 'player', name: attacker.name || bullet.ownerId };
+          player.killedByWeapon = weaponFromTypeId(weaponDef.typeId);
         }
       }
     }
@@ -2477,11 +2540,8 @@ export class Room {
 
       if (isDead) {
         const info = this.getAttackerInfo(ownerId);
-        player.killedBy = info.name;
-        player.killedByWeaponName = info.weaponName === '拳头' ? '破片手雷' : info.weaponName; // 如果是手雷爆炸，且没拿到具体武器名，默认手雷
-        if (info.weaponName === '环境伤害' || info.weaponName === '未知') {
-             player.killedByWeaponName = '破片手雷';
-        }
+        player.killedBy = info.actor;
+        player.killedByWeapon = this.throwableWeapon(info, 'frag_grenade');
         this.handlePlayerDeath(player.id);
       }
     }
@@ -2536,11 +2596,8 @@ export class Room {
 
       if (isDead) {
         const info = this.getAttackerInfo(ownerId);
-        turret.killedBy = info.name;
-        turret.killedByWeaponName = info.weaponName === '拳头' ? '破片手雷' : info.weaponName;
-        if (info.weaponName === '环境伤害' || info.weaponName === '未知') {
-             turret.killedByWeaponName = '破片手雷';
-        }
+        turret.killedBy = info.actor;
+        turret.killedByWeapon = this.throwableWeapon(info, 'frag_grenade');
       }
 
       if (ownerId) {
@@ -2576,11 +2633,8 @@ export class Room {
 
       if (isDead) {
         const info = this.getAttackerInfo(ownerId);
-        ai.killedBy = info.name;
-        ai.killedByWeaponName = info.weaponName === '拳头' ? '破片手雷' : info.weaponName;
-        if (info.weaponName === '环境伤害' || info.weaponName === '未知') {
-             ai.killedByWeaponName = '破片手雷';
-        }
+        ai.killedBy = info.actor;
+        ai.killedByWeapon = this.throwableWeapon(info, 'frag_grenade');
         this.handleAIDeath(aiId);
       }
 
@@ -2606,8 +2660,6 @@ export class Room {
       });
     }
 
-    // 记录爆炸事件
-    this.pushEvent(`Grenade exploded at (${Math.round(x)}, ${Math.round(y)})`);
     log('GRENADE_EXPLOSION', {
       room: this.id,
       x: Math.round(x),
@@ -2690,7 +2742,6 @@ export class Room {
       }
     }
 
-    this.pushEvent(`Flashbang exploded at (${Math.round(x)}, ${Math.round(y)})`);
     log('FLASHBANG_EXPLOSION', {
       room: this.id,
       x: Math.round(x),
@@ -2719,7 +2770,6 @@ export class Room {
     this.fires.push(fire);
     this.newFires.push({ id: fireId, x, y, radius, durationMs });
 
-    this.pushEvent(`Molotov ignited at (${Math.round(x)}, ${Math.round(y)})`);
     log('MOLOTOV_IGNITE', {
       room: this.id,
       fireId,
@@ -2764,8 +2814,8 @@ export class Room {
           // 如果玩家死亡，处理死亡逻辑
           if (player.hp <= 0) {
             const info = this.getAttackerInfo(fire.ownerId);
-            player.killedBy = info.name;
-            player.killedByWeaponName = '燃烧弹';
+            player.killedBy = info.actor;
+            player.killedByWeapon = { kind: 'item', itemTypeId: 'molotov' };
             this.handlePlayerDeath(playerId);
           }
 
@@ -2802,8 +2852,8 @@ export class Room {
           turret.takeDamage(damageTick);
           if (turret.hp <= 0) {
             const info = this.getAttackerInfo(fire.ownerId);
-            turret.killedBy = info.name;
-            turret.killedByWeaponName = '燃烧弹';
+            turret.killedBy = info.actor;
+            turret.killedByWeapon = { kind: 'item', itemTypeId: 'molotov' };
           }
           
           if (fire.ownerId) {
@@ -2829,8 +2879,8 @@ export class Room {
             
             if (ai.hp <= 0) {
               const info = this.getAttackerInfo(fire.ownerId);
-              ai.killedBy = info.name;
-              ai.killedByWeaponName = '燃烧弹';
+              ai.killedBy = info.actor;
+              ai.killedByWeapon = { kind: 'item', itemTypeId: 'molotov' };
               this.handleAIDeath(aiId);
             }
 
@@ -2905,7 +2955,6 @@ export class Room {
       }
     }
 
-    this.pushEvent(`Decoy stun explosion at (${Math.round(x)}, ${Math.round(y)})`);
     log('STUN_EXPLOSION', {
       room: this.id,
       x: Math.round(x),
@@ -2934,7 +2983,7 @@ export class Room {
           // 爆炸/生成烟雾！
           if (bullet.weaponTypeId === 'smoke_grenade') {
             // 烟雾弹：不造成伤害，只生成烟雾区域
-            const logMsg = `[烟雾弹] 实际爆点（时间到）: (${bullet.x.toFixed(2)}, ${bullet.y.toFixed(2)}), 目标落点: (${bullet.targetX?.toFixed(2) ?? 'N/A'}, ${bullet.targetY?.toFixed(2) ?? 'N/A'})`;
+            const logMsg = `[smoke] burst (fuse expired): (${bullet.x.toFixed(2)}, ${bullet.y.toFixed(2)}), target: (${bullet.targetX?.toFixed(2) ?? 'N/A'}, ${bullet.targetY?.toFixed(2) ?? 'N/A'})`;
             console.log(logMsg);
             log('SMOKE_GRENADE_EXPLODE_TIMEOUT', {
               room: this.id,
@@ -2986,7 +3035,6 @@ export class Room {
             );
             this.decoys.push(decoy);
             
-            this.pushEvent(`Decoy deployed at (${Math.round(bullet.x)}, ${Math.round(bullet.y)})`);
             log('DECOY_DEPLOYED', {
               room: this.id,
               decoyId,
@@ -3030,7 +3078,7 @@ export class Room {
 
             // 修复: 烟雾弹/闪光弹一到达目标位置就立即生效
             if (bullet.weaponTypeId === 'smoke_grenade') {
-              const logMsg = `[烟雾弹] 实际爆点（到达落点）: (${bullet.x.toFixed(2)}, ${bullet.y.toFixed(2)}), 目标落点: (${bullet.targetX?.toFixed(2) ?? 'N/A'}, ${bullet.targetY?.toFixed(2) ?? 'N/A'})`;
+              const logMsg = `[smoke] burst (reached target): (${bullet.x.toFixed(2)}, ${bullet.y.toFixed(2)}), target: (${bullet.targetX?.toFixed(2) ?? 'N/A'}, ${bullet.targetY?.toFixed(2) ?? 'N/A'})`;
               console.log(logMsg);
               log('SMOKE_GRENADE_EXPLODE_TARGET', {
                 room: this.id,
@@ -3087,7 +3135,6 @@ export class Room {
               );
               this.decoys.push(decoy);
               
-              this.pushEvent(`Decoy deployed at (${Math.round(bullet.x)}, ${Math.round(bullet.y)})`);
               log('DECOY_DEPLOYED', {
                 room: this.id,
                 decoyId,
@@ -3123,7 +3170,7 @@ export class Room {
         if (bullet.x < 0 || bullet.x > this.mapConfig.width ||
             bullet.y < 0 || bullet.y > this.mapConfig.height) {
           if (bullet.weaponTypeId === 'smoke_grenade') {
-            const logMsg = `[烟雾弹] 实际爆点（边界碰撞）: (${bullet.x.toFixed(2)}, ${bullet.y.toFixed(2)}), 目标落点: (${bullet.targetX?.toFixed(2) ?? 'N/A'}, ${bullet.targetY?.toFixed(2) ?? 'N/A'})`;
+            const logMsg = `[smoke] burst (hit boundary): (${bullet.x.toFixed(2)}, ${bullet.y.toFixed(2)}), target: (${bullet.targetX?.toFixed(2) ?? 'N/A'}, ${bullet.targetY?.toFixed(2) ?? 'N/A'})`;
             console.log(logMsg);
             log('SMOKE_GRENADE_EXPLODE_BOUNDARY', {
               room: this.id,
@@ -3174,7 +3221,6 @@ export class Room {
             );
             this.decoys.push(decoy);
             
-            this.pushEvent(`Decoy deployed at (${Math.round(bullet.x)}, ${Math.round(bullet.y)})`);
             log('DECOY_DEPLOYED', {
               room: this.id,
               decoyId,
@@ -3309,8 +3355,8 @@ export class Room {
          const isDead = hitTurret.hp <= 0;
          if (isDead) {
             const info = this.getAttackerInfo(bullet.ownerId);
-            hitTurret.killedBy = info.name;
-            hitTurret.killedByWeaponName = info.weaponName;
+            hitTurret.killedBy = info.actor;
+            hitTurret.killedByWeapon = info.weapon;
          }
          
          if (bullet.ownerId) {
@@ -3400,8 +3446,8 @@ export class Room {
           
           if (wasAlive && isDead) {
             const info = this.getAttackerInfo(bullet.ownerId);
-            player.killedBy = info.name;
-            player.killedByWeaponName = info.weaponName;
+            player.killedBy = info.actor;
+            player.killedByWeapon = info.weapon;
 
             log('PLAYER_DEAD_WITH_KILL_INFO', {
               room: this.id,
@@ -3409,8 +3455,8 @@ export class Room {
               playerName: player.name,
               tick: this.tick,
               killer: bullet.ownerId,
-              killerName: player.killedBy,
-              weapon: player.killedByWeaponName,
+              killerKind: player.killedBy?.kind ?? 'none',
+              weaponKind: player.killedByWeapon?.kind ?? 'none',
             });
 
             log('PLAYER_DEAD', {
@@ -3419,8 +3465,6 @@ export class Room {
               tick: this.tick,
               killer: bullet.ownerId,
             });
-            // 游戏化增强: 推送击杀事件
-            this.pushEvent(`${playerId} killed by ${bullet.ownerId}`);
 
             // 关键：设置好击杀信息后再处理死亡逻辑，确保结果消息包含正确 killer
             this.handlePlayerDeath(player.id);
@@ -3448,8 +3492,13 @@ export class Room {
             this.combatEvents.get(playerId)!.push({ kind: 'DAMAGE_TAKEN', direction });
           }
           
-          // 游戏化增强: 推送命中事件
-          this.pushEvent(`${bullet.ownerId} hit ${playerId} (-${finalDamage})`);
+          log('BULLET_HIT_PLAYER', {
+            room: this.id,
+            attacker: bullet.ownerId,
+            target: playerId,
+            damage: finalDamage,
+            tick: this.tick,
+          });
           
           this.applyExplosion(bullet, hitPosition.x, hitPosition.y);
           bulletsToRemove.add(bullet.id); // Step4: 用Set.add
@@ -3509,8 +3558,8 @@ export class Room {
 
             if (ai.hp <= 0) {
               const info = this.getAttackerInfo(bullet.ownerId);
-              ai.killedBy = info.name;
-              ai.killedByWeaponName = info.weaponName;
+              ai.killedBy = info.actor;
+              ai.killedByWeapon = info.weapon;
               this.handleAIDeath(aiId);
             }
 
@@ -3519,8 +3568,6 @@ export class Room {
               this.combatEvents.set(bullet.ownerId, []);
             }
             this.combatEvents.get(bullet.ownerId)!.push({ kind: 'HIT' });
-
-            this.pushEvent(`${bullet.ownerId} hit AI ${aiId} (-${finalDamage})`);
 
             log('AI_HIT', {
               room: this.id,
@@ -3562,7 +3609,6 @@ export class Room {
               shooter: bullet.ownerId,
               tick: this.tick,
             });
-            this.pushEvent(`Decoy ${decoy.id} destroyed by ${bullet.ownerId}`);
           }
 
           // Send hit event to shooter
@@ -4078,19 +4124,14 @@ export class Room {
     if (!ai || !ai.weaponRuntime) return;
 
     ai.status = 'DEAD';
-    const killedBy = ai.killedBy || '未知';
-    const killedByWeaponName = ai.killedByWeaponName || '未知';
 
     // 击杀播报
-    if (ai.killedBy && ai.killedByWeaponName) {
-      let aiName = 'AI';
-      switch (ai.role) {
-        case 'scout': aiName = '侦查兵AI'; break;
-        case 'sniper': aiName = '狙击手AI'; break;
-        case 'heavy_gunner': aiName = '重装兵AI'; break;
-        case 'basic': aiName = '野怪AI'; break;
-      }
-      this.pushKillFeed(ai.killedBy, aiName, ai.killedByWeaponName);
+    if (ai.killedBy && ai.killedByWeapon) {
+      this.pushKillFeed(
+        ai.killedBy,
+        { kind: 'enemy', enemyKind: enemyKindForRole(ai.role) },
+        ai.killedByWeapon,
+      );
     }
 
     // 记录槽位死亡时间（用于重刷冷却）
@@ -4128,13 +4169,13 @@ export class Room {
       bid: bid,
     });
 
-    log('AI_DEATH', { 
-      room: this.id, 
-      aiId, 
-      position: `${ai.x},${ai.y}`, 
-      killedBy,
-      killedByWeaponName,
-      tick: this.tick 
+    log('AI_DEATH', {
+      room: this.id,
+      aiId,
+      position: `${ai.x},${ai.y}`,
+      killedBy: ai.killedBy?.kind ?? 'unknown',
+      killedByWeapon: ai.killedByWeapon?.kind ?? 'unknown',
+      tick: this.tick,
     });
   }
 
@@ -4245,7 +4286,7 @@ export class Room {
         
         // 死亡信息
         if (state.killedBy) optimized.killedBy = state.killedBy;
-        if (state.killedByWeaponName) optimized.killedByWeaponName = state.killedByWeaponName;
+        if (state.killedByWeapon) optimized.killedByWeapon = state.killedByWeapon;
         
         // ✅ 优化3: Inventory 隐私 - 只发给本人
         if (forPlayerId && state.id === forPlayerId) {
@@ -4462,7 +4503,6 @@ export class Room {
           // 清理背包中可能的无效物品
           player.cleanupInventory();
 
-          this.pushEvent(`Player ${playerId} used ${itemType.name} (+${healAmount} HP)`);
           log('USE_MEDKIT_FINISH', {
             room: this.id,
             player: playerId,
@@ -4530,7 +4570,7 @@ export class Room {
         const type = bestObs.type;
         if (type === 'door_closed') {
              bestObs.type = 'door_open';
-             this.pushEvent(`Player ${player.name || playerId} opened a door`);
+             log('DOOR_OPENED', { room: this.id, player: playerId, obstacle: bestObs.id, tick: this.tick });
 
              this.worldEvents.push({
                type: 'S2C_OBSTACLE_UPDATE',
@@ -4541,7 +4581,7 @@ export class Room {
              });
         } else if (type === 'door_open') {
              bestObs.type = 'door_closed';
-             this.pushEvent(`Player ${player.name || playerId} closed a door`);
+             log('DOOR_CLOSED', { room: this.id, player: playerId, obstacle: bestObs.id, tick: this.tick });
              
              this.worldEvents.push({
                type: 'S2C_OBSTACLE_UPDATE',
@@ -4553,7 +4593,7 @@ export class Room {
         } else if (type === 'chest_closed') {
              bestObs.type = 'chest_open';
              this.spawnLootFromChest(bestObs);
-             this.pushEvent(`Player ${player.name || playerId} opened a chest`);
+             this.pushEvent('event.chest.opened', { name: this.displayName(playerId, player) });
 
              this.worldEvents.push({
                type: 'S2C_OBSTACLE_UPDATE',
@@ -5012,8 +5052,11 @@ export class Room {
           action: 'REMOVE',
           wid: nearestWid,
         });
-        const itemType = getItemType(nearestWorldItem.typeId);
-        this.pushEvent(`Player ${playerId} picked up ${itemType.name} x${result.added}`);
+        this.pushEvent('event.pickup.item', {
+          name: this.displayName(playerId, player),
+          item: nearestWorldItem.typeId,
+          qty: result.added,
+        });
         log('PICKUP_WORLD_ITEM', {
           room: this.id,
           player: playerId,
@@ -5084,7 +5127,7 @@ export class Room {
           nearestBag.items = remainingItems;
         }
         
-        this.pushEvent(`Player ${playerId} picked up loot bag`);
+        this.pushEvent('event.pickup.lootBag', { name: this.displayName(playerId, player) });
         log('PICKUP_LOOT_BAG', {
           room: this.id,
           player: playerId,
@@ -5098,7 +5141,7 @@ export class Room {
   }
 
   // 新增: 处理玩家死亡（生成掉落包）
-  handlePlayerDeath(playerId: string): { success: boolean; accountId?: string; moneyLost?: number; killedBy?: string; killedByWeaponName?: string } {
+  handlePlayerDeath(playerId: string): { success: boolean; accountId?: string; moneyLost?: number; killedBy?: COMBAT_ACTOR; killedByWeapon?: COMBAT_WEAPON } {
     const player = this.players.get(playerId);
     
     // 调试日志：记录 handlePlayerDeath 被调用
@@ -5139,7 +5182,7 @@ export class Room {
 
     // 获取击杀者信息
     const killedBy = player.killedBy ?? undefined;
-    const killedByWeaponName = player.killedByWeaponName ?? undefined;
+    const killedByWeapon = player.killedByWeapon ?? undefined;
 
     // 计算损失的金钱（prep 物品的价值，但 prep 已经在进入战局时移到 inventory 了）
     // 所以这里计算的是 inventory 中物品的价值
@@ -5179,7 +5222,7 @@ export class Room {
         bid: bid,
       });
       
-      this.pushEvent(`Player ${playerId} died and dropped loot`);
+      this.pushEvent('event.player.downed', { name: this.displayName(playerId, player) });
       log('LOOT_BAG_CREATED', {
         room: this.id,
         player: playerId,
@@ -5187,8 +5230,8 @@ export class Room {
         bid,
         itemCount: droppedItems.length,
         moneyLost,
-        killedBy,
-        killedByWeaponName,
+        killedBy: killedBy?.kind ?? 'unknown',
+        killedByWeapon: killedByWeapon?.kind ?? 'unknown',
         tick: this.tick,
       });
     }
@@ -5232,7 +5275,7 @@ export class Room {
       accountId,
       moneyLost,
       killedBy,
-      killedByWeaponName,
+      killedByWeapon,
     });
     
     log('RAID_RESULT_SET_DIED', {
@@ -5240,68 +5283,59 @@ export class Room {
       player: playerId,
       accountId,
       moneyLost,
-      killedBy,
-      killedByWeaponName,
+      killedBy: killedBy?.kind ?? 'unknown',
+      killedByWeapon: killedByWeapon?.kind ?? 'unknown',
       raidResultsSize: this.raidResults.size,
       tick: this.tick,
     });
-    
+
     // 击杀播报
-    if (killedBy && killedByWeaponName) {
-      this.pushKillFeed(killedBy, player.name || '玩家', killedByWeaponName);
+    if (killedBy && killedByWeapon) {
+      this.pushKillFeed(killedBy, { kind: 'player', name: player.name || playerId }, killedByWeapon);
     }
 
-    return { success: true, accountId, moneyLost, killedBy, killedByWeaponName };
+    return { success: true, accountId, moneyLost, killedBy, killedByWeapon };
   }
 
-  // 新增: 获取攻击者信息（用于击杀记录）
-  private getAttackerInfo(ownerId: string | undefined): { name: string, weaponName: string } {
-    if (!ownerId) return { name: '环境伤害', weaponName: '未知' };
+  // 新增: 获取攻击者信息（用于击杀记录）—— 只返回结构化数据，绝不拼文案
+  private getAttackerInfo(ownerId: string | undefined): { actor: COMBAT_ACTOR; weapon: COMBAT_WEAPON } {
+    if (!ownerId) return { actor: { kind: 'environment' }, weapon: UNKNOWN_WEAPON };
 
     // 1. 检查是否为玩家
     const player = this.players.get(ownerId);
     if (player) {
-      let weaponName = '拳头';
-      if (player.weaponRuntime) {
-        try {
-          const weaponDef = getWeaponDef(player.weaponRuntime.weaponTypeId);
-          weaponName = weaponDef.name;
-        } catch {}
-      }
-      return { name: player.name || ownerId, weaponName };
+      return {
+        actor: { kind: 'player', name: player.name || ownerId },
+        weapon: player.weaponRuntime ? weaponFromTypeId(player.weaponRuntime.weaponTypeId) : UNARMED,
+      };
     }
 
     // 2. 检查是否为 AI
     const ai = this.ais.get(ownerId);
     if (ai) {
-      let weaponName = 'AI武器';
-      if (ai.weaponRuntime) {
-        try {
-          const weaponDef = getWeaponDef(ai.weaponRuntime.weaponTypeId);
-          weaponName = weaponDef.name;
-        } catch {}
-      }
-      // AI角色预设名称
-      let roleName = 'AI';
-      switch (ai.role) {
-        case 'scout': roleName = '侦查兵AI'; break;
-        case 'sniper': roleName = '狙击手AI'; break;
-        case 'heavy_gunner': roleName = '重装兵AI'; break;
-        case 'basic': roleName = '野怪AI'; break;
-      }
-      
-      return { name: roleName, weaponName };
+      return {
+        actor: { kind: 'enemy', enemyKind: enemyKindForRole(ai.role) },
+        weapon: ai.weaponRuntime ? weaponFromTypeId(ai.weaponRuntime.weaponTypeId) : UNKNOWN_WEAPON,
+      };
     }
 
     // 3. 检查是否为炮台
     const turret = this.turrets.get(ownerId);
     if (turret) {
       const owner = turret.ownerId ? this.players.get(turret.ownerId) : null;
-      const name = owner ? `${owner.name} 的机枪炮塔` : '机枪炮塔';
-      return { name, weaponName: '自动火炮' };
+      return {
+        actor: { kind: 'turret', ownerName: owner?.name ?? null },
+        weapon: { kind: 'special', specialId: 'autocannon' },
+      };
     }
 
-    return { name: ownerId, weaponName: '未知' };
+    log('ATTACKER_UNRESOLVED', { room: this.id, ownerId, tick: this.tick });
+    return { actor: { kind: 'unknown' }, weapon: UNKNOWN_WEAPON };
+  }
+
+  /** Explosion / fire kills override the weapon with the throwable that caused them. */
+  private throwableWeapon(info: { weapon: COMBAT_WEAPON }, itemTypeId: string): COMBAT_WEAPON {
+    return isUnattributedWeapon(info.weapon) ? { kind: 'item', itemTypeId } : info.weapon;
   }
 
   // 新增: 获取攻击者当前位置（用于受伤方向计算）
@@ -5367,7 +5401,7 @@ export class Room {
       
       player.clearInventory();
       
-      this.pushEvent(`Player ${playerId} extracted with ${items.length} items`);
+      this.pushEvent('event.extract.loot', { name: this.displayName(playerId, player), count: items.length });
       log('PLAYER_EXTRACT', {
         room: this.id,
         player: playerId,
@@ -5379,7 +5413,7 @@ export class Room {
     } else {
       // 修复: 即使没有物品，也要清空背包并记录日志
       player.clearInventory();
-      this.pushEvent(`Player ${playerId} extracted with no items`);
+      this.pushEvent('event.extract.empty', { name: this.displayName(playerId, player) });
       log('PLAYER_EXTRACT', {
         room: this.id,
         player: playerId,
@@ -5427,22 +5461,22 @@ export class Room {
   }
 
   // 新增: 处理拾取世界物品（来自客户端消息）
-  handlePickupWorldItem(playerId: string, wid: string): { success: boolean; message?: string } {
+  handlePickupWorldItem(playerId: string, wid: string): ActionResult {
     const player = this.players.get(playerId);
     if (!player || player.status !== 'ALIVE') {
-      return { success: false, message: 'Player not alive' };
+      return { success: false, errorCode: 'raid.notAlive' };
     }
     
     const worldItem = this.worldItems.get(wid);
     if (!worldItem) {
-      return { success: false, message: 'World item not found' };
+      return { success: false, errorCode: 'interact.itemGone' };
     }
     
     const dx = worldItem.x - player.x;
     const dy = worldItem.y - player.y;
     const dist = Math.sqrt(dx * dx + dy * dy);
     if (dist > this.PICKUP_RADIUS) {
-      return { success: false, message: 'Too far away' };
+      return { success: false, errorCode: 'interact.outOfReach' };
     }
     
     const autoEquipItem = player.createItemInstance(worldItem.typeId, worldItem.qty);
@@ -5470,30 +5504,33 @@ export class Room {
         wid,
       });
 
-      const itemType = getItemType(worldItem.typeId);
-      this.pushEvent(`Player ${playerId} picked up ${itemType.name} x${result.added}`);
+      this.pushEvent('event.pickup.item', {
+        name: this.displayName(playerId, player),
+        item: worldItem.typeId,
+        qty: result.added,
+      });
       return { success: true };
     }
-    return { success: false, message: 'Inventory full' };
+    return { success: false, errorCode: 'inventory.full' };
   }
 
   // 新增: 处理拾取掉落包（来自客户端消息）
-  handlePickupLootBag(playerId: string, bid: string): { success: boolean; message?: string } {
+  handlePickupLootBag(playerId: string, bid: string): ActionResult {
     const player = this.players.get(playerId);
     if (!player || player.status !== 'ALIVE') {
-      return { success: false, message: 'Player not alive' };
+      return { success: false, errorCode: 'raid.notAlive' };
     }
     
     const bag = this.lootBags.get(bid);
     if (!bag || bag.items.length === 0) {
-      return { success: false, message: 'Loot bag not found or empty' };
+      return { success: false, errorCode: 'interact.bagEmpty' };
     }
     
     const dx = bag.x - player.x;
     const dy = bag.y - player.y;
     const dist = Math.sqrt(dx * dx + dy * dy);
     if (dist > this.PICKUP_RADIUS) {
-      return { success: false, message: 'Too far away' };
+      return { success: false, errorCode: 'interact.outOfReach' };
     }
     
     const remainingItems: typeof bag.items = [];
@@ -5542,10 +5579,10 @@ export class Room {
            bid: bid, 
          });
       }
-      this.pushEvent(`Player ${playerId} picked up loot bag`);
+      this.pushEvent('event.pickup.lootBag', { name: this.displayName(playerId, player) });
       return { success: true };
     } else {
-      return { success: false, message: 'Inventory full' };
+      return { success: false, errorCode: 'inventory.full' };
     }
   }
 
@@ -5608,10 +5645,10 @@ export class Room {
 
   // 新增: 自动交互（服务端选最近可交互目标）
   // 优先级：worldItems > lootBags
-  handleAutoInteract(playerId: string): { success: boolean; message?: string; target?: string } {
+  handleAutoInteract(playerId: string): ActionResult<{ target?: string }> {
     const player = this.players.get(playerId);
     if (!player || player.status !== 'ALIVE') {
-      return { success: false, message: 'Player not alive' };
+      return { success: false, errorCode: 'raid.notAlive' };
     }
     
     // 查找最近的世界物品
@@ -5652,7 +5689,7 @@ export class Room {
     
     // 没有可交互目标
     if (!nearestWorldItem && !nearestBag) {
-      return { success: false, message: 'No target nearby' };
+      return { success: false, errorCode: 'interact.noTarget' };
     }
     
     // 优先拾取世界物品（如果距离更近或相同）
@@ -5691,8 +5728,11 @@ export class Room {
            wid: nearestWid,
         });
 
-        const itemType = getItemType(nearestWorldItem.typeId);
-        this.pushEvent(`Player ${playerId} picked up ${itemType.name} x${result.added}`);
+        this.pushEvent('event.pickup.item', {
+          name: this.displayName(playerId, player),
+          item: nearestWorldItem.typeId,
+          qty: result.added,
+        });
         log('AUTO_PICKUP_WORLD', {
           room: this.id,
           player: playerId,
@@ -5704,7 +5744,7 @@ export class Room {
         });
         return { success: true, target: `world:${nearestWid}` };
       }
-      return { success: false, message: 'Inventory full' };
+      return { success: false, errorCode: 'inventory.full' };
     }
     
     // 拾取掉落包
@@ -5755,7 +5795,7 @@ export class Room {
              bid: nearestBid, 
           });
         }
-        this.pushEvent(`Player ${playerId} picked up loot bag`);
+        this.pushEvent('event.pickup.lootBag', { name: this.displayName(playerId, player) });
         log('AUTO_PICKUP_BAG', {
           room: this.id,
           player: playerId,
@@ -5765,23 +5805,23 @@ export class Room {
         });
         return { success: true, target: `bag:${nearestBid}` };
       } else {
-        return { success: false, message: 'Inventory full' };
+        return { success: false, errorCode: 'inventory.full' };
       }
     }
     
-    return { success: false, message: 'No target nearby' };
+    return { success: false, errorCode: 'interact.noTarget' };
   }
 
   // 新增: 使用物品（快捷栏1-5键）
-  handleUseItem(playerId: string, slot: number): { success: boolean; message?: string; itemType?: string } {
+  handleUseItem(playerId: string, slot: number): ActionResult<{ itemType?: string }> {
     const player = this.players.get(playerId);
     if (!player || player.status !== 'ALIVE') {
-      return { success: false, message: 'Player not alive' };
+      return { success: false, errorCode: 'raid.notAlive' };
     }
 
     // 如果正在读条使用道具，则本次请求直接失败，避免叠加
     if (player.isUsingItem(this.tick)) {
-      return { success: false, message: 'Already using item' };
+      return { success: false, errorCode: 'use.busy' };
     }
 
     // 获取可使用的物品列表（使用统一的定义）
@@ -5791,7 +5831,7 @@ export class Room {
 
     // 检查槽位是否有效
     if (slot < 1 || slot > 5 || slot > usableItems.length) {
-      return { success: false, message: 'Invalid slot or no item' };
+      return { success: false, errorCode: 'inventory.invalidSlot' };
     }
 
     const item = usableItems[slot - 1];
@@ -5802,14 +5842,13 @@ export class Room {
       if (item.typeId === 'medkit' || item.typeId === 'advanced_medkit') {
         // 使用医疗包：先启动 1 秒读条，期间禁止一切行动，读条结束时再真正回复生命并消耗道具
         if (player.hp >= 100) {
-          return { success: false, message: 'Already at full health' };
+          return { success: false, errorCode: 'use.fullHealth' };
         }
 
         // 1 秒使用时间
         const DURATION_MS = 1000;
         player.startUsingItem(item.typeId, item.iid, DURATION_MS, this.tick);
 
-        this.pushEvent(`Player ${playerId} started using ${itemType.name}`);
         log('USE_MEDKIT_START', {
           room: this.id,
           player: playerId,
@@ -5830,7 +5869,6 @@ export class Room {
         player.addOrRefreshBuff(
           {
             id: 'combat_stim',
-            name: '战斗兴奋剂',
             kind: 'speed',
             durationMs: DURATION_MS,
             speedMultiplier: SPEED_MULTIPLIER,
@@ -5841,12 +5879,11 @@ export class Room {
         // 消耗一个战斗兴奋剂
         const removed = player.removeItem(item.iid, 1);
         if (!removed) {
-          return { success: false, message: 'Failed to consume item' };
+          return { success: false, errorCode: 'inventory.removeFailed' };
         }
 
         player.cleanupInventory();
 
-        this.pushEvent(`Player ${playerId} used combat stim (+40% speed for 15s)`);
         log('USE_COMBAT_STIM', {
           room: this.id,
           player: playerId,
@@ -5867,7 +5904,6 @@ export class Room {
         player.addOrRefreshBuff(
           {
             id: 'regeneration_serum',
-            name: '再生血清',
             kind: 'regeneration',
             durationMs: DURATION_MS,
             hpPerSecond: HP_PER_SECOND,
@@ -5878,12 +5914,11 @@ export class Room {
         // 消耗一个再生血清
         const removed = player.removeItem(item.iid, 1);
         if (!removed) {
-          return { success: false, message: 'Failed to consume item' };
+          return { success: false, errorCode: 'inventory.removeFailed' };
         }
 
         player.cleanupInventory();
 
-        this.pushEvent(`Player ${playerId} used regeneration serum (+${HP_PER_SECOND} HP/s for ${DURATION_MS / 1000}s)`);
         log('USE_REGENERATION_SERUM', {
           room: this.id,
           player: playerId,
@@ -5903,7 +5938,6 @@ export class Room {
         player.addOrRefreshBuff(
           {
             id: 'disguise_kit',
-            name: '伪装',
             kind: 'disguise',
             durationMs: DURATION_MS,
           },
@@ -5912,11 +5946,10 @@ export class Room {
 
         const removed = player.removeItem(item.iid, 1);
         if (!removed) {
-          return { success: false, message: 'Failed to consume item' };
+          return { success: false, errorCode: 'inventory.removeFailed' };
         }
         player.cleanupInventory();
 
-        this.pushEvent(`Player ${playerId} used Disguise Kit`);
         log('USE_DISGUISE', {
            room: this.id,
            player: playerId,
@@ -5933,11 +5966,11 @@ export class Room {
         
         const removed = player.removeItem(item.iid, 1);
         if (!removed) {
-          return { success: false, message: 'Failed to remove item' };
+          return { success: false, errorCode: 'inventory.removeFailed' };
         }
         player.cleanupInventory();
         
-        this.pushEvent(`Player ${playerId} deployed Sentry Turret`);
+        this.pushEvent('event.turret.deployed', { name: this.displayName(playerId, player) });
         log('USE_TURRET', {
           room: this.id,
           player: playerId,
@@ -5948,33 +5981,33 @@ export class Room {
 
       } else if (item.typeId === 'frag_grenade' || item.typeId === 'smoke_grenade' || item.typeId === 'w_decoy') {
         // 手雷/烟雾弹/诱饵 不能通过快捷栏直接使用，需要通过投掷系统
-        return { success: false, message: 'Use number key to aim and throw grenade' };
+        return { success: false, errorCode: 'use.mustThrow' };
       }
       
-      return { success: false, message: 'Item not usable' };
+      return { success: false, errorCode: 'use.notUsable' };
       
     } catch (err) {
-      return { success: false, message: 'Unknown item type' };
+      return { success: false, errorCode: 'inventory.unknownItem' };
     }
   }
 
   // 新增: 投掷物品（手雷等）
-  handleThrow(playerId: string, targetX: number, targetY: number, itemType: string): { success: boolean; message?: string } {
+  handleThrow(playerId: string, targetX: number, targetY: number, itemType: string): ActionResult {
     // 调试：打印所有投掷请求（详细版本）
-    console.log(`[handleThrow] 收到投掷请求: playerId=${playerId}, itemType="${itemType}" (类型: ${typeof itemType}, 长度: ${itemType.length}), targetX=${targetX.toFixed(2)}, targetY=${targetY.toFixed(2)}`);
-    console.log(`[handleThrow] itemType === 'smoke_grenade' 结果: ${itemType === 'smoke_grenade'}, JSON: ${JSON.stringify(itemType)}`);
+    console.log(`[handleThrow] request: playerId=${playerId}, itemType="${itemType}" (type: ${typeof itemType}, len: ${itemType.length}), targetX=${targetX.toFixed(2)}, targetY=${targetY.toFixed(2)}`);
+    console.log(`[handleThrow] itemType === 'smoke_grenade': ${itemType === 'smoke_grenade'}, JSON: ${JSON.stringify(itemType)}`);
     
     const player = this.players.get(playerId);
     if (!player || player.status !== 'ALIVE') {
-      console.log(`[handleThrow] 失败: 玩家不存在或已死亡`);
-      return { success: false, message: 'Player not alive' };
+      console.log(`[handleThrow] rejected: player missing or dead`);
+      return { success: false, errorCode: 'raid.notAlive' };
     }
 
     // 检查是否有对应的投掷物
     const grenadeItem = player.inventory.items.find(item => item.typeId === itemType);
     if (!grenadeItem) {
-      console.log(`[handleThrow] 失败: 找不到物品, itemType="${itemType}", 背包物品: ${player.inventory.items.map(i => i.typeId).join(', ')}`);
-      return { success: false, message: 'No grenade available' };
+      console.log(`[handleThrow] rejected: item not carried, itemType="${itemType}", inventory: ${player.inventory.items.map(i => i.typeId).join(', ')}`);
+      return { success: false, errorCode: 'throw.noThrowable' };
     }
 
     // 检查投掷距离（最大350像素，比客户端稍宽松）
@@ -5982,15 +6015,15 @@ export class Room {
     const dy = targetY - player.y;
     const distance = Math.sqrt(dx * dx + dy * dy);
     if (distance > 350) { // 增加50像素容错
-      console.log(`[handleThrow] 失败: 距离太远, distance=${distance.toFixed(2)}`);
-      return { success: false, message: 'Target too far' };
+      console.log(`[handleThrow] rejected: out of range, distance=${distance.toFixed(2)}`);
+      return { success: false, errorCode: 'throw.outOfRange' };
     }
 
     // 消耗一个手雷
     const removed = player.removeItem(grenadeItem.iid, 1);
     if (!removed) {
-      console.log(`[handleThrow] 失败: 无法消耗物品`);
-      return { success: false, message: 'Failed to consume grenade' };
+      console.log(`[handleThrow] rejected: could not consume item`);
+      return { success: false, errorCode: 'inventory.removeFailed' };
     }
 
     // 清理背包中可能的无效物品
@@ -6004,11 +6037,11 @@ export class Room {
     const isFlash = itemType === 'flash_grenade';
     const isFrag = itemType === 'frag_grenade';
     const isMolotov = itemType === 'molotov';
-    console.log(`[handleThrow] 投掷物类型判断: isSmoke=${isSmoke}, isFlash=${isFlash}, isFrag=${isFrag}, isMolotov=${isMolotov}, itemType="${itemType}"`);
+    console.log(`[handleThrow] throwable kind: isSmoke=${isSmoke}, isFlash=${isFlash}, isFrag=${isFrag}, isMolotov=${isMolotov}, itemType="${itemType}"`);
     
     // 烟雾弹：打印落点（使用 console.log 和 log 双重输出）
     if (isSmoke) {
-      const logMsg = `[烟雾弹] 落点: (${targetX.toFixed(2)}, ${targetY.toFixed(2)}), 玩家位置: (${player.x.toFixed(2)}, ${player.y.toFixed(2)}), 距离: ${distance.toFixed(2)}`;
+      const logMsg = `[smoke] target: (${targetX.toFixed(2)}, ${targetY.toFixed(2)}), player: (${player.x.toFixed(2)}, ${player.y.toFixed(2)}), distance: ${distance.toFixed(2)}`;
       console.log(logMsg);
       log('SMOKE_GRENADE_THROW', {
         room: this.id,
@@ -6055,7 +6088,6 @@ export class Room {
     // 添加到子弹列表（复用子弹系统）
     this.bullets.push(grenadeBullet);
 
-    this.pushEvent(`Player ${playerId} threw grenade`);
     log('THROW_GRENADE', {
       room: this.id,
       player: playerId,

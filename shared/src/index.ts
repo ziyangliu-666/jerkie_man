@@ -16,7 +16,6 @@ export {
   MAP_CONFIG_SCHEMA, 
   DEFAULT_MAP_CONFIG, 
   ITEM_TYPE_SCHEMA, 
-  DEFAULT_ITEM_TYPES, 
   loadMapConfig, 
   loadItemTypes 
 } from './content.js';
@@ -33,7 +32,7 @@ export * from './equipment.js';
 export * from './fireControl.js';
 
 // 国际化支持
-export * from './i18n.js';
+export * from './i18n/index.js';
 
 // 常量（单一数据源）
 export * from './constants.js';

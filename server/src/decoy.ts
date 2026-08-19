@@ -1,4 +1,4 @@
-import { getBulletPenetration, isObstacleDestructible, OBSTACLE_STATE } from '@jerkie-man/shared';
+import { getBulletPenetration, isObstacleDestructible, OBSTACLE_STATE } from '@ziyang-protocol/shared';
 
 export class Decoy {
   public id: string;

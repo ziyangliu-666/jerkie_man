@@ -1,3 +1,5 @@
+import { t } from '@ziyang-protocol/shared';
+
 /**
  * UIOverlay - 屏幕固定 HUD 层（Layer 1: UI Canvas）
  * 
@@ -28,16 +30,6 @@ export interface UIOverlayState {
   extractProgress: {
     enabled: boolean;
     progress: number; // 0~1
-  };
-  
-  // 武器状态（新增）
-  weaponStatus: {
-    enabled: boolean;
-    weaponName: string;
-    ammoInMag: number;
-    magSize: number;
-    reloading: boolean;
-    reloadProgress: number; // 0~1（换弹进度）
   };
   
   // 文本提示（新增）
@@ -82,7 +74,6 @@ export class UIOverlay {
     damage: { alpha: 0 },
     hitMarker: { alpha: 0 },
     extractProgress: { enabled: false, progress: 0 },
-    weaponStatus: { enabled: false, weaponName: '', ammoInMag: 0, magSize: 0, reloading: false, reloadProgress: 0 },
     textHint: { alpha: 0, text: '', color: undefined },
     flash: { enabled: false, progress: 0 },
     throwingAim: { enabled: false },
@@ -116,9 +107,6 @@ export class UIOverlay {
     }
     if (partial.extractProgress) {
       Object.assign(this.state.extractProgress, partial.extractProgress);
-    }
-    if (partial.weaponStatus) {
-      Object.assign(this.state.weaponStatus, partial.weaponStatus);
     }
     if (partial.textHint) {
       Object.assign(this.state.textHint, partial.textHint);
@@ -220,18 +208,13 @@ export class UIOverlay {
     if (this.state.extractProgress.enabled) {
       this.drawExtractProgress(ctx, cx, cy, this.state.extractProgress.progress);
     }
-    
-    // 4. 武器状态（左下角）- 已禁用
-    // if (this.state.weaponStatus.enabled) {
-    //   this.drawWeaponStatus(ctx, w, h, this.state.weaponStatus);
-    // }
-    
-    // 5. 文本提示（屏幕中央）
+
+    // 4. 文本提示（屏幕中央）
     if (this.state.textHint.alpha > 0 && this.state.textHint.text) {
       this.drawTextHint(ctx, cx, cy, this.state.textHint.text, this.state.textHint.alpha, this.state.textHint.color);
     }
 
-    // 6. 闪光弹效果（全屏偏灰白色 + 中央进度条）
+    // 5. 闪光弹效果（全屏偏灰白色 + 中央进度条）
     if (this.state.flash.enabled) {
       this.drawFlashEffect(ctx, w, h, cx, cy, this.state.flash.progress);
     }
@@ -375,7 +358,7 @@ export class UIOverlay {
     ctx.shadowOffsetY = 2;
     
     // 绘制标题
-    ctx.fillText('正在撤离...', cx, barY - 20);
+    ctx.fillText(t('combat.extract.inProgress'), cx, barY - 20);
     
     // 绘制进度百分比
     ctx.font = 'bold 14px Rajdhani, sans-serif';
@@ -413,10 +396,19 @@ export class UIOverlay {
     // 默认白色，如果指定了颜色则使用指定颜色
     const textColor = color || '255, 255, 255';
     ctx.fillStyle = `rgba(${textColor}, ${alpha})`;
-    ctx.font = 'bold 24px Orbitron, sans-serif';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    
+
+    // 自动缩号：Orbitron 是宽体，同样的提示英文往往比中文宽 2~3 倍
+    // （「背包已满」≈96px，"INVENTORY FULL" 接近 300px）。窄屏上必须能收进来。
+    const maxWidth = this.cssWidth * 0.9;
+    let fontSize = 24;
+    ctx.font = `bold ${fontSize}px Orbitron, sans-serif`;
+    while (fontSize > 12 && ctx.measureText(text).width > maxWidth) {
+      fontSize -= 2;
+      ctx.font = `bold ${fontSize}px Orbitron, sans-serif`;
+    }
+
     // 绘制文字阴影（增强可读性）
     ctx.shadowColor = 'rgba(0, 0, 0, 0.8)';
     ctx.shadowBlur = 4;
@@ -430,52 +422,6 @@ export class UIOverlay {
     ctx.shadowBlur = 0;
     ctx.shadowOffsetX = 0;
     ctx.shadowOffsetY = 0;
-  }
-
-  /**
-   * 绘制武器状态（左下角）
-   */
-  private drawWeaponStatus(ctx: CanvasRenderingContext2D, w: number, h: number, status: UIOverlayState['weaponStatus']): void {
-    const leftMargin = 20;
-    const bottomMargin = 20;
-    const x = leftMargin;
-    const y = h - bottomMargin;
-    
-    ctx.fillStyle = '#ffffff';
-    ctx.font = 'bold 16px "Share Tech Mono", monospace';
-    ctx.textAlign = 'left';
-    ctx.textBaseline = 'bottom';
-    
-    // 武器名称
-    ctx.fillText(status.weaponName, x, y - 30);
-    
-    // 弹匣信息
-    const ammoText = `${status.ammoInMag} / ${status.magSize}`;
-    ctx.fillStyle = status.ammoInMag === 0 ? '#ff4444' : '#ffffff';
-    ctx.font = '14px "Share Tech Mono", monospace';
-    ctx.fillText(ammoText, x, y - 10);
-    
-    // 换弹进度条
-    if (status.reloading) {
-      const barWidth = 120;
-      const barHeight = 4;
-      const barX = x;
-      const barY = y - 5;
-      
-      // 背景
-      ctx.fillStyle = 'rgba(255, 255, 255, 0.2)';
-      ctx.fillRect(barX, barY, barWidth, barHeight);
-      
-      // 进度
-      ctx.fillStyle = '#4CAF50';
-      ctx.fillRect(barX, barY, barWidth * status.reloadProgress, barHeight);
-      
-      // 文字提示
-      ctx.fillStyle = '#ffffff';
-      ctx.font = '12px "Share Tech Mono", monospace';
-      ctx.textAlign = 'left';
-      ctx.fillText('RELOADING', x, barY - 5);
-    }
   }
 
   /**

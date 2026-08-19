@@ -129,7 +129,7 @@ export function validateInvariants(profile: PlayerProfile): string[] {
     const found = findItemByIid(profile, profile.equipment.weaponIid);
     if (!found) {
       errors.push(
-        `equipment.weaponIid="${profile.equipment.weaponIid}" 指向不存在的物品`
+        `equipment.weaponIid="${profile.equipment.weaponIid}" points at a missing item`
       );
     }
   }
@@ -139,7 +139,7 @@ export function validateInvariants(profile: PlayerProfile): string[] {
     const found = findItemByIid(profile, profile.equipment.bagIid);
     if (!found) {
       errors.push(
-        `equipment.bagIid="${profile.equipment.bagIid}" 指向不存在的物品`
+        `equipment.bagIid="${profile.equipment.bagIid}" points at a missing item`
       );
     }
   }
@@ -149,7 +149,7 @@ export function validateInvariants(profile: PlayerProfile): string[] {
     const found = findItemByIid(profile, profile.equipment.armorIid);
     if (!found) {
       errors.push(
-        `equipment.armorIid="${profile.equipment.armorIid}" 指向不存在的物品`
+        `equipment.armorIid="${profile.equipment.armorIid}" points at a missing item`
       );
     }
   }
@@ -158,55 +158,18 @@ export function validateInvariants(profile: PlayerProfile): string[] {
   const actualBagCap = getEquippedBagCap(profile);
   if (profile.bagCap !== undefined && profile.bagCap !== actualBagCap) {
     errors.push(
-      `bagCap=${profile.bagCap} 与实际装备容量 ${actualBagCap} 不一致`
+      `bagCap=${profile.bagCap} disagrees with the equipped backpack capacity ${actualBagCap}`
     );
   }
 
   // 不变量5：prep物品数量不能超过背包容量
   if (profile.prep.length > actualBagCap) {
     errors.push(
-      `prep 物品数量 ${profile.prep.length} 超过容量 ${actualBagCap}`
+      `loadout holds ${profile.prep.length} items, over the ${actualBagCap} capacity`
     );
   }
 
   return errors;
 }
 
-/**
- * 获取物品显示名称（为国际化预留）
- * @param typeId 物品类型ID
- * @param lang 语言（默认英文）
- * @returns 显示名称
- */
-export function getItemDisplayName(typeId: string, lang: 'en' | 'zh' = 'en'): string {
-  // 优先从装备定义中查找
-  try {
-    const weaponDef = getWeaponDef(typeId);
-    return weaponDef.name; // 当前已经是中文
-  } catch {
-    // 不是武器
-  }
 
-  try {
-    const bagDef = getBagDef(typeId);
-    return bagDef.name;
-  } catch {
-    // 不是背包
-  }
-
-  try {
-    const armorDef = getArmorDef(typeId);
-    return armorDef.name;
-  } catch {
-    // 不是护甲
-  }
-
-  // 未来：从ITEM_CATALOG查找
-  // const itemType = getItemType(typeId);
-  // if (lang === 'zh') {
-  //   return ITEM_NAME_ZH[typeId] ?? itemType.name;
-  // }
-  // return itemType.name;
-
-  return typeId; // 兜底：返回typeId本身
-}

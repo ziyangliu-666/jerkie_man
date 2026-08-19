@@ -23,6 +23,7 @@ import {
   type S2C_MESSAGE,
   type S2C_SNAPSHOT,
   type S2C_WORLD_INIT, // 新增: 世界初始化消息类型
+  type ERROR_CODE, // 结构化错误码（文案由客户端按 error.<code> 渲染）
   type S2C_RAID_RESULT, // 新增: 战局结果消息类型
   type S2C_COMBAT_EVENT, // 新增: 战斗事件消息类型
   type S2C_MELEE_SWING, // 新增: 近战挥击事件类型
@@ -38,12 +39,12 @@ import {
   type ITEM_STATE, // 修复: 静态世界初始化
   parseWebSocketMessage, // 二进制解码
   importFieldMapping, // 动态字段压缩映射
-} from '@jerkie-man/shared';
+} from '@ziyang-protocol/shared';
 import { SnapshotBuffer } from './snapshot.js';
 
 // 生成或获取 accountId（用于持久化 Profile）
 function getOrCreateAccountId(): string {
-  const key = 'jerkie_man_account_id';
+  const key = 'zp_account_id';
   let accountId = localStorage.getItem(key);
   if (!accountId) {
     // 生成 UUID v4
@@ -69,11 +70,14 @@ export interface RoomInfo {
 
 export interface NetworkCallbacks {
   onSnapshot?: (snapshot: S2C_SNAPSHOT) => void;
-  onError?: (error: string) => void;
+  onError?: (code: ERROR_CODE, params?: Record<string, string | number>) => void;
   onConnect?: () => void;
   onDisconnect?: () => void;
   onWelcome?: (playerId: string, accountId: string, roomInfo?: RoomInfo) => void;
-  onEvent?: (message: string) => void; // 游戏化增强: 服务端事件回调
+  onEvent?: (key: string, params?: Record<string, string | number>) => void; // 服务端事件（文案在客户端渲染）
+  onMapList?: (maps: string[]) => void; // /maps 与 /maplist 的地图名列表
+  onPlayerList?: (players: { name: string; hp: number; alive: boolean }[]) => void; // /players 与 /playerlist
+  onAutoEquip?: (playerId: string, slot: 'weapon' | 'bag' | 'armor', itemTypeId: string) => void;
   onWorldInit?: (world: S2C_WORLD_INIT) => void; // 新增: 世界初始化回调（使用协议类型）
   onProfile?: (profile: { 
     accountId: string; 
@@ -230,9 +234,21 @@ export class Network {
               this.callbacks.onWorldInit(message);
             }
           } else if (message.type === 'S2C_EVENT') {
-            // 游戏化增强: 处理服务端事件
+            // 服务端只发 key + params，具体文案由客户端按当前语言渲染
             if (this.callbacks.onEvent) {
-              this.callbacks.onEvent(message.message);
+              this.callbacks.onEvent(message.key, message.params);
+            }
+          } else if (message.type === 'S2C_MAP_LIST') {
+            if (this.callbacks.onMapList) {
+              this.callbacks.onMapList(message.maps);
+            }
+          } else if (message.type === 'S2C_PLAYER_LIST') {
+            if (this.callbacks.onPlayerList) {
+              this.callbacks.onPlayerList(message.players);
+            }
+          } else if (message.type === 'S2C_AUTO_EQUIP') {
+            if (this.callbacks.onAutoEquip) {
+              this.callbacks.onAutoEquip(message.playerId, message.slot, message.itemTypeId);
             }
           } else if (message.type === 'S2C_PONG') {
             // Day5: 处理 Pong 消息，计算 RTT
@@ -257,7 +273,7 @@ export class Network {
           } else if (message.type === 'S2C_RAID_RESULT') {
             // 新增: 处理战局结果消息
             // 记录日志：记录是否收到 S2C_RAID_RESULT，直接打印到控制台
-            console.log('[S2C_RAID_RESULT] 收到战局结果消息', {
+            console.log('[S2C_RAID_RESULT] raid result received', {
               result: message.result,
               extracted: message.result === 'EXTRACTED',
               lootCount: message.loot.length,
@@ -308,9 +324,9 @@ export class Network {
               this.callbacks.onLootBagUpdate(message);
             }
           } else if (message.type === 'S2C_ERROR') {
-            console.error('Server error:', message.message);
+            console.error('Server error:', message.code, message.params ?? '');
             if (this.callbacks.onError) {
-              this.callbacks.onError(message.message);
+              this.callbacks.onError(message.code, message.params);
             }
           }
         } catch (error) {
@@ -353,10 +369,9 @@ export class Network {
       };
 
       this.ws.onerror = (error) => {
+        // 传输层故障没有协议错误码。onclose 紧随其后会触发重连并更新连接状态，
+        // 这里只记录，不再伪造一个 ERROR_CODE 塞给 UI。
         console.error('WebSocket error:', error);
-        if (this.callbacks.onError) {
-          this.callbacks.onError('WebSocket error');
-        }
       };
     } catch (error) {
       console.error('Failed to connect:', error);

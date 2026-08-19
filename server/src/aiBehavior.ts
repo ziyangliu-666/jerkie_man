@@ -7,8 +7,8 @@ import { Turret } from './turret.js';
 
 type AITarget = Player | Decoy | Turret;
 const DISGUISE_DETECTION_RADIUS = 150;
-import type { OBSTACLE_STATE } from '@jerkie-man/shared';
-import { msToTicks, getWeaponDef, advanceFireCooldown } from '@jerkie-man/shared';
+import type { OBSTACLE_STATE } from '@ziyang-protocol/shared';
+import { msToTicks, getWeaponDef, advanceFireCooldown } from '@ziyang-protocol/shared';
 
 // 注意：ATTACK_RANGE和CHASE_RANGE现在使用AI实例的aggroRange和chaseRange属性
 const SEARCH_TIMEOUT_MS = 5000;  // 搜索超时5秒

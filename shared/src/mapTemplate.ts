@@ -1215,13 +1215,13 @@ export function formatLintResult(result: LintResult): string {
   const lines: string[] = [];
   
   if (result.summary.totalIssues === 0) {
-    lines.push(`✅ 地图 "${result.mapId}" 检测通过，无问题`);
+    lines.push(`✅ Map "${result.mapId}" passed with no issues`);
     return lines.join('\n');
   }
   
   lines.push('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-  lines.push(`📍 地图 "${result.mapId}" (${result.mapName || 'unnamed'}) 检测结果:`);
-  lines.push(`   ${result.summary.errorCount} 个错误, ${result.summary.warningCount} 个警告`);
+  lines.push(`📍 Map "${result.mapId}" (${result.mapName || 'unnamed'})`);
+  lines.push(`   ${result.summary.errorCount} error(s), ${result.summary.warningCount} warning(s)`);
   lines.push('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
   
   let index = 1;
@@ -1241,9 +1241,9 @@ export function formatLintResult(result: LintResult): string {
   lines.push('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
   
   if (result.summary.errorCount > 0) {
-    lines.push('💡 提示: 存在错误，地图可能无法正常游玩');
+    lines.push('💡 Errors present — this map may not be playable');
   } else {
-    lines.push('💡 提示: 仅有警告，建议修复以提升地图质量');
+    lines.push('💡 Warnings only — worth fixing, but the map will run');
   }
   
   return lines.join('\n');

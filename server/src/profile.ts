@@ -3,8 +3,8 @@
  * 管理玩家的 money、stash 和 bagCap
  * 支持 JSON 文件持久化（server/data/profiles.json）
  */
-import type { ItemInstance, PlayerProfile, PlayerEquipment } from '@jerkie-man/shared';
-import { getItemType, getBagDef, BAGS } from '@jerkie-man/shared';
+import type { ItemInstance, PlayerProfile, PlayerEquipment, ActionResult } from '@ziyang-protocol/shared';
+import { getItemType, getBagDef, BAGS } from '@ziyang-protocol/shared';
 import { log } from './logger.js';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -327,10 +327,6 @@ export class ProfileManager {
     const aRarity = this.getRarityOrder(aType?.rarity);
     const bRarity = this.getRarityOrder(bType?.rarity);
     if (aRarity !== bRarity) return aRarity - bRarity;
-
-    const aName = aType?.name ?? a.typeId;
-    const bName = bType?.name ?? b.typeId;
-    if (aName !== bName) return aName.localeCompare(bName);
 
     const aStackable = (aType?.stackMax ?? 1) > 1;
     const bStackable = (bType?.stackMax ?? 1) > 1;
@@ -692,18 +688,18 @@ export class ProfileManager {
     accountId: string,
     iid: string,
     qty: number
-  ): { success: boolean; message?: string } {
+  ): ActionResult {
     const profile = this.getProfileData(accountId);
 
     // ✅ 关键：只允许在 HIDEOUT 阶段修改整备区
     if (profile.phase !== 'HIDEOUT') {
-      return { success: false, message: `Cannot modify prep area in phase: ${profile.phase}` };
+      return { success: false, errorCode: 'loadout.locked' };
     }
 
     // 查找仓库中的物品
     const stashItemIndex = profile.stash.findIndex(s => s.iid === iid);
     if (stashItemIndex === -1) {
-      return { success: false, message: 'Item not found in stash' };
+      return { success: false, errorCode: 'stash.itemMissing' };
     }
     
     const stashItem = profile.stash[stashItemIndex];
@@ -718,7 +714,7 @@ export class ProfileManager {
       
       // 容量校验：按槽位数
       if (profile.prep.length + 1 > profile.bagCap) {
-        return { success: false, message: 'Prep area full' };
+        return { success: false, errorCode: 'loadout.full' };
       }
       
       // 直接移动实例本体（iid不变）
@@ -734,13 +730,13 @@ export class ProfileManager {
     
     // Case B: 可堆叠（stackMax>1）
     if (stashItem.qty < qty) {
-      return { success: false, message: 'Not enough quantity in stash' };
+      return { success: false, errorCode: 'stash.notEnough' };
     }
     
     // 计算额外槽位
     const extra = this.calcExtraSlotsIfAdd(profile.prep, stashItem.typeId, qty);
     if (profile.prep.length + extra > profile.bagCap) {
-      return { success: false, message: 'Prep area full' };
+      return { success: false, errorCode: 'loadout.full' };
     }
     
     // 从stash扣减
@@ -770,18 +766,18 @@ export class ProfileManager {
     accountId: string,
     iid: string,
     qty: number
-  ): { success: boolean; message?: string } {
+  ): ActionResult {
     const profile = this.getProfileData(accountId);
 
     // ✅ 关键：只允许在 HIDEOUT 阶段修改整备区
     if (profile.phase !== 'HIDEOUT') {
-      return { success: false, message: `Cannot modify prep area in phase: ${profile.phase}` };
+      return { success: false, errorCode: 'loadout.locked' };
     }
 
     // 查找整备区中的物品
     const prepItemIndex = profile.prep.findIndex(p => p.iid === iid);
     if (prepItemIndex === -1) {
-      return { success: false, message: 'Item not found in prep' };
+      return { success: false, errorCode: 'loadout.itemMissing' };
     }
     
     const prepItem = profile.prep[prepItemIndex];
@@ -807,7 +803,7 @@ export class ProfileManager {
     
     // Case B: 可堆叠（stackMax>1）
     if (prepItem.qty < qty) {
-      return { success: false, message: 'Not enough quantity in prep' };
+      return { success: false, errorCode: 'loadout.notEnough' };
     }
     
     // 从prep扣减
@@ -839,7 +835,7 @@ export class ProfileManager {
     typeId: string,
     qty: number,
     autoAction: 'none' | 'equip' | 'prep' = 'none'
-  ): { success: boolean; money?: number; message?: string } {
+  ): ActionResult<{ money?: number }> {
     const profile = this.getProfileData(accountId);
     
     // 获取物品类型
@@ -847,13 +843,13 @@ export class ProfileManager {
     try {
       itemType = getItemType(typeId);
     } catch {
-      return { success: false, message: 'Unknown item type' };
+      return { success: false, errorCode: 'inventory.unknownItem' };
     }
     
     // 计算总价
     const totalCost = itemType.value * qty;
     if (profile.money < totalCost) {
-      return { success: false, message: 'Not enough money' };
+      return { success: false, errorCode: 'market.notEnoughCredits' };
     }
     
     // 扣钱
@@ -925,7 +921,7 @@ export class ProfileManager {
     accountId: string,
     slot: 'weapon' | 'bag' | 'armor',
     iid: string | null
-  ): { success: boolean; message?: string } {
+  ): ActionResult {
     const profile = this.getProfileData(accountId);
     
     // 如果iid为null，表示卸下装备
@@ -940,7 +936,7 @@ export class ProfileManager {
     // 查找要装备的物品（在stash和prep中查找）
     const found = this.findItemByIid(profile, iid);
     if (!found) {
-      return { success: false, message: 'Item not found' };
+      return { success: false, errorCode: 'inventory.itemMissing' };
     }
     
     const item = found.item;
@@ -948,7 +944,7 @@ export class ProfileManager {
     // 验证物品类型是否匹配槽位
     const itemSlot = this.getItemSlot(item.typeId);
     if (itemSlot !== slot) {
-      return { success: false, message: `Item type does not match slot: ${itemSlot} != ${slot}` };
+      return { success: false, errorCode: 'equip.slotMismatch' };
     }
     
     // 如果是背包，检查容量（如果新背包容量小于当前prep槽位数，禁止装备）
@@ -956,10 +952,10 @@ export class ProfileManager {
       try {
         const bagDef = getBagDef(item.typeId);
         if (bagDef.bagCap < profile.prep.length) {
-          return { success: false, message: 'Prep over capacity' };
+          return { success: false, errorCode: 'loadout.overCapacity' };
         }
       } catch {
-        return { success: false, message: 'Invalid bag type' };
+        return { success: false, errorCode: 'equip.invalidBackpack' };
       }
     }
     

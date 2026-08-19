@@ -7,15 +7,13 @@ export type Rarity = "COMMON" | "RARE" | "EPIC" | "LEGENDARY";
 export type ItemCategory = "weapon" | "armor" | "bag" | "consumable" | "material";
 
 export type ItemType = {
-  id: string;        // "scrap_metal"
-  name: string;      // "Scrap Metal"
+  // 显示文案（name/desc/short）不在这里，走 i18n：item.<id>.name / .desc / .short
+  id: string;        // "scrap_metal"，同时也是翻译 key
   rarity: Rarity;
   category: ItemCategory; // 物品分类（用于商店分类）
   value: number;     // sell price for 1 qty
   stackMax: number;  // e.g. 20
   weight?: number;   // optional future use
-  description?: string; // 物品详细描述
-  shortName?: string;  // 热键栏显示的简短名称（如 "医疗"、"手雷"）
   // 消耗品属性（可选）
   consumableProps?: {
     // 医疗包属性
@@ -84,10 +82,8 @@ export type PlayerEquipment = {
 export type BuffKind = 'speed' | 'damage_reduction' | 'regeneration' | 'disguise';
 
 export type PlayerBuff = {
-  /** Buff 唯一 ID，比如 'combat_stim' */
+  /** Buff 唯一 ID，比如 'combat_stim'；显示名由客户端查 `buff.<id>` 得到 */
   id: string;
-  /** 显示名称，比如 '战斗兴奋剂' */
-  name: string;
   /** 效果大类：移动速度、减伤等 */
   kind: BuffKind;
   /**

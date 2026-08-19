@@ -1,5 +1,23 @@
-import type { PLAYER_STATE, PlayerInventory, ItemInstance } from '@jerkie-man/shared';
-import { getItemType, getWeaponDef, ticksToMs, EXTRACT_DURATION_MS } from '@jerkie-man/shared';
+import type {
+  PLAYER_STATE,
+  PlayerInventory,
+  ItemInstance,
+  COMBAT_ACTOR,
+  COMBAT_WEAPON,
+} from '@ziyang-protocol/shared';
+import {
+  getItemType,
+  getWeaponDef,
+  ticksToMs,
+  EXTRACT_DURATION_MS,
+  t,
+  itemName,
+  rarityLabel,
+  combatActorName,
+  combatWeaponName,
+  hasKey,
+  onLocaleChange,
+} from '@ziyang-protocol/shared';
 
 /**
  * HTML 转义函数（防止 XSS）
@@ -14,6 +32,31 @@ function escapeHtml(text: string | number): string {
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#039;');
 }
+
+/**
+ * 调试面板里可能出现任意服务端 typeId。
+ * 有翻译就用翻译，没有就直接显示 id（比显示 "item.xxx.name" 更有用）。
+ */
+function displayItemName(typeId: string): string {
+  return hasKey(`item.${typeId}.name`) ? itemName(typeId) : typeId;
+}
+
+/** 玩家/实体状态词的唯一来源，避免各处出现「死亡」「阵亡」两套说法 */
+function stateLabel(status: PLAYER_STATE['status']): string {
+  if (status === 'ALIVE') return t('hud.state.alive');
+  if (status === 'DEAD') return t('hud.state.dead');
+  if (status === 'EXTRACTED') return t('hud.state.extracted');
+  return status;
+}
+
+/** 字段行：加粗标签 + 值（标签不带冒号，见 docs/LOCALIZATION.md §2） */
+function field(label: string, value: string): string {
+  return `<div><strong>${label}</strong> ${value}</div>`;
+}
+
+// 英文比中文宽 40-60%，面板固定 300px，表格统一降到 11px 并禁止数值列换行
+const TABLE_STYLE = 'font-size: 11px;';
+const NOWRAP = 'white-space: nowrap;';
 
 // HUDActions 接口已移除（不再需要 Sell 按钮）
 
@@ -52,6 +95,7 @@ export class HUD {
   private lastInventorySignature: string | null = null;
   // 性能优化: 缓存上次渲染的事件数量，只在有新事件时才更新 DOM
   private lastRenderedEventCount: number = 0;
+  private unsubscribeLocale: () => void;
 
   constructor(containerId: string) {
     const container = document.getElementById(containerId);
@@ -60,34 +104,51 @@ export class HUD {
     }
     this.container = container;
     this.createHUD();
+    // 切换语言时只改标题文字（不能重建容器：main.ts 在 #hud-inventory 上挂了丢弃按钮的
+    // 事件委托，重建会丢监听），并让带缓存的分区（背包/事件）强制重绘
+    this.unsubscribeLocale = onLocaleChange(() => {
+      this.refreshSectionTitles();
+      this.lastInventorySignature = null;
+      this.lastRenderedEventCount = -1;
+    });
   }
 
   private createHUD(): void {
     this.container.innerHTML = `
-      <h3>连接</h3>
+      <h3 data-i18n="hud.section.connection"></h3>
       <div id="hud-connection"></div>
-      
-      <h3>玩家</h3>
+
+      <h3 data-i18n="hud.section.players"></h3>
       <div id="hud-players"></div>
-      
-      <h3>计数</h3>
+
+      <h3 data-i18n="hud.section.counts"></h3>
       <div id="hud-counts"></div>
 
-      <h3>战斗状态</h3>
+      <h3 data-i18n="hud.section.status"></h3>
       <div id="hud-status"></div>
-      
-      <h3>附近交互（按E）</h3>
+
+      <h3 data-i18n="hud.section.nearby"></h3>
       <div id="hud-nearby" style="color: #4CAF50; font-weight: bold;"></div>
-      
-      <h3>背包（局内）</h3>
+
+      <h3 data-i18n="hud.section.inventory"></h3>
       <div id="hud-inventory"></div>
-      
-      <h3>选中实体</h3>
+
+      <h3 data-i18n="hud.section.selected"></h3>
       <div id="hud-selected"></div>
-      
-      <h3>事件日志</h3>
+
+      <h3 data-i18n="hud.section.events"></h3>
       <div id="hud-events" class="event-log"></div>
     `;
+    this.refreshSectionTitles();
+  }
+
+  /** 用当前语言刷新分区标题，保留所有子节点和已绑定的监听 */
+  private refreshSectionTitles(): void {
+    const titles = this.container.querySelectorAll<HTMLElement>('h3[data-i18n]');
+    titles.forEach((el) => {
+      const key = el.dataset.i18n;
+      if (key) el.textContent = t(key);
+    });
   }
 
   addEvent(event: string): void {
@@ -96,6 +157,11 @@ export class HUD {
     if (this.events.length > this.maxEvents) {
       this.events.shift();
     }
+  }
+
+  /** 取消语言订阅（HUD 生命周期与页面一致，通常无需调用） */
+  dispose(): void {
+    this.unsubscribeLocale();
   }
 
   // bindStashEvents 方法已移除（不再需要 Sell 按钮）
@@ -107,27 +173,33 @@ export class HUD {
       // P1-2 修复: 显示重连信息
       let statusDisplay: string = data.connection.status;
       if (data.connection.status === 'connected') {
-        statusDisplay = '已连接';
+        statusDisplay = t('hud.connection.connected');
       } else if (data.connection.status === 'reconnecting') {
-        const attempts = data.connection.reconnectAttempts ?? 0;
+        const attempt = data.connection.reconnectAttempts ?? 0;
         const nextIn = data.connection.nextReconnectInMs;
-        statusDisplay = `重连中（尝试 ${attempts}${nextIn !== null ? `，${nextIn}ms 后重试` : ''}）`;
+        statusDisplay =
+          nextIn !== null && nextIn !== undefined
+            ? t('hud.connection.reconnectingRetry', { attempt, ms: nextIn })
+            : t('hud.connection.reconnecting', { attempt });
       } else if (data.connection.status === 'disconnected') {
-        statusDisplay = '已断开';
+        statusDisplay = t('hud.connection.disconnected');
       }
       let extractProgressHtml = '';
       if (data.connection.extractProgress !== undefined && data.connection.extractProgress > 0) {
         const progressPercent = Math.min(100, (data.connection.extractProgress / EXTRACT_DURATION_MS) * 100);
         // 修复: 使用 escapeHtml 防止 XSS
-        extractProgressHtml = `<div><strong>撤离进度：</strong> ${escapeHtml(progressPercent.toFixed(1))}% (${escapeHtml(data.connection.extractProgress)}/${EXTRACT_DURATION_MS}ms)</div>`;
+        extractProgressHtml = field(
+          t('hud.field.extraction'),
+          `${escapeHtml(progressPercent.toFixed(1))}% (${escapeHtml(data.connection.extractProgress)}/${EXTRACT_DURATION_MS}ms)`
+        );
       }
       // 修复: 使用 escapeHtml 防止 XSS（虽然 statusDisplay 是本地生成，但保持一致性）
       connectionEl.innerHTML = `
-        <div><strong>状态：</strong> ${escapeHtml(statusDisplay)}</div>
-        ${data.connection.ping !== undefined ? `<div><strong>延迟：</strong> ${escapeHtml(data.connection.ping)}ms</div>` : ''}
-        ${data.connection.accountId ? `<div><strong>账号：</strong> ${escapeHtml(data.connection.accountId.substring(0, 8))}...</div>` : ''}
-        <div><strong>客户端时间：</strong> ${escapeHtml(new Date(data.connection.clientTime).toISOString())}</div>
-        <div><strong>最后服务器Tick：</strong> ${escapeHtml(data.connection.lastServerTick)}</div>
+        ${field(t('hud.field.status'), escapeHtml(statusDisplay))}
+        ${data.connection.ping !== undefined ? field(t('hud.field.ping'), `${escapeHtml(data.connection.ping)}ms`) : ''}
+        ${data.connection.accountId ? field(t('hud.field.account'), `${escapeHtml(data.connection.accountId.substring(0, 8))}...`) : ''}
+        ${field(t('hud.field.clientTime'), escapeHtml(new Date(data.connection.clientTime).toISOString()))}
+        ${field(t('hud.field.serverTick'), escapeHtml(data.connection.lastServerTick))}
         ${extractProgressHtml}
       `;
     }
@@ -136,24 +208,26 @@ export class HUD {
     const playersEl = document.getElementById('hud-players');
     if (playersEl) {
       if (data.players.length === 0) {
-        playersEl.innerHTML = '<div>无玩家</div>';
+        playersEl.innerHTML = `<div>${t('hud.players.empty')}</div>`;
       } else {
         // 修复: 对玩家数据使用 escapeHtml（防止恶意 playerId 等字段注入）
-        let html = '<table><tr><th>名字</th><th>血量</th><th>坐标</th><th>状态</th></tr>';
+        let html =
+          `<table style="${TABLE_STYLE}"><tr>` +
+          `<th>${t('hud.players.col.name')}</th>` +
+          `<th style="${NOWRAP}">${t('hud.players.col.hp')}</th>` +
+          `<th style="${NOWRAP}">${t('hud.players.col.pos')}</th>` +
+          `<th style="${NOWRAP}">${t('hud.players.col.status')}</th>` +
+          `</tr>`;
         for (const player of data.players) {
-          let statusText: string;
-          if (player.status === 'ALIVE') statusText = '存活';
-          else if (player.status === 'DEAD') statusText = '死亡';
-          else if (player.status === 'EXTRACTED') statusText = '已撤离';
-          else statusText = player.status;
+          const statusText = stateLabel(player.status);
           const displayName = player.name && player.name.trim().length > 0 ? player.name : player.id.substring(0, 8);
           const coordText = `(${player.x.toFixed(1)}, ${player.y.toFixed(1)})`;
           html += `
             <tr>
               <td>${escapeHtml(displayName)}</td>
-              <td>${escapeHtml(player.hp)}</td>
-              <td>${escapeHtml(coordText)}</td>
-              <td>${escapeHtml(statusText)}</td>
+              <td style="${NOWRAP}">${escapeHtml(player.hp)}</td>
+              <td style="${NOWRAP}">${escapeHtml(coordText)}</td>
+              <td style="${NOWRAP}">${escapeHtml(statusText)}</td>
             </tr>
           `;
         }
@@ -166,9 +240,9 @@ export class HUD {
     const countsEl = document.getElementById('hud-counts');
     if (countsEl) {
       countsEl.innerHTML = `
-        <div>子弹：${data.counts.bullets}</div>
-        <div>世界物品：${data.counts.worldItems}</div>
-        <div>掉落包：${data.counts.lootBags}</div>
+        ${field(t('hud.counts.bullets'), String(data.counts.bullets))}
+        ${field(t('hud.counts.worldItems'), String(data.counts.worldItems))}
+        ${field(t('hud.counts.lootBags'), String(data.counts.lootBags))}
       `;
     }
 
@@ -177,68 +251,72 @@ export class HUD {
     if (statusEl) {
       const local = data.localPlayer;
       if (!local) {
-        statusEl.innerHTML = '<div>未进入战局</div>';
+        statusEl.innerHTML = `<div>${t('hud.status.notInRaid')}</div>`;
       } else {
         const hp = local.hp;
-        let hpLabel = '良好';
-        if (hp <= 20) hpLabel = '危急';
-        else if (hp <= 40) hpLabel = '重伤';
-        else if (hp <= 70) hpLabel = '轻伤';
+        let hpLabel = t('hud.status.hp.healthy');
+        if (hp <= 20) hpLabel = t('hud.status.hp.critical');
+        else if (hp <= 40) hpLabel = t('hud.status.hp.wounded');
+        else if (hp <= 70) hpLabel = t('hud.status.hp.hurt');
 
-        let statusText = local.status === 'ALIVE' ? '存活' : local.status === 'DEAD' ? '阵亡' : '已撤离';
+        const statusText = stateLabel(local.status);
         let extraStatus = '';
         if (local.status === 'DEAD' && local.killedBy) {
-          const weaponName = local.killedByWeaponName ? `（${escapeHtml(local.killedByWeaponName)}）` : '';
-          extraStatus = `<div><strong>击杀来源：</strong> ${escapeHtml(local.killedBy)}${weaponName}</div>`;
+          const weaponSuffix = local.killedByWeapon
+            ? ` (${escapeHtml(combatWeaponName(local.killedByWeapon))})`
+            : '';
+          extraStatus = field(
+            t('hud.field.killedBy'),
+            `${escapeHtml(combatActorName(local.killedBy))}${weaponSuffix}`
+          );
         }
 
-        let weaponName = '空手';
+        let weaponName = t('hud.status.fists');
         let ammoLine = '';
         let reloadLine = '';
         let cooldownLine = '';
         if (local.weaponRuntime) {
+          weaponName = displayItemName(local.weaponRuntime.weaponTypeId);
           try {
             const weaponDef = getWeaponDef(local.weaponRuntime.weaponTypeId);
-            weaponName = weaponDef.name;
             if (weaponDef.magSize > 0) {
-              ammoLine = `<div><strong>弹匣：</strong> ${escapeHtml(local.weaponRuntime.ammoInMag)}/${escapeHtml(weaponDef.magSize)}</div>`;
+              ammoLine = field(
+                t('hud.field.mag'),
+                `${escapeHtml(local.weaponRuntime.ammoInMag)}/${escapeHtml(weaponDef.magSize)}`
+              );
             }
           } catch {
-            weaponName = local.weaponRuntime.weaponTypeId;
+            // 未知武器类型：只显示 typeId，不显示弹匣
           }
           const reloadRemaining = local.weaponRuntime.reloadingUntilTick - data.connection.lastServerTick;
           if (reloadRemaining > 0) {
-            reloadLine = `<div><strong>换弹：</strong> 进行中（${escapeHtml(ticksToMs(reloadRemaining))}ms）</div>`;
+            reloadLine = field(t('hud.field.reloading'), `${escapeHtml(ticksToMs(reloadRemaining))}ms`);
           }
           const cooldownRemaining = local.weaponRuntime.nextFireTick - data.connection.lastServerTick;
           if (cooldownRemaining > 0) {
-            cooldownLine = `<div><strong>冷却：</strong> ${escapeHtml(ticksToMs(cooldownRemaining))}ms</div>`;
+            cooldownLine = field(t('hud.field.cooldown'), `${escapeHtml(ticksToMs(cooldownRemaining))}ms`);
           }
         }
 
         // 新增: 道具读条提示（例如急救包使用中）
         let usingItemLine = '';
-        if (local.usingItemTypeId && local.usingItemRemainingMs !== undefined && local.usingItemTotalMs !== undefined) {
-          try {
-            const itemType = getItemType(local.usingItemTypeId);
+        if (local.usingItemTypeId) {
+          const usedName = escapeHtml(displayItemName(local.usingItemTypeId));
+          if (local.usingItemRemainingMs !== undefined && local.usingItemTotalMs !== undefined) {
             const percent = Math.max(
               0,
               Math.min(100, ((local.usingItemTotalMs - local.usingItemRemainingMs) / local.usingItemTotalMs) * 100)
             );
-            usingItemLine = `<div><strong>道具：</strong> 正在使用 ${escapeHtml(
-              itemType.name
-            )}（${escapeHtml(percent.toFixed(0))}%）</div>`;
-          } catch {
-            usingItemLine = `<div><strong>道具：</strong> 正在使用 ${escapeHtml(
-              local.usingItemTypeId
-            )}</div>`;
+            usingItemLine = field(t('hud.field.using'), `${usedName} (${escapeHtml(percent.toFixed(0))}%)`);
+          } else {
+            usingItemLine = field(t('hud.field.using'), usedName);
           }
         }
 
         statusEl.innerHTML = `
-          <div><strong>状态：</strong> ${escapeHtml(statusText)}</div>
-          <div><strong>生命：</strong> ${escapeHtml(hp)}/100（${escapeHtml(hpLabel)}）</div>
-          <div><strong>武器：</strong> ${escapeHtml(weaponName)}</div>
+          ${field(t('hud.field.status'), escapeHtml(statusText))}
+          ${field(t('hud.field.health'), `${escapeHtml(hp)}/100 (${escapeHtml(hpLabel)})`)}
+          ${field(t('hud.field.weapon'), escapeHtml(weaponName))}
           ${ammoLine}
           ${reloadLine}
           ${cooldownLine}
@@ -249,14 +327,23 @@ export class HUD {
     }
 
     // 新增: Nearby Interaction
+    // 注意：E 只能拾取物品/掉落包；撤离是站进区域后自动读条，不需要按键。
+    // 所以交互方式写在每一项自己的提示里，标题不再统一写「按E」。
     const nearbyEl = document.getElementById('hud-nearby');
     if (nearbyEl) {
       if (data.nearbyInteractable) {
         const { type, name, distance } = data.nearbyInteractable;
-        const typeLabel = type === 'worldItem' ? '物品' : type === 'lootBag' ? '掉落包' : '撤离区';
-        nearbyEl.innerHTML = `<div>${typeLabel}：${escapeHtml(name)} (${escapeHtml(distance.toFixed(1))}px)</div>`;
+        const typeKey = type === 'worldItem' ? 'item' : type === 'lootBag' ? 'lootBag' : 'extractZone';
+        const typeLabel = t(`hud.nearby.${typeKey}`);
+        const hint = t(`hud.nearby.${typeKey}.hint`);
+        // 撤离区没有有意义的实例名（main.ts 传的是固定字符串），只显示分类名+距离
+        const detail = type === 'extractZone' ? '' : ` · ${escapeHtml(name)}`;
+        nearbyEl.innerHTML = `
+          <div>${typeLabel}${detail} (${escapeHtml(distance.toFixed(1))}px)</div>
+          <div style="font-weight: normal; color: #8fbf8f;">${hint}</div>
+        `;
       } else {
-        nearbyEl.innerHTML = '<div style="color: #999;">无</div>';
+        nearbyEl.innerHTML = `<div style="color: #999;">${t('hud.nearby.none')}</div>`;
       }
     }
 
@@ -274,63 +361,76 @@ export class HUD {
         if (data.inventory) {
           const items = data.inventory.items;
           if (items.length === 0) {
-            inventoryEl.innerHTML = '<div>空</div>';
+            inventoryEl.innerHTML = `<div>${t('hud.inventory.empty')}</div>`;
           } else {
             let totalValue = 0;
             let rows = '';
             for (const item of items) {
-              let itemName = item.typeId;
-              let rarityLabel = '未知';
+              const displayName = displayItemName(item.typeId);
+              let rarityText = t('hud.unknown');
               let rarityColor = '#888';
-              let valueText = '未知';
-              let stackableText = '未知';
+              // 未知 typeId 时数值列用破折号，比塞一个长单词更省列宽
+              let valueText = '—';
+              let stackableText = '—';
               try {
                 const itemType = getItemType(item.typeId);
-                itemName = itemType.name;
+                rarityText = rarityLabel(itemType.rarity);
                 if (itemType.rarity === 'COMMON') {
-                  rarityLabel = '常见';
                   rarityColor = '#aaa';
                 } else if (itemType.rarity === 'RARE') {
-                  rarityLabel = '稀有';
                   rarityColor = '#4CAF50';
                 } else if (itemType.rarity === 'EPIC') {
-                  rarityLabel = '史诗';
                   rarityColor = '#9d4edd';
                 } else if (itemType.rarity === 'LEGENDARY') {
-                  rarityLabel = '传说';
                   rarityColor = '#ffaa00';
                 }
                 const itemValue = itemType.value * item.qty;
                 totalValue += itemValue;
                 valueText = `$${itemValue}`;
-                stackableText = itemType.stackMax > 1 ? `可堆叠(${itemType.stackMax})` : '不可堆叠';
+                stackableText =
+                  itemType.stackMax > 1
+                    ? t('hud.inventory.stack.max', { max: itemType.stackMax })
+                    : t('hud.inventory.stack.none');
               } catch {
-                itemName = item.typeId;
+                // 未知物品类型：只显示 typeId 和破折号
               }
               rows += `
                 <tr>
-                  <td>${escapeHtml(itemName)}</td>
-                  <td style="color: ${rarityColor}; font-weight: bold;">${escapeHtml(rarityLabel)}</td>
-                  <td>x${escapeHtml(item.qty)}</td>
-                  <td style="color: #ffd700; font-weight: bold;">${escapeHtml(valueText)}</td>
-                  <td>${escapeHtml(stackableText)}</td>
-                  <td><button class="item-btn hud-drop-btn" data-iid="${escapeHtml(item.iid)}" data-qty="${escapeHtml(item.qty)}">丢弃</button></td>
+                  <td>${escapeHtml(displayName)}</td>
+                  <td style="color: ${rarityColor}; font-weight: bold; ${NOWRAP}">${escapeHtml(rarityText)}</td>
+                  <td style="${NOWRAP}">x${escapeHtml(item.qty)}</td>
+                  <td style="color: #ffd700; font-weight: bold; ${NOWRAP}">${escapeHtml(valueText)}</td>
+                  <td style="${NOWRAP}">${escapeHtml(stackableText)}</td>
+                  <td style="${NOWRAP}"><button class="item-btn hud-drop-btn" data-iid="${escapeHtml(item.iid)}" data-qty="${escapeHtml(item.qty)}">${t('hud.inventory.drop')}</button></td>
                 </tr>
               `;
             }
             const totalQty = items.reduce((sum: number, entry: ItemInstance) => sum + entry.qty, 0);
-            let html = `
-              <div><strong>容量：</strong> ${escapeHtml(items.length)}/${escapeHtml(data.inventory.bagCap)} <span style="color: #666;">| 总数 ${escapeHtml(totalQty)}</span></div>
-              <div><strong>总价值：</strong> <span style="color: #ffd700; font-weight: bold;">$${escapeHtml(totalValue)}</span></div>
-              <table>
-                <tr><th>物品</th><th>稀有度</th><th>数量</th><th>价格</th><th>堆叠</th><th>操作</th></tr>
+            const capacityValue =
+              `${escapeHtml(items.length)}/${escapeHtml(data.inventory.bagCap)} ` +
+              `<span style="color: #666;">| ${t('hud.inventory.total', { count: totalQty })}</span>`;
+            const html = `
+              ${field(t('hud.field.capacity'), capacityValue)}
+              ${field(
+                t('hud.field.totalValue'),
+                `<span style="color: #ffd700; font-weight: bold;">$${escapeHtml(totalValue)}</span>`
+              )}
+              <table style="${TABLE_STYLE}">
+                <tr>
+                  <th>${t('hud.inventory.col.item')}</th>
+                  <th style="${NOWRAP}">${t('hud.inventory.col.rarity')}</th>
+                  <th style="${NOWRAP}">${t('hud.inventory.col.qty')}</th>
+                  <th style="${NOWRAP}">${t('hud.inventory.col.value')}</th>
+                  <th style="${NOWRAP}">${t('hud.inventory.col.stack')}</th>
+                  <th></th>
+                </tr>
                 ${rows}
               </table>
             `;
             inventoryEl.innerHTML = html;
           }
         } else {
-          inventoryEl.innerHTML = '<div>不可用</div>';
+          inventoryEl.innerHTML = `<div>${t('hud.inventory.unavailable')}</div>`;
         }
       }
     }
@@ -340,23 +440,19 @@ export class HUD {
     if (selectedEl) {
       if (data.selectedEntity) {
         const e = data.selectedEntity;
-        let statusText: string;
-        if (e.status === 'ALIVE') statusText = '存活';
-        else if (e.status === 'DEAD') statusText = '死亡';
-        else if (e.status === 'EXTRACTED') statusText = '已撤离';
-        else statusText = e.status;
+        const statusText = stateLabel(e.status);
         // 修复: 对选中实体数据使用 escapeHtml
         selectedEl.innerHTML = `
-          <div><strong>ID：</strong> ${escapeHtml(e.id)}</div>
-          <div><strong>位置：</strong> (${escapeHtml(e.x.toFixed(1))}, ${escapeHtml(e.y.toFixed(1))})</div>
-          <div><strong>血量：</strong> ${escapeHtml(e.hp)}/100</div>
-          <div><strong>状态：</strong> ${escapeHtml(statusText)}</div>
-          <div><strong>战利品数量：</strong> ${escapeHtml(e.lootCount ?? 0)}</div>
-          <div><strong>最后输入序号：</strong> ${escapeHtml(e.lastInputSeq)}</div>
-          <div><strong>最后输入Tick：</strong> ${escapeHtml(e.lastInputTick)}</div>
+          ${field(t('hud.field.id'), escapeHtml(e.id))}
+          ${field(t('hud.field.position'), `(${escapeHtml(e.x.toFixed(1))}, ${escapeHtml(e.y.toFixed(1))})`)}
+          ${field(t('hud.field.health'), `${escapeHtml(e.hp)}/100`)}
+          ${field(t('hud.field.status'), escapeHtml(statusText))}
+          ${field(t('hud.field.loot'), escapeHtml(e.lootCount ?? 0))}
+          ${field(t('hud.field.lastInputSeq'), escapeHtml(e.lastInputSeq))}
+          ${field(t('hud.field.lastInputTick'), escapeHtml(e.lastInputTick))}
         `;
       } else {
-        selectedEl.innerHTML = '<div>无（点击玩家）</div>';
+        selectedEl.innerHTML = `<div>${t('hud.selected.none')}</div>`;
       }
     }
 
@@ -365,22 +461,22 @@ export class HUD {
     const eventsEl = document.getElementById('hud-events');
     if (eventsEl) {
       const currentEventCount = this.events.length;
-      
+
       // 只在事件数量变化时才更新（新增事件或事件被移除）
       if (currentEventCount !== this.lastRenderedEventCount) {
         // 清空现有内容
         eventsEl.textContent = '';
-        
+
         // 为每个事件创建 DOM 节点
         for (const event of this.events) {
           const div = document.createElement('div');
           div.textContent = event; // 使用 textContent，自动转义
           eventsEl.appendChild(div);
         }
-        
+
         // 滚动到底部（只在有新事件时才滚动，避免频繁 reflow）
         eventsEl.scrollTop = eventsEl.scrollHeight;
-        
+
         this.lastRenderedEventCount = currentEventCount;
       }
     }

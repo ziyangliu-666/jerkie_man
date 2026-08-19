@@ -1,15 +1,15 @@
 ﻿<!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>To be a Jerk</title>
+  <title>ZIYANG PROTOCOL</title>
   <link rel="icon" type="image/svg+xml" href="/favicon.svg">
   <link rel="icon" type="image/x-icon" href="/favicon.ico">
   <!-- Fonts: Cyberpunk / Sci-Fi Aesthetic -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Rajdhani:wght@300;400;500;600;700&family=Oxanium:wght@400;700&family=Share+Tech+Mono&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Rajdhani:wght@300;400;500;600;700&family=Oxanium:wght@400;700&family=Share+Tech+Mono&family=Noto+Sans+SC:wght@400;500;700;900&display=swap" rel="stylesheet">
   <style>
     * {
       margin: 0;
@@ -39,10 +39,10 @@
       --noiseA: 0.02;
 
       /* 字体系统 */
-      --font-title: 'Orbitron', sans-serif;
-      --font-ui: 'Rajdhani', sans-serif;
-      --font-mono: 'Share Tech Mono', monospace;
-      --font-body: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      --font-title: 'Orbitron', 'Noto Sans SC', sans-serif;
+      --font-ui: 'Rajdhani', 'Noto Sans SC', sans-serif;
+      --font-mono: 'Share Tech Mono', 'Noto Sans SC', monospace;
+      --font-body: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, 'Noto Sans SC', sans-serif;
     }
 
     body {
@@ -907,7 +907,7 @@
       color: #fff;
       padding: 8px 12px;
       border-radius: 4px;
-      font-family: 'Courier New', monospace;
+      font-family: 'Courier New', 'Noto Sans SC', monospace;
       font-size: 13px;
       outline: none;
       opacity: 0;
@@ -969,7 +969,7 @@
       color: rgba(255, 255, 255, 0.8);
       cursor: pointer;
       transition: background 0.1s ease;
-      font-family: 'Courier New', monospace;
+      font-family: 'Courier New', 'Noto Sans SC', monospace;
       font-size: 12px;
       border-left: 2px solid transparent;
     }
@@ -1124,6 +1124,75 @@
     }
 
     /* NAME Modal 样式 */
+    /* ===== First-run language modal (structure mirrors #nameModal) ===== */
+    #languageModal {
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.85);
+      display: none; /* toggled by main.ts on first run */
+      align-items: center;
+      justify-content: center;
+      z-index: 100001; /* above the start screen (99999) */
+      pointer-events: auto;
+    }
+
+    #languageModal .modal-content {
+      background: linear-gradient(135deg, rgba(30, 35, 45, 0.95) 0%, rgba(20, 24, 32, 0.98) 100%);
+      -webkit-backdrop-filter: blur(12px);
+      backdrop-filter: blur(12px);
+      border: 1px solid rgba(0, 255, 255, 0.2);
+      padding: 32px 36px;
+      border-radius: 8px;
+      min-width: 320px;
+      text-align: center;
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+    }
+
+    #languageModal h2 {
+      color: #0ff;
+      font-family: var(--font-title);
+      font-size: 18px;
+      letter-spacing: 2px;
+      margin-bottom: 10px;
+    }
+
+    #languageModal p {
+      color: #aaa;
+      font-size: 13px;
+      margin-bottom: 22px;
+    }
+
+    #languageModal .language-options {
+      display: flex;
+      gap: 12px;
+      justify-content: center;
+    }
+
+    #languageModal .language-option {
+      flex: 1;
+      min-width: 120px;
+      padding: 12px 18px;
+      background: rgba(0, 255, 255, 0.04);
+      border: 1px solid rgba(0, 255, 255, 0.25);
+      border-radius: 4px;
+      color: #fff;
+      font-family: var(--font-ui);
+      font-size: 15px;
+      font-weight: 600;
+      letter-spacing: 1px;
+      cursor: pointer;
+      transition: all 0.2s;
+      outline: none;
+    }
+
+    #languageModal .language-option:hover,
+    #languageModal .language-option.active {
+      background: rgba(0, 255, 255, 0.14);
+      border-color: rgba(0, 255, 255, 0.6);
+      color: #0ff;
+      box-shadow: 0 0 16px rgba(0, 255, 255, 0.18);
+    }
+
     #nameModal {
       position: fixed;
       inset: 0;
@@ -1570,6 +1639,8 @@
     }
 
     .topBar-left {
+      order: 1;
+      flex: 0 0 auto;
       display: flex;
       gap: 24px;
       align-items: center;
@@ -1590,14 +1661,14 @@
       font-weight: bold;
       text-shadow: 0 0 10px rgba(0, 255, 255, 0.3);
       font-size: 20px;
-      font-family: 'Orbitron', sans-serif; /* Unify font */
+      font-family: 'Orbitron', 'Noto Sans SC', sans-serif; /* Unify font */
       letter-spacing: 1px;
     }
 
     #hideoutStatus {
       color: #0ff;
       font-size: 20px;
-      font-family: 'Orbitron', sans-serif; /* Unify font */
+      font-family: 'Orbitron', 'Noto Sans SC', sans-serif; /* Unify font */
       letter-spacing: 1px;
     }
 
@@ -1617,20 +1688,38 @@
     }
 
     .topBar-right {
+      order: 3;
+      flex: 0 0 auto;
       display: flex;
       align-items: center;
       gap: 20px;
     }
 
+    /* 顶栏装饰层。
+       原本是 position:absolute 居中，会和左侧的金额/状态硬重叠——中英文都会，
+       只是中文标签更短、装饰串更长时更明显。改成参与 flex 布局的弹性中间项：
+       它只能吃掉左右内容之间的剩余空间，因此永远不可能压到实际信息上。 */
     .top-center-decor {
-      position: absolute;
-      left: 50%;
-      top: 50%;
-      transform: translate(-50%, -50%);
+      order: 2;
+      flex: 1 1 auto;
+      min-width: 0;
       display: flex;
       align-items: center;
+      justify-content: center;
       gap: 30px;
+      margin: 0 24px;
+      overflow: hidden;
       pointer-events: none;
+    }
+
+    .top-center-decor > * {
+      flex: 0 1 auto;
+      min-width: 0;
+    }
+
+    /* 空间不够时优先牺牲装饰，而不是挤压真实信息 */
+    @media (max-width: 1100px) {
+      .top-center-decor { display: none; }
     }
 
     .decor-scanner {
@@ -1660,6 +1749,9 @@
     }
 
     .decor-bits {
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
       font-size: 8px;
       color: rgba(0, 255, 255, 0.2);
       font-family: monospace;
@@ -1675,6 +1767,7 @@
 
     /* 进入战局按钮样式 */
     .enter-raid-btn {
+      white-space: nowrap;
       padding: 10px 24px;
       background: linear-gradient(135deg, #0ff 0%, #08f 100%);
       color: #000;
@@ -1739,7 +1832,7 @@
 
     /* 左侧 Tab */
     #hideoutTabs {
-      width: 220px;
+      width: 240px; /* widened for EN tab labels */
       background: rgba(8, 9, 12, 0.4);
       border-right: 1px solid rgba(0, 255, 255, 0.08);
       display: flex;
@@ -1750,7 +1843,7 @@
     }
 
     .tab-btn {
-      padding: 16px 30px;
+      padding: 16px 20px;
       background: transparent;
       border: none;
       color: rgba(255, 255, 255, 0.4);
@@ -1760,14 +1853,19 @@
       font-size: 14px;
       font-weight: bold;
       text-transform: uppercase;
-      letter-spacing: 2px;
+      letter-spacing: 1px; /* 2px overflowed the rail once labels became EN */
       transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
       position: relative;
       display: flex;
       align-items: center;
-      gap: 12px;
+      gap: 10px;
       outline: none; /* 移除焦点轮廓 */
       user-select: none; /* 防止文本选择 */
+    }
+
+    .tab-btn > span:not(.tab-icon) {
+      min-width: 0;
+      overflow-wrap: anywhere;
     }
 
     .tab-btn:focus {
@@ -1801,12 +1899,12 @@
 
     .tab-btn:hover {
       color: rgba(255, 255, 255, 0.8);
-      padding-left: 35px;
+      padding-left: 25px;
     }
 
     .tab-btn.active {
       color: #0ff;
-      padding-left: 40px;
+      padding-left: 30px;
       text-shadow: 0 0 15px rgba(0, 255, 255, 0.4);
     }
 
@@ -2298,7 +2396,7 @@
 
     /* 左列：装备 */
     .equipment-prep-row > .layout-col-equipment {
-      width: 170px; 
+      width: 210px; /* widened for EN slot labels (measured: 205px is the wrap threshold) */ 
       flex-shrink: 0;
       display: flex;
       flex-direction: column;
@@ -2373,7 +2471,9 @@
       letter-spacing: 0.5px;
       display: flex;
       align-items: center;
-      gap: 4px;
+      flex-wrap: wrap; /* EN labels + hint are wider than the CN originals */
+      gap: 0 4px;
+      line-height: 1.25;
     }
 
     .slot-hint {
@@ -2409,6 +2509,7 @@
       font-size: 12px;
       padding: 6px 8px;
       text-align: center;
+      overflow-wrap: anywhere;
       font-style: italic;
       border: 1px dashed rgba(120, 180, 200, 0.15);
       border-radius: 4px;
@@ -2466,6 +2567,7 @@
       color: #aaa;
       font-size: 11px;
       line-height: 1.3;
+      overflow-wrap: anywhere; /* EN stat strings are longer than the CN ones */
     }
 
     .slot-item-actions {
@@ -2684,8 +2786,18 @@
 
     .shop-card-actions {
       display: flex;
-      gap: 8px;
+      flex-wrap: wrap; /* 3 EN buttons (Buy / Buy & Equip / Buy & Load) must be able to wrap */
+      gap: 6px;
       margin-top: auto; /* Push to bottom */
+    }
+
+    .shop-card-actions .item-btn,
+    .shop-card-actions button {
+      flex: 1 1 auto;
+      min-width: 0; /* override .item-btn's 80px floor so three buttons fit one row */
+      padding: 8px 10px;
+      font-size: 11px;
+      white-space: nowrap;
     }
     
 
@@ -3359,7 +3471,7 @@
       border: 1px solid rgba(120, 180, 200, 0.15);
       color: #fff;
       cursor: pointer;
-      font-family: 'Courier New', monospace;
+      font-family: 'Courier New', 'Noto Sans SC', monospace;
       font-size: 14px;
       border-radius: 4px;
       transition: all 0.2s;
@@ -3394,7 +3506,7 @@
     }
 
     #bgmControl.expanded {
-      max-width: 500px; /* 展开宽度 */
+      max-width: 560px; /* 展开宽度（含语言选择） */
       padding: 5px 15px 5px 5px;
       background: rgba(20, 24, 32, 0.95);
       border-color: rgba(0, 255, 255, 0.5);
@@ -3534,7 +3646,7 @@
       border-radius: 4px;
       cursor: pointer;
       outline: none;
-      font-family: 'Courier New', monospace;
+      font-family: 'Courier New', 'Noto Sans SC', monospace;
       width: 80px; /* 限制宽度 */
     }
 
@@ -3548,6 +3660,39 @@
     }
 
     #bgmTrackSelect option {
+      background: #12141a;
+      color: #fff;
+    }
+
+    /* 语言选择（沿用 BGM 曲目下拉的样式） */
+    .bgm-divider {
+      width: 1px;
+      height: 18px;
+      background: rgba(120, 180, 200, 0.25);
+      flex-shrink: 0;
+    }
+
+    #languageSelect {
+      background: rgba(15, 18, 25, 0.8);
+      border: 1px solid rgba(120, 180, 200, 0.2);
+      color: #0ff;
+      font-size: 11px;
+      padding: 2px 5px;
+      border-radius: 4px;
+      cursor: pointer;
+      outline: none;
+      font-family: var(--font-mono);
+      width: 78px;
+      flex-shrink: 0;
+    }
+
+    #languageSelect:hover,
+    #languageSelect:focus {
+      outline: none;
+      border-color: rgba(0, 255, 255, 0.4);
+    }
+
+    #languageSelect option {
       background: #12141a;
       color: #fff;
     }
@@ -3579,12 +3724,14 @@
     }
 
     .kill-feed-item {
+      max-width: 100%;
+      flex-wrap: wrap;
       background: linear-gradient(90deg, transparent, rgba(20, 24, 32, 0.8));
       border-right: 2px solid rgba(255, 68, 68, 0.6); /* 红色点缀及边框 */
       padding: 5px 10px;
       color: #fff;
       font-size: 13px;
-      font-family: 'Courier New', monospace;
+      font-family: 'Courier New', 'Noto Sans SC', monospace;
       text-transform: uppercase;
       opacity: 0;
       transform: translateX(20px);
@@ -3624,6 +3771,8 @@
     .kill-icon {
         color: #fff;
         font-size: 10px;
+        letter-spacing: 0.5px;
+        white-space: nowrap;
         opacity: 0.7;
     }
 
@@ -3660,14 +3809,14 @@
 
     .currency-sign {
       color: #ffd700;
-      font-family: 'Orbitron', sans-serif;
+      font-family: 'Orbitron', 'Noto Sans SC', sans-serif;
       font-size: 24px;
       font-weight: bold;
       text-shadow: 0 0 15px rgba(255, 215, 0, 0.4);
     }
 
     .credits-amount {
-      font-family: 'Orbitron', sans-serif;
+      font-family: 'Orbitron', 'Noto Sans SC', sans-serif;
       font-size: 42px; /* Even bigger to stand out, but neighbors are now proportional */
       font-weight: 900;
       color: #fff;
@@ -3687,13 +3836,13 @@
     <!-- BGM 控制器 -->
     <div id="bgmControl">
       <!-- 收起时可见的 Toggle 按钮 -->
-      <button id="bgmPanelToggle" title="音乐控制" tabindex="-1">🎵</button>
+      <button id="bgmPanelToggle" title="Audio" data-i18n-title="ui.bgm.panel" tabindex="-1">🎵</button>
       
       <!-- 展开时可见的内容 -->
       <div id="bgmPanelContent">
-        <button id="bgmToggleBtn" title="切换音乐 (M)" tabindex="-1">🔊</button>
-        <button id="bgmNextBtn" title="下一首 (N)" tabindex="-1">⏭</button>
-        <select id="bgmTrackSelect" title="选择曲目" tabindex="-1">
+        <button id="bgmToggleBtn" title="Toggle music (M)" data-i18n-title="ui.bgm.mute" tabindex="-1">🔊</button>
+        <button id="bgmNextBtn" title="Next track (N)" data-i18n-title="ui.bgm.next" tabindex="-1">⏭</button>
+        <select id="bgmTrackSelect" title="Select track" data-i18n-title="ui.bgm.track" tabindex="-1">
           <option value="1">BGM 1</option>
           <option value="2">BGM 2</option>
           <option value="3">BGM 3</option>
@@ -3705,7 +3854,12 @@
           <option value="9">BGM 9</option>
           <option value="10">BGM 10</option>
         </select>
-        <input type="range" id="bgmVolumeSlider" min="0" max="1" step="0.01" value="0.05" title="调整音量" tabindex="-1">
+        <input type="range" id="bgmVolumeSlider" min="0" max="1" step="0.01" value="0.05" title="Volume" data-i18n-title="ui.bgm.volume" tabindex="-1">
+        <span class="bgm-divider"></span>
+        <select id="languageSelect" title="Language" data-i18n-title="lang.select" tabindex="-1">
+          <option value="en">English</option>
+          <option value="zh">中文</option>
+        </select>
       </div>
     </div>
     <!-- Canvas 容器（左侧） -->
@@ -3729,31 +3883,31 @@
 
       <!-- RAID Phase: 局内装备 HUD -->
       <div id="raidEquipment">
-        <div class="raid-equipment-title">装备</div>
+        <div class="raid-equipment-title" data-i18n="hud.gear">Gear</div>
         <div class="raid-slot">
-          <div class="raid-slot-label">武器</div>
-          <div class="raid-slot-name" id="raidWeaponName">拳头</div>
+          <div class="raid-slot-label" data-i18n="hud.weapon">Weapon</div>
+          <div class="raid-slot-name" id="raidWeaponName" data-i18n="hud.weapon.fists">Fists</div>
           <div class="raid-slot-meta" id="raidWeaponMeta">-</div>
           <div class="raid-slot-actions">
-            <button id="raidWeaponSwap" class="item-btn" tabindex="-1">交换</button>
-            <button id="raidWeaponUnequip" class="item-btn" tabindex="-1">卸下</button>
+            <button id="raidWeaponSwap" class="item-btn" data-i18n="ui.btn.swap" tabindex="-1">Swap</button>
+            <button id="raidWeaponUnequip" class="item-btn" data-i18n="ui.btn.unequip" tabindex="-1">Unequip</button>
           </div>
         </div>
         <div class="raid-slot">
           <div class="raid-slot-header">
-            <div class="raid-slot-label">背包</div>
-            <button id="raidBagToggle" class="item-btn" tabindex="-1">展开</button>
+            <div class="raid-slot-label" data-i18n="hud.backpack">Backpack</div>
+            <button id="raidBagToggle" class="item-btn" data-i18n="ui.btn.expand" tabindex="-1">Expand</button>
           </div>
           <div class="raid-slot-name" id="raidBagName">-</div>
           <div class="raid-slot-meta" id="raidBagMeta">-</div>
           <div id="raidBagList" class="raid-bag-list"></div>
         </div>
         <div class="raid-slot">
-          <div class="raid-slot-label">防具</div>
+          <div class="raid-slot-label" data-i18n="hud.armor">Armor</div>
           <div class="raid-slot-name" id="raidArmorName">-</div>
           <div class="raid-slot-meta" id="raidArmorMeta">-</div>
           <div class="raid-slot-actions">
-            <button id="raidArmorUnequip" class="item-btn" tabindex="-1">卸下</button>
+            <button id="raidArmorUnequip" class="item-btn" data-i18n="ui.btn.unequip" tabindex="-1">Unequip</button>
           </div>
         </div>
       </div>
@@ -3790,7 +3944,7 @@
       <!-- 左下角生命值 HUD -->
       <div id="healthHud">
         <div class="health-hud-header">
-          <div class="health-hud-title">生命</div>
+          <div class="health-hud-title" data-i18n="hud.health">Health</div>
           <div class="health-hud-value" id="healthHudValue">100</div>
         </div>
         <div class="health-hud-bar">
@@ -3801,7 +3955,7 @@
       <!-- 左下角耐力 HUD -->
       <div id="staminaHud">
         <div class="stamina-hud-header">
-          <div class="stamina-hud-title">耐力</div>
+          <div class="stamina-hud-title" data-i18n="hud.stamina">Stamina</div>
           <div class="stamina-hud-value" id="staminaHudValue">100/100</div>
           <div class="stamina-hud-state" id="staminaHudState"></div>
         </div>
@@ -3814,7 +3968,7 @@
       <!-- 左下角武器 HUD -->
       <div id="weaponHud">
         <div class="weapon-hud-header">
-          <div class="weapon-hud-title">武器</div>
+          <div class="weapon-hud-title" data-i18n="hud.weapon">Weapon</div>
           <div class="weapon-hud-state" id="weaponHudState"></div>
         </div>
         <div class="weapon-hud-name" id="weaponHudName">-</div>
@@ -3828,7 +3982,7 @@
       <!-- 左下角 Buff HUD -->
       <div id="buffHud">
         <div class="buff-hud-header">
-          <div class="buff-hud-title">状态</div>
+          <div class="buff-hud-title" data-i18n="hud.status">Status</div>
         </div>
         <div class="buff-hud-list" id="buffHudList"></div>
       </div>
@@ -3837,16 +3991,16 @@
       <div id="chatContainer">
         <div id="chatLog"></div>
         <div id="chatSuggestions" class="chat-suggestions"></div>
-        <input type="text" id="chatInput" placeholder="按 / 键输入命令" autocomplete="off" spellcheck="false" />
+        <input type="text" id="chatInput" placeholder="Press / for commands" data-i18n-placeholder="ui.chat.placeholder" autocomplete="off" spellcheck="false" />
       </div>
 
       <!-- NAME Phase: 昵称输入 Modal -->
       <div id="nameModal" style="display: none;">
         <div class="modal-content">
-          <h2>创建干员</h2>
-          <p>请输入你的昵称（1-32 字符）</p>
-          <input type="text" id="nameInput" placeholder="输入昵称..." maxlength="32" />
-          <button id="nameSubmit">确认</button>
+          <h2 data-i18n="operator.create.title">Set Your Nickname</h2>
+          <p data-i18n="operator.create.prompt">Enter your nickname (1-32 characters)</p>
+          <input type="text" id="nameInput" placeholder="Nickname" data-i18n-placeholder="operator.callsign.placeholder" maxlength="32" />
+          <button id="nameSubmit" data-i18n="ui.btn.confirm">Confirm</button>
         </div>
       </div>
 
@@ -3859,10 +4013,10 @@
           
           <div class="result-header">
             <div class="result-title-wrapper">
-              <h1 id="resultTitle">OPERATION COMPLETE</h1>
+              <h1 id="resultTitle" data-i18n="debrief.title.success">OPERATION COMPLETE</h1>
               <div class="result-decoration-line"></div>
             </div>
-            <div id="resultStatusBadge" class="status-badge">EXTRACTED</div>
+            <div id="resultStatusBadge" class="status-badge" data-i18n="debrief.status.extracted">EXTRACTED</div>
           </div>
           
           <div class="result-body">
@@ -3870,7 +4024,7 @@
             <div class="result-column info-col">
               <!-- 收益卡片 -->
               <div class="result-card money-card">
-                <div class="card-label">TOTAL VALUE</div>
+                <div class="card-label" data-i18n="debrief.totalValue">TOTAL VALUE</div>
                 <div class="money-value-group">
                   <div class="currency-symbol">$</div>
                   <div id="resultMoney" class="metric-value">0</div>
@@ -3880,13 +4034,13 @@
 
               <!-- 死亡信息 (仅失败时显示) -->
               <div id="resultDeathInfo" class="result-card death-card" style="display:none;">
-                <div class="card-label warning">KILLED IN ACTION</div>
+                <div class="card-label warning" data-i18n="debrief.kia">KILLED IN ACTION</div>
                 <div class="killer-info">
-                  <span class="label">Killer:</span>
+                  <span class="label" data-i18n="debrief.killer">Killer:</span>
                   <span id="resultKiller" class="value">Unknown</span>
                 </div>
                 <div class="killer-info">
-                  <span class="label">Weapon:</span>
+                  <span class="label" data-i18n="debrief.weapon">Weapon:</span>
                   <span id="resultKillerWeapon" class="value">-</span>
                 </div>
               </div>
@@ -3894,8 +4048,8 @@
               <!-- 统计信息 (预留) -->
               <div class="result-card stats-card">
                 <div class="stat-row">
-                  <span class="stat-label">Status</span>
-                  <span id="resultStatusText" class="stat-value">Survived</span>
+                  <span class="stat-label" data-i18n="debrief.statusLabel">Status</span>
+                  <span id="resultStatusText" class="stat-value" data-i18n="debrief.status.survived">Survived</span>
                 </div>
                 <!-- 可以在这里添加更多统计，如击杀数、时间等 -->
               </div>
@@ -3904,21 +4058,21 @@
             <!-- 右侧：战利品展示 -->
             <div class="result-column loot-col">
               <div class="section-header">
-                <h3>ACQUIRED LOOT</h3>
+                <h3 data-i18n="debrief.loot">ACQUIRED LOOT</h3>
                 <span class="deco-dots">:::</span>
               </div>
               <div id="resultLootScroll" class="loot-scroll-area">
                 <div id="resultLootGrid" class="loot-grid">
                   <!-- Loot Items Injected Here -->
                 </div>
-                <div id="resultNoLoot" class="no-loot-hint" style="display:none;">NO ITEMS RECOVERED</div>
+                <div id="resultNoLoot" class="no-loot-hint" style="display:none;" data-i18n="debrief.loot.empty">NO ITEMS RECOVERED</div>
               </div>
             </div>
           </div>
 
           <div class="result-footer">
             <button id="resultContinueBtn" class="cyber-btn-lg">
-              <span class="btn-text">RETURN TO BASE</span>
+              <span class="btn-text" data-i18n="ui.btn.returnToBase">Return to Base</span>
               <span class="btn-glitch"></span>
             </button>
           </div>
@@ -3928,10 +4082,10 @@
       <!-- 装备选择弹窗 -->
       <div id="equipSelectModal">
         <div class="modal-content">
-          <h3 id="equipSelectTitle">选择要装备的物品</h3>
+          <h3 id="equipSelectTitle" data-i18n="equip.select.title">Select an item to equip</h3>
           <div id="equipSelectList"></div>
           <div class="modal-actions">
-            <button id="equipSelectCancel">取消</button>
+            <button id="equipSelectCancel" data-i18n="ui.btn.cancel">Cancel</button>
           </div>
         </div>
       </div>
@@ -3939,12 +4093,12 @@
       <!-- 改名输入弹窗 -->
       <div id="renameModal" style="display: none;">
         <div class="modal-content">
-          <h2>修改昵称</h2>
-          <p>请输入新昵称（1-32 字符）</p>
-          <input type="text" id="renameInput" placeholder="输入昵称..." maxlength="32" />
+          <h2 data-i18n="operator.rename.title">Change Nickname</h2>
+          <p data-i18n="operator.rename.prompt">Enter a new nickname (1-32 characters)</p>
+          <input type="text" id="renameInput" placeholder="Nickname" data-i18n-placeholder="operator.callsign.placeholder" maxlength="32" />
           <div class="modal-actions">
-            <button id="renameCancel">取消</button>
-            <button id="renameSubmit" class="primary-btn">确认</button>
+            <button id="renameCancel" data-i18n="ui.btn.cancel">Cancel</button>
+            <button id="renameSubmit" class="primary-btn" data-i18n="ui.btn.confirm">Confirm</button>
           </div>
         </div>
       </div>
@@ -4114,12 +4268,12 @@
           <!-- 装饰中心 -->
           <div class="top-center-decor">
             <div class="decor-scanner"></div>
-            <div class="decor-bits">STREAMING_DATA: OK // SYSTEM_CORE: ONLINE</div>
+            <div class="decor-bits" data-i18n="hideout.decor.stream">STREAMING_DATA: OK // SYSTEM_CORE: ONLINE</div>
           </div>
 
           <div class="topBar-left">
             <div class="top-stat-item">
-              <span class="top-stat-label">OPERATOR</span>
+              <span class="top-stat-label" data-i18n="hideout.operator">NICKNAME</span>
               <span id="hideoutName">-</span>
             </div>
             <div class="separator"></div>
@@ -4132,12 +4286,12 @@
             </div>
             <div class="separator"></div>
             <div class="top-stat-item">
-              <span class="top-stat-label">STATUS</span>
-              <span id="hideoutStatus">CONNECTING...</span>
+              <span class="top-stat-label" data-i18n="hideout.statusLabel">STATUS</span>
+              <span id="hideoutStatus" data-i18n="hideout.status.connecting">CONNECTING...</span>
             </div>
           </div>
           <div class="topBar-right">
-            <button id="enterRaidBtn" class="enter-raid-btn" disabled>进入战局</button>
+            <button id="enterRaidBtn" class="enter-raid-btn" data-i18n="ui.btn.deploy" disabled>Deploy</button>
           </div>
         </div>
 
@@ -4147,11 +4301,11 @@
           <div id="hideoutTabs">
             <button class="tab-btn active" data-tab="equipment" tabindex="-1">
               <span class="tab-icon">📦</span>
-              <span>装备与仓库</span>
+              <span data-i18n="hideout.tab.gear">Gear &amp; Stash</span>
             </button>
             <button class="tab-btn" data-tab="shop" tabindex="-1">
               <span class="tab-icon">💳</span>
-              <span>商店</span>
+              <span data-i18n="hideout.tab.market">Market</span>
             </button>
           </div>
 
@@ -4159,29 +4313,29 @@
           <div id="hideoutMain">
             <!-- 装备区域 -->
             <div id="hideoutEquipment" class="hideout-panel active">
-              <h3>装备与整备</h3>
-              <div class="panel-desc">点击装备槽位自动从仓库选择并装备，或从右侧整备区装备</div>
+              <h3 data-i18n="gear.title">Gear &amp; Loadout</h3>
+              <div class="panel-desc" data-i18n="gear.desc">Click a slot to equip from your stash.</div>
               <!-- 装备区和整备区横向布局 -->
               <div class="equipment-prep-row">
                 <!-- 第1列：装备区 -->
                 <div class="layout-col-equipment">
                   <div class="equipment-area">
                     <div class="equipment-slot clickable-slot" data-slot="weapon">
-                      <div class="slot-label">武器 <span class="slot-hint">(点击装备)</span></div>
+                      <div class="slot-label"><span data-i18n="gear.slot.weapon">Weapon</span> <span class="slot-hint" data-i18n="gear.slot.hint">(click to equip)</span></div>
                       <div id="equipmentWeapon" class="slot-content">
-                        <div class="slot-empty">未装备</div>
+                        <div class="slot-empty" data-i18n="gear.slot.empty">Empty</div>
                       </div>
                     </div>
                     <div class="equipment-slot clickable-slot" data-slot="bag">
-                      <div class="slot-label">背包 <span class="slot-hint">(点击装备)</span></div>
+                      <div class="slot-label"><span data-i18n="gear.slot.backpack">Backpack</span> <span class="slot-hint" data-i18n="gear.slot.hint">(click to equip)</span></div>
                       <div id="equipmentBag" class="slot-content">
-                        <div class="slot-empty">未装备</div>
+                        <div class="slot-empty" data-i18n="gear.slot.empty">Empty</div>
                       </div>
                     </div>
                     <div class="equipment-slot clickable-slot" data-slot="armor">
-                      <div class="slot-label">防具 <span class="slot-hint">(点击装备)</span></div>
+                      <div class="slot-label"><span data-i18n="gear.slot.armor">Armor</span> <span class="slot-hint" data-i18n="gear.slot.hint">(click to equip)</span></div>
                       <div id="equipmentArmor" class="slot-content">
-                        <div class="slot-empty">未装备</div>
+                        <div class="slot-empty" data-i18n="gear.slot.empty">Empty</div>
                       </div>
                     </div>
                   </div>
@@ -4189,21 +4343,21 @@
 
                 <!-- 第2列：整备区 -->
                 <div class="layout-col-prep">
-                  <h4 style="color: #0ff; margin-bottom: 8px; font-size: 14px;">整备道具 (<span id="prepCapacity">0/8</span>)</h4>
+                  <h4 style="color: #0ff; margin-bottom: 8px; font-size: 14px;"><span data-i18n="loadout.title">Loadout</span> (<span id="prepCapacity">0/8</span>)</h4>
                   <div id="prepList" class="item-list"></div>
                 </div>
 
                 <!-- 第3列：仓库区 -->
                 <div class="layout-col-stash">
                   <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px;">
-                    <h3 style="color: #0ff; margin: 0; font-size: 16px;">仓库</h3>
+                    <h3 style="color: #0ff; margin: 0; font-size: 16px;" data-i18n="stash.title">Stash</h3>
                     <!-- 仓库分类内嵌到这一行 -->
                     <div id="stashTabs" class="shop-tabs" style="margin: 0; padding: 0; border: none; gap: 6px;">
-                      <button class="shop-tab-btn active" data-stash-category="weapon" style="padding: 6px 12px; font-size: 13px;" tabindex="-1">武器</button>
-                      <button class="shop-tab-btn" data-stash-category="armor" style="padding: 6px 12px; font-size: 13px;" tabindex="-1">防具</button>
-                      <button class="shop-tab-btn" data-stash-category="bag" style="padding: 6px 12px; font-size: 13px;" tabindex="-1">背包</button>
-                      <button class="shop-tab-btn" data-stash-category="consumable" style="padding: 6px 12px; font-size: 13px;" tabindex="-1">消耗</button>
-                      <button class="shop-tab-btn" data-stash-category="material" style="padding: 6px 12px; font-size: 13px;" tabindex="-1">材料</button>
+                      <button class="shop-tab-btn active" data-stash-category="weapon" style="padding: 6px 12px; font-size: 13px;" data-i18n="category.weapons" tabindex="-1">Weapons</button>
+                      <button class="shop-tab-btn" data-stash-category="armor" style="padding: 6px 12px; font-size: 13px;" data-i18n="category.armor" tabindex="-1">Armor</button>
+                      <button class="shop-tab-btn" data-stash-category="bag" style="padding: 6px 12px; font-size: 13px;" data-i18n="category.backpacks" tabindex="-1">Backpacks</button>
+                      <button class="shop-tab-btn" data-stash-category="consumable" style="padding: 6px 12px; font-size: 13px;" data-i18n="category.consumables" tabindex="-1">Consumables</button>
+                      <button class="shop-tab-btn" data-stash-category="material" style="padding: 6px 12px; font-size: 13px;" data-i18n="category.materials" tabindex="-1">Materials</button>
                     </div>
                   </div>
                   <div id="stashList" class="shop-container"></div>
@@ -4213,15 +4367,15 @@
 
             <!-- 商店 -->
             <div id="hideoutShop" class="hideout-panel">
-              <h3>商店</h3>
-              <p class="panel-desc">购买物品（买到仓库）</p>
+              <h3 data-i18n="market.title">Market</h3>
+              <p class="panel-desc" data-i18n="market.desc">Purchases go straight to your stash.</p>
               <!-- 商店分类 Tab -->
               <div id="shopTabs" class="shop-tabs">
-                <button class="shop-tab-btn active" data-shop-category="weapon" tabindex="-1">武器</button>
-                <button class="shop-tab-btn" data-shop-category="armor" tabindex="-1">防具</button>
-                <button class="shop-tab-btn" data-shop-category="bag" tabindex="-1">背包</button>
-                <button class="shop-tab-btn" data-shop-category="consumable" tabindex="-1">消耗品</button>
-                <button class="shop-tab-btn" data-shop-category="material" tabindex="-1">材料</button>
+                <button class="shop-tab-btn active" data-shop-category="weapon" data-i18n="category.weapons" tabindex="-1">Weapons</button>
+                <button class="shop-tab-btn" data-shop-category="armor" data-i18n="category.armor" tabindex="-1">Armor</button>
+                <button class="shop-tab-btn" data-shop-category="bag" data-i18n="category.backpacks" tabindex="-1">Backpacks</button>
+                <button class="shop-tab-btn" data-shop-category="consumable" data-i18n="category.consumables" tabindex="-1">Consumables</button>
+                <button class="shop-tab-btn" data-shop-category="material" data-i18n="category.materials" tabindex="-1">Materials</button>
               </div>
               <div id="shopList" class="shop-container"></div>
             </div>
@@ -4238,7 +4392,7 @@
     <!-- HUD 容器（右侧，与canvas并列） -->
     <div id="hudContainer">
       <!-- Debug 面板折叠按钮 -->
-      <button id="debugToggle" title="Toggle Debug Panel (F1)">◀</button>
+      <button id="debugToggle" title="Toggle debug panel (F1)" data-i18n-title="ui.debug.toggle">◀</button>
       
       <!-- Debug 面板（右侧） -->
       <div id="debugPanel"></div>
@@ -4256,7 +4410,7 @@
       align-items: center;
       justify-content: center;
       overflow: hidden;
-      font-family: 'Courier New', monospace;
+      font-family: 'Courier New', 'Noto Sans SC', monospace;
       color: #fff;
       perspective: 1200px; /* For 3D Tilt */
       
@@ -4344,6 +4498,8 @@
     .content-wrapper {
       position: relative;
       z-index: 10;
+      max-width: 100vw;
+      padding: 0 24px;
       text-align: center;
       display: flex;
       flex-direction: column;
@@ -4355,13 +4511,17 @@
     }
 
     /* Glitch Title (Refined) */
+    /* "ZIYANG PROTOCOL" is 15 glyphs wide, so the size and tracking scale with the
+       viewport instead of being pinned at 96px/12px (which overflowed under 1100px). */
     .game-title {
-      font-size: 96px;
+      font-size: clamp(30px, 6.2vw, 72px);
       font-weight: 900;
-      letter-spacing: 12px;
+      letter-spacing: clamp(3px, 0.85vw, 10px);
       color: #fff;
       text-transform: uppercase;
       position: relative;
+      white-space: nowrap;
+      max-width: 100%;
       text-shadow: 0 0 20px rgba(0, 255, 255, 0.4);
       animation: titleFloat 4s ease-in-out infinite;
       margin: 0;
@@ -4386,21 +4546,23 @@
     .game-title:hover::before {
       left: 2px;
       text-shadow: -2px 0 #f0f;
-      clip: rect(24px, 550px, 90px, 0);
+      /* 9999px right edge: the old 550px was tuned to the short former title and
+         clipped the glitch layer off the wider one. */
+      clip: rect(0, 9999px, 42px, 0);
       animation: glitch-anim-1 0.4s infinite linear alternate-reverse;
     }
     
     .game-title:hover::after {
       left: -2px;
       text-shadow: -2px 0 #0ff;
-      clip: rect(85px, 550px, 140px, 0);
+      clip: rect(42px, 9999px, 140px, 0);
       animation: glitch-anim-2 0.3s infinite linear alternate-reverse;
     }
 
     /* Subtitle */
     .game-subtitle {
-      font-size: 16px;
-      letter-spacing: 8px;
+      font-size: clamp(11px, 1.1vw, 16px);
+      letter-spacing: clamp(3px, 0.6vw, 8px);
       color: rgba(0, 255, 255, 0.6);
       text-transform: uppercase;
       margin-top: -20px;
@@ -4434,7 +4596,7 @@
     }
     
     .btn-content {
-      font-family: 'Courier New', monospace;
+      font-family: 'Courier New', 'Noto Sans SC', monospace;
       font-size: 20px;
       font-weight: bold;
       color: #fff;
@@ -4498,10 +4660,92 @@
       transition: all 0.8s ease-out;
       pointer-events: none;
     }
+
+    /* ===== Language switch (start screen) ===== */
+    #startLanguageSwitch {
+      position: absolute;
+      top: 28px;
+      right: 32px;
+      z-index: 20;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 16px;
+      background: rgba(0, 20, 26, 0.55);
+      border: 1px solid rgba(0, 255, 255, 0.25);
+      border-radius: 2px;
+      -webkit-backdrop-filter: blur(6px);
+      backdrop-filter: blur(6px);
+      box-shadow: 0 0 24px rgba(0, 255, 255, 0.08);
+      font-family: var(--font-mono);
+    }
+
+    .lang-switch-icon {
+      color: rgba(0, 255, 255, 0.5);
+      font-size: 10px;
+      line-height: 1;
+    }
+
+    .lang-switch-sep {
+      color: rgba(0, 255, 255, 0.25);
+      font-size: 12px;
+      user-select: none;
+    }
+
+    .lang-btn {
+      background: none;
+      border: none;
+      color: rgba(255, 255, 255, 0.45);
+      font-family: inherit;
+      font-size: 13px;
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      cursor: pointer;
+      padding: 2px 4px;
+      outline: none;
+      transition: color 0.2s, text-shadow 0.2s;
+    }
+
+    .lang-btn:hover {
+      color: rgba(255, 255, 255, 0.85);
+    }
+
+    .lang-btn.active {
+      color: #0ff;
+      text-shadow: 0 0 10px rgba(0, 255, 255, 0.6);
+    }
+
+    @media (max-width: 720px) {
+      #startLanguageSwitch {
+        top: 14px;
+        right: 14px;
+        padding: 6px 10px;
+      }
+    }
     </style>
+
+  <!-- First-run language prompt (shown by main.ts when no locale is stored) -->
+  <div id="languageModal" style="display: none;">
+    <div class="modal-content">
+      <h2 data-i18n="lang.modal.title">LANGUAGE // 语言</h2>
+      <p data-i18n="lang.modal.prompt">Select your language / 选择你的语言</p>
+      <div class="language-options">
+        <button type="button" id="languageModalEn" class="language-option" data-locale="en">English</button>
+        <button type="button" id="languageModalZh" class="language-option" data-locale="zh">中文</button>
+      </div>
+    </div>
+  </div>
 
   <!-- START SCREEN -->
   <div id="startScreen">
+    <!-- Language switch -->
+    <div id="startLanguageSwitch" class="lang-switch">
+      <span class="lang-switch-icon">◈</span>
+      <button type="button" id="startLangEn" class="lang-btn active" data-locale="en">EN</button>
+      <span class="lang-switch-sep">/</span>
+      <button type="button" id="startLangZh" class="lang-btn" data-locale="zh">中文</button>
+    </div>
+
     <!-- Parallax Container -->
     <div class="scene-container">
       <div class="cyber-grid-layer grid-base"></div>
@@ -4510,21 +4754,21 @@
     </div>
     
     <div class="content-wrapper">
-      <h1 class="game-title" data-text="JERKIE MAN">JERKIE MAN</h1>
-      <p class="game-subtitle">CYBERNETIC_WARFARE // v.0.9</p>
+      <h1 class="game-title" data-text="ZIYANG PROTOCOL">ZIYANG PROTOCOL</h1>
+      <p class="game-subtitle" data-i18n="start.subtitle">EXTRACTION_PROTOCOL // v.0.9</p>
       
       <!-- New Server Input -->
       <div class="server-input-container" style="margin-top: 20px; width: 100%; max-width: 400px; text-align: left;">
-        <label for="serverUrlInput" style="display: block; font-size: 11px; color: rgba(0,255,255,0.6); margin-bottom: 8px; letter-spacing: 1px;">SERVER_UPLINK_TARGET //:</label>
+        <label for="serverUrlInput" style="display: block; font-size: 11px; color: rgba(0,255,255,0.6); margin-bottom: 8px; letter-spacing: 1px;" data-i18n="start.server.label">SERVER_UPLINK_TARGET //:</label>
         <div style="display: flex; gap: 10px;">
           <input type="text" id="serverUrlInput" class="cyber-input" spellcheck="false" 
-                 style="flex: 1; background: rgba(0,0,0,0.6); border: 1px solid rgba(0,255,255,0.3); color: #0ff; padding: 12px; font-family: 'Courier New', monospace; font-size: 13px; outline: none; transition: all 0.2s;">
+                 style="flex: 1; background: rgba(0,0,0,0.6); border: 1px solid rgba(0,255,255,0.3); color: #0ff; padding: 12px; font-family: 'Courier New', 'Noto Sans SC', monospace; font-size: 13px; outline: none; transition: all 0.2s;">
         </div>
       </div>
 
       <div class="start-btn-container">
         <button id="startGameBtn" class="cyber-button">
-          <span class="btn-content">INITIALIZE // START</span>
+          <span class="btn-content" data-i18n="start.btn.initialize">INITIALIZE // START</span>
           <span class="btn-corner corner-tl"></span>
           <span class="btn-corner corner-tr"></span>
           <span class="btn-corner corner-bl"></span>

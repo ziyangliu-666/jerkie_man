@@ -1,5 +1,5 @@
 {
-  "name": "@jerkie-man/client",
+  "name": "@ziyang-protocol/client",
   "version": "0.1.0",
   "type": "module",
   "scripts": {
@@ -8,7 +8,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@jerkie-man/shared": "*"
+    "@ziyang-protocol/shared": "*"
   },
   "devDependencies": {
     "typescript": "^5.3.3",

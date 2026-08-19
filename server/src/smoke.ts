@@ -6,7 +6,7 @@ import {
   S2C_MESSAGE_SCHEMA,
   type S2C_SNAPSHOT,
   type S2C_MESSAGE,
-} from '@jerkie-man/shared';
+} from '@ziyang-protocol/shared';
 
 // CI友好：使用随机端口，自动启动server
 const PORT = Math.floor(Math.random() * 10000) + 10000; // 10000-19999

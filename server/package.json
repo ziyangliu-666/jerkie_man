@@ -1,5 +1,5 @@
 {
-  "name": "@jerkie-man/server",
+  "name": "@ziyang-protocol/server",
   "version": "0.1.0",
   "type": "module",
   "main": "./dist/main.js",
@@ -8,7 +8,7 @@
     "dev": "tsx watch src/main.ts"
   },
   "dependencies": {
-    "@jerkie-man/shared": "*",
+    "@ziyang-protocol/shared": "*",
     "@types/node": "^25.0.3",
     "@types/ws": "^8.18.1",
     "sirv": "^3.0.2",

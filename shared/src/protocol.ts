@@ -229,10 +229,38 @@ export const WEAPON_RUNTIME_SCHEMA = z.object({
   fireCredit: z.number().int().nonnegative().optional(),
 });
 
+// ---------------------------------------------------------------------------
+// Kill attribution
+//
+// The server never sends prose. `COMBAT_ACTOR` distinguishes a player callsign
+// (rendered verbatim, never translated) from a constant the client must look up
+// in the catalog. `COMBAT_WEAPON` carries an item id whenever one exists so the
+// client can call `itemName()`; the `special` branch covers the handful of
+// damage sources that have no catalog entry.
+// ---------------------------------------------------------------------------
+export const ENEMY_KIND = z.enum(['scout', 'sniper', 'heavy', 'feral']);
+
+export const COMBAT_ACTOR_SCHEMA = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('player'), name: z.string() }),
+  z.object({ kind: z.literal('enemy'), enemyKind: ENEMY_KIND }),
+  z.object({ kind: z.literal('turret'), ownerName: z.string().nullish() }),
+  z.object({ kind: z.literal('environment') }),
+  z.object({ kind: z.literal('admin') }),
+  z.object({ kind: z.literal('unknown') }),
+]);
+
+export const COMBAT_WEAPON_SCHEMA = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('item'), itemTypeId: z.string() }),
+  z.object({
+    kind: z.literal('special'),
+    specialId: z.enum(['fists', 'autocannon', 'console', 'unknown']),
+  }),
+]);
+
 // 短效 Buff（局内状态）—— 只包含给客户端展示所需的信息
 export const PLAYER_BUFF_SCHEMA = z.object({
+  // Display name is resolved client-side from the id (`buff.<id>`), never sent.
   id: z.string(),
-  name: z.string(),
   kind: z.enum(['speed', 'damage_reduction', 'regeneration', 'disguise']),
   remainingMs: z.number().int().nonnegative(),
   totalMs: z.number().int().positive(),
@@ -266,8 +294,8 @@ export const PLAYER_STATE_SCHEMA = z.object({
   isStunned: z.boolean().optional().default(false), // 新增: 是否被眩晕
   stunnedEndTime: z.number().optional().default(0), // 新增: 眩晕结束时间（毫秒时间戳）
   raidEquipment: PLAYER_RAID_EQUIPMENT_SCHEMA.optional(), // 新增: 局内装备状态
-  killedBy: z.string().nullish(), // nullish: 允许 null/undefined
-  killedByWeaponName: z.string().nullish(), // nullish: 允许 null/undefined
+  killedBy: COMBAT_ACTOR_SCHEMA.nullish(), // 结构化击杀者（客户端渲染文本）
+  killedByWeapon: COMBAT_WEAPON_SCHEMA.nullish(), // 结构化击杀武器
   buffs: z.array(PLAYER_BUFF_SCHEMA).optional(), // 新增: 局内短效 Buff 列表
   // 新增: 正在使用的道具（读条）状态，用于 HUD 提示（例如急救包）
   usingItemTypeId: z.string().nullable().optional(),
@@ -399,10 +427,83 @@ export const S2C_SNAPSHOT_SCHEMA = z.object({
   turrets: z.array(TURRET_STATE_SCHEMA).optional(), // 新增: 炮台列表
 });
 
+// ---------------------------------------------------------------------------
+// Errors
+//
+// The wire carries a code, never prose. The client renders `error.<code>` from
+// the catalog; anything the operator needs (zod details, ids) goes to the
+// server log instead.
+// ---------------------------------------------------------------------------
+export const ERROR_CODE = z.enum([
+  // Session
+  'session.notAuthenticated',
+  'session.noAccount',
+  'session.badRequest',
+  'session.adminDisabled',
+
+  // Hideout: stash, loadout, market
+  'stash.itemMissing',
+  'stash.notEnough',
+  'loadout.locked',
+  'loadout.full',
+  'loadout.overCapacity',
+  'loadout.itemMissing',
+  'loadout.notEnough',
+  'market.notEnoughCredits',
+  'market.sellFailed',
+
+  // Equipment slots
+  'equip.slotMismatch',
+  'equip.unknownSlot',
+  'equip.unequipFailed',
+  'equip.weaponMissing',
+  'equip.invalidWeapon',
+  'equip.backpackRequired',
+  'equip.backpackMissing',
+  'equip.backpackTooSmall',
+  'equip.invalidBackpack',
+  'equip.armorMissing',
+  'equip.invalidArmor',
+
+  // Raid inventory
+  'raid.notAlive',
+  'inventory.full',
+  'inventory.itemMissing',
+  'inventory.unknownItem',
+  'inventory.invalidQuantity',
+  'inventory.invalidSlot',
+  'inventory.removeFailed',
+  'drop.weaponEquipped',
+  'drop.backpackEquipped',
+  'drop.armorEquipped',
+
+  // World interaction
+  'interact.noTarget',
+  'interact.itemGone',
+  'interact.bagEmpty',
+  'interact.outOfReach',
+
+  // Item use
+  'use.busy',
+  'use.fullHealth',
+  'use.notUsable',
+  'use.mustThrow',
+  'throw.noThrowable',
+  'throw.outOfRange',
+]);
+
+export type ERROR_CODE = z.infer<typeof ERROR_CODE>;
+
+/**
+ * Server-side action result. Failures carry a code only — the copy lives in the
+ * client catalog under `error.<code>`.
+ */
+export type ActionResult<T = {}> = ({ success: true } & T) | { success: false; errorCode: ERROR_CODE };
+
 export const S2C_ERROR_SCHEMA = z.object({
   type: z.literal('S2C_ERROR'),
-  code: z.string(),
-  message: z.string(),
+  code: ERROR_CODE,
+  params: z.record(z.string(), z.union([z.string(), z.number()])).optional(),
 });
 
 export const S2C_WELCOME_SCHEMA = z.object({
@@ -429,11 +530,41 @@ export const S2C_WORLD_INIT_SCHEMA = z.object({
 });
 
 // 游戏化增强: 服务端事件流 -> HUD Event Log
+//
+// `key` indexes the client catalog; `params` are interpolated into it. Params
+// named `item` always hold an item type id — the client resolves them through
+// `itemName()` before interpolating. Every other param is rendered verbatim
+// (callsigns, counts, amounts).
 export const S2C_EVENT_SCHEMA = z.object({
   type: z.literal('S2C_EVENT'),
   tick: z.number().int().nonnegative(),
   timestamp: z.number(),
-  message: z.string(),
+  key: z.string(),
+  params: z.record(z.string(), z.union([z.string(), z.number()])).optional(),
+});
+
+// 地图列表（/maps 与 /maplist 的机器可读回执）
+export const S2C_MAP_LIST_SCHEMA = z.object({
+  type: z.literal('S2C_MAP_LIST'),
+  maps: z.array(z.string()),
+});
+
+// 在线玩家列表（/players 与 /playerlist 的机器可读回执）
+export const S2C_PLAYER_LIST_SCHEMA = z.object({
+  type: z.literal('S2C_PLAYER_LIST'),
+  players: z.array(z.object({
+    name: z.string(),
+    hp: z.number().int().nonnegative(),
+    alive: z.boolean(),
+  })),
+});
+
+// 局内自动装备回执（单播给当事玩家；客户端用 itemName(itemTypeId) 自行组句）
+export const S2C_AUTO_EQUIP_SCHEMA = z.object({
+  type: z.literal('S2C_AUTO_EQUIP'),
+  playerId: z.string(),
+  slot: z.enum(['weapon', 'bag', 'armor']),
+  itemTypeId: z.string(),
 });
 
 // Day5: Ping/Pong 消息（用于测量网络延迟）
@@ -464,8 +595,8 @@ export const S2C_RAID_RESULT_SCHEMA = z.object({
   loot: z.array(ITEM_INSTANCE_SCHEMA), // 获得的物品（撤离时）
   moneyGained: z.number().int().nonnegative(), // 获得的金钱（撤离时）
   moneyLost: z.number().int().nonnegative(), // 损失的金钱（死亡时，prep 物品的价值）
-  killedBy: z.string().optional(), // 死亡时：击杀者名字
-  killedByWeaponName: z.string().optional(), // 死亡时：击杀使用的武器名称
+  killedBy: COMBAT_ACTOR_SCHEMA.optional(), // 死亡时：结构化击杀者
+  killedByWeapon: COMBAT_WEAPON_SCHEMA.optional(), // 死亡时：结构化击杀武器
 });
 
 // 新增: 战斗事件消息（干火/命中/受伤反馈）
@@ -515,9 +646,9 @@ export const S2C_FIRE_SCHEMA = z.object({
 // 新增: 击杀播报消息
 export const S2C_KILL_FEED_SCHEMA = z.object({
   type: z.literal('S2C_KILL_FEED'),
-  killer: z.string(),
-  victim: z.string(),
-  weapon: z.string(),
+  killer: COMBAT_ACTOR_SCHEMA,
+  victim: COMBAT_ACTOR_SCHEMA,
+  weapon: COMBAT_WEAPON_SCHEMA,
 });
 
 export const S2C_OBSTACLE_UPDATE_SCHEMA = z.object({
@@ -550,6 +681,9 @@ export const S2C_MESSAGE_SCHEMA = z.discriminatedUnion('type', [
   S2C_WELCOME_SCHEMA,
   S2C_WORLD_INIT_SCHEMA, // 静态世界初始化消息
   S2C_EVENT_SCHEMA, // 游戏化增强: 事件消息
+  S2C_MAP_LIST_SCHEMA, // 地图列表回执
+  S2C_PLAYER_LIST_SCHEMA, // 在线玩家列表回执
+  S2C_AUTO_EQUIP_SCHEMA, // 局内自动装备回执
   S2C_PONG_SCHEMA, // Day5: Pong 消息
   S2C_PROFILE_SCHEMA, // P1-1: Profile 消息
   S2C_RAID_RESULT_SCHEMA, // 新增: 战局结果消息
@@ -585,6 +719,12 @@ export type S2C_ERROR = z.infer<typeof S2C_ERROR_SCHEMA>;
 export type S2C_WELCOME = z.infer<typeof S2C_WELCOME_SCHEMA>;
 export type S2C_WORLD_INIT = z.infer<typeof S2C_WORLD_INIT_SCHEMA>; // 静态世界初始化类型
 export type S2C_EVENT = z.infer<typeof S2C_EVENT_SCHEMA>; // 游戏化增强: 事件类型
+export type S2C_MAP_LIST = z.infer<typeof S2C_MAP_LIST_SCHEMA>;
+export type S2C_PLAYER_LIST = z.infer<typeof S2C_PLAYER_LIST_SCHEMA>;
+export type S2C_AUTO_EQUIP = z.infer<typeof S2C_AUTO_EQUIP_SCHEMA>;
+export type COMBAT_ACTOR = z.infer<typeof COMBAT_ACTOR_SCHEMA>;
+export type COMBAT_WEAPON = z.infer<typeof COMBAT_WEAPON_SCHEMA>;
+export type ENEMY_KIND = z.infer<typeof ENEMY_KIND>;
 export type S2C_PONG = z.infer<typeof S2C_PONG_SCHEMA>; // Day5: Pong 类型
 export type S2C_PROFILE = z.infer<typeof S2C_PROFILE_SCHEMA>;
 export type S2C_RAID_RESULT = z.infer<typeof S2C_RAID_RESULT_SCHEMA>; // P1-1: Profile 类型

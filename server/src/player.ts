@@ -1,5 +1,5 @@
-import type { PLAYER_STATE, OBSTACLE_STATE, PlayerInventory, ItemInstance, WeaponRuntime, PLAYER_BUFF } from '@jerkie-man/shared';
-import { simulatePlayerMove, getItemType, getWeaponDef, getArmorDef, getBagDef, PositionHistory, calculateStaminaChange, canSprint, getSprintSpeedMultiplier, msToTicks, ticksToMs, EXTRACT_DURATION_MS } from '@jerkie-man/shared';
+import type { PLAYER_STATE, OBSTACLE_STATE, PlayerInventory, ItemInstance, WeaponRuntime, PLAYER_BUFF, COMBAT_ACTOR, COMBAT_WEAPON } from '@ziyang-protocol/shared';
+import { simulatePlayerMove, getItemType, getWeaponDef, getArmorDef, getBagDef, PositionHistory, calculateStaminaChange, canSprint, getSprintSpeedMultiplier, msToTicks, ticksToMs, EXTRACT_DURATION_MS } from '@ziyang-protocol/shared';
 
 // 内部 Buff 运行时类型（仅服务端使用）
 // 内部 Buff 运行时类型（仅服务端使用）
@@ -7,7 +7,6 @@ type InternalBuffKind = 'speed' | 'damage_reduction' | 'regeneration' | 'disguis
 
 type InternalBuff = {
   id: string;
-  name: string;
   kind: InternalBuffKind;
   // 数值效果（服务端权威）
   speedMultiplier?: number;
@@ -41,8 +40,8 @@ export class Player {
   public equippedWeaponItem: ItemInstance | null = null; // 新增: 局内装备武器实例
   public equippedBagItem: ItemInstance | null = null; // 新增: 局内装备背包实例
   public equippedArmorItem: ItemInstance | null = null; // 新增: 局内装备护甲实例
-  public killedBy: string | undefined; // 新增: 击杀者玩家ID
-  public killedByWeaponName: string | undefined; // 新增: 击杀使用的武器名称
+  public killedBy: COMBAT_ACTOR | undefined; // 新增: 结构化击杀者
+  public killedByWeapon: COMBAT_WEAPON | undefined; // 新增: 结构化击杀武器
   public positionHistory: PositionHistory; // 延迟补偿: 位置历史记录
   public lastShotOriginX?: number;
   public lastShotOriginY?: number;
@@ -376,7 +375,6 @@ export class Player {
    */
   addOrRefreshBuff(params: {
     id: string;
-    name: string;
     kind: InternalBuffKind;
     durationMs: number;
     speedMultiplier?: number;
@@ -387,7 +385,6 @@ export class Player {
     const existingIndex = this.activeBuffs.findIndex(b => b.id === params.id);
     const base: InternalBuff = {
       id: params.id,
-      name: params.name,
       kind: params.kind,
       speedMultiplier: params.speedMultiplier,
       damageReductionBonus: params.damageReductionBonus,
@@ -436,7 +433,6 @@ export class Player {
       const remainingMs = ticksToMs(remainingTicks);
       return {
         id: buff.id,
-        name: buff.name,
         kind: buff.kind,
         remainingMs,
         totalMs,
@@ -728,8 +724,8 @@ export class Player {
         bagTypeId: this.equippedBagTypeId,
         armorTypeId: this.equippedArmorTypeId,
       },
-      killedBy: this.killedBy, // 新增: 击杀者名字
-      killedByWeaponName: this.killedByWeaponName, // 新增: 击杀使用的武器名称
+      killedBy: this.killedBy, // 新增: 结构化击杀者
+      killedByWeapon: this.killedByWeapon, // 新增: 结构化击杀武器
       buffs: this.getPublicBuffs(currentTick), // 新增: 短效 Buff 列表
       usingItemTypeId,
       usingItemRemainingMs,

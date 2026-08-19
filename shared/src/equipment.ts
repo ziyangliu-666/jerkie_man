@@ -20,7 +20,6 @@ export interface EquipmentBuffs {
 // 武器定义
 export interface WeaponDef {
   typeId: string;
-  name: string;
   weaponKind?: WeaponKind; // 武器种类（默认为gun）
   magSize: number; // 弹匣容量
   reloadMs: number; // 换弹时间（毫秒）
@@ -51,7 +50,6 @@ export interface ProjectileDef {
 // 背包定义
 export interface BagDef {
   typeId: string;
-  name: string;
   bagCap: number; // 背包容量
   buffs?: EquipmentBuffs; // 装备 Buff 效果
 }
@@ -59,7 +57,6 @@ export interface BagDef {
 // 防具定义
 export interface ArmorDef {
   typeId: string;
-  name: string;
   damageReduction: number; // 伤害减免（0-1，例如 0.3 表示减少 30% 伤害）
   buffs?: EquipmentBuffs; // 装备 Buff 效果
 }
@@ -68,7 +65,6 @@ export interface ArmorDef {
 export const WEAPONS: Record<string, WeaponDef> = {
   w_fists: {
     typeId: 'w_fists',
-    name: '拳头',
     weaponKind: 'melee',
     magSize: 0, // 拳头没有弹药
     reloadMs: 0, // 不需要换弹
@@ -82,7 +78,6 @@ export const WEAPONS: Record<string, WeaponDef> = {
   },
   w_pistol: {
     typeId: 'w_pistol',
-    name: '手枪',
     magSize: 6,
     reloadMs: 1500,
     fireIntervalMs: 300,
@@ -93,7 +88,6 @@ export const WEAPONS: Record<string, WeaponDef> = {
   },
   w_smg: {
     typeId: 'w_smg',
-    name: '冲锋枪',
     magSize: 30,
     reloadMs: 2000,
     fireIntervalMs: 100,
@@ -104,7 +98,6 @@ export const WEAPONS: Record<string, WeaponDef> = {
   },
   w_burst: {
     typeId: 'w_burst',
-    name: '三连发步枪',
     magSize: 20,
     reloadMs: 2500,
     fireIntervalMs: 300,
@@ -117,7 +110,6 @@ export const WEAPONS: Record<string, WeaponDef> = {
   },
   w_dmr: {
     typeId: 'w_dmr',
-    name: '精确步枪',
     magSize: 10,
     reloadMs: 3000,
     fireIntervalMs: 500,
@@ -128,7 +120,6 @@ export const WEAPONS: Record<string, WeaponDef> = {
   },
   w_shotgun: {
     typeId: 'w_shotgun',
-    name: '霰弹枪',
     magSize: 8,
     reloadMs: 3500,
     fireIntervalMs: 800,
@@ -140,7 +131,6 @@ export const WEAPONS: Record<string, WeaponDef> = {
   },
   w_sniper: {
     typeId: 'w_sniper',
-    name: '狙击步枪',
     magSize: 5,
     reloadMs: 3800,
     fireIntervalMs: 900,
@@ -151,7 +141,6 @@ export const WEAPONS: Record<string, WeaponDef> = {
   },
   w_grenade_launcher: {
     typeId: 'w_grenade_launcher',
-    name: '榴弹炮',
     weaponKind: 'launcher',
     magSize: 1,
     reloadMs: 3000,
@@ -165,7 +154,6 @@ export const WEAPONS: Record<string, WeaponDef> = {
   },
   w_burst_grenade_launcher: {
     typeId: 'w_burst_grenade_launcher',
-    name: '多连榴弹炮',
     weaponKind: 'launcher',
     magSize: 6,          // 6发弹匣
     reloadMs: 3000,      // 换弹较慢（4秒）
@@ -179,7 +167,6 @@ export const WEAPONS: Record<string, WeaponDef> = {
   },
   w_minigun: {
     typeId: 'w_minigun',
-    name: '加特林机枪',
     magSize: 200,        // 超大弹匣
     reloadMs: 6000,      // 换弹极慢（6秒）
     fireIntervalMs: 50,  // 极快射速（20发/秒）
@@ -193,7 +180,6 @@ export const WEAPONS: Record<string, WeaponDef> = {
   },
   w_anti_material: {
     typeId: 'w_anti_material',
-    name: '反器材狙击枪',
     magSize: 3,          // 极小弹匣
     reloadMs: 5000,      // 换弹极慢（5秒）
     fireIntervalMs: 1500, // 极慢射速
@@ -204,7 +190,6 @@ export const WEAPONS: Record<string, WeaponDef> = {
   },
   w_double_barrel: {
     typeId: 'w_double_barrel',
-    name: '双管霰弹枪',
     magSize: 2,          // 只有2发
     reloadMs: 4000,      // 换弹慢
     fireIntervalMs: 200, // 可以快速连射2发
@@ -216,7 +201,6 @@ export const WEAPONS: Record<string, WeaponDef> = {
   },
   w_laser_rifle: {
     typeId: 'w_laser_rifle',
-    name: '激光步枪',
     magSize: 30,
     reloadMs: 2500,
     fireIntervalMs: 150,
@@ -227,7 +211,6 @@ export const WEAPONS: Record<string, WeaponDef> = {
   },
   w_crossbow: {
     typeId: 'w_crossbow',
-    name: '弩',
     magSize: 5,          // 单发装填
     reloadMs: 3000,      // 装填慢
     fireIntervalMs: 300, // 装填后可以快速射击
@@ -238,7 +221,6 @@ export const WEAPONS: Record<string, WeaponDef> = {
   },
   w_auto_shotgun: {
     typeId: 'w_auto_shotgun',
-    name: '全自动霰弹枪',
     magSize: 12,
     reloadMs: 4000,
     fireIntervalMs: 150, // 全自动快速射击
@@ -250,7 +232,6 @@ export const WEAPONS: Record<string, WeaponDef> = {
   },
   w_precision_rifle: {
     typeId: 'w_precision_rifle',
-    name: '精确射手步枪',
     magSize: 15,
     reloadMs: 2800,
     fireIntervalMs: 400,
@@ -262,7 +243,6 @@ export const WEAPONS: Record<string, WeaponDef> = {
   },
   w_micro_smg: {
     typeId: 'w_micro_smg',
-    name: '微型冲锋枪',
     magSize: 50,         // 超大弹匣
     reloadMs: 1800,      // 快速换弹
     fireIntervalMs: 60,  // 极快射速
@@ -273,7 +253,6 @@ export const WEAPONS: Record<string, WeaponDef> = {
   },
   w_chainsaw: {
     typeId: 'w_chainsaw',
-    name: '链锯',
     weaponKind: 'melee',
     magSize: 0,
     reloadMs: 0,
@@ -287,7 +266,6 @@ export const WEAPONS: Record<string, WeaponDef> = {
   },
   w_katana: {
     typeId: 'w_katana',
-    name: '武士刀',
     weaponKind: 'melee',
     magSize: 0,
     reloadMs: 0,
@@ -304,7 +282,6 @@ export const WEAPONS: Record<string, WeaponDef> = {
   },
   w_sledgehammer: {
     typeId: 'w_sledgehammer',
-    name: '大锤',
     weaponKind: 'melee',
     magSize: 0,
     reloadMs: 0,
@@ -321,7 +298,6 @@ export const WEAPONS: Record<string, WeaponDef> = {
   },
   w_whip: {
     typeId: 'w_whip',
-    name: '鞭子',
     weaponKind: 'melee',
     magSize: 0,
     reloadMs: 0,
@@ -338,7 +314,6 @@ export const WEAPONS: Record<string, WeaponDef> = {
   },
   w_bubble_gun: {
     typeId: 'w_bubble_gun',
-    name: '泡泡枪',
     magSize: 100,        // 弹夹很多 100 发
     reloadMs: 3000,
     fireIntervalMs: 50,  // 射速很快，类似加特林
@@ -353,27 +328,22 @@ export const WEAPONS: Record<string, WeaponDef> = {
 export const BAGS: Record<string, BagDef> = {
   bag_sling: {
     typeId: 'bag_sling',
-    name: '小挎包',
     bagCap: 8,
   },
   bag_daypack: {
     typeId: 'bag_daypack',
-    name: '小背包',
     bagCap: 12,
   },
   bag_tactical: {
     typeId: 'bag_tactical',
-    name: '战术背包',
     bagCap: 16,
   },
   bag_expedition: {
     typeId: 'bag_expedition',
-    name: '大背包',
     bagCap: 20,
   },
   bag_military: {
     typeId: 'bag_military',
-    name: '军用背包',
     bagCap: 24, // 超大容量
   },
 };
@@ -382,22 +352,18 @@ export const BAGS: Record<string, BagDef> = {
 export const ARMORS: Record<string, ArmorDef> = {
   armor_light: {
     typeId: 'armor_light',
-    name: '轻甲',
     damageReduction: 0.1, // 减少 10% 伤害
   },
   armor_kevlar: {
     typeId: 'armor_kevlar',
-    name: '凯夫拉甲',
     damageReduction: 0.25, // 减少 25% 伤害
   },
   armor_plate: {
     typeId: 'armor_plate',
-    name: '插板甲',
     damageReduction: 0.4, // 减少 40% 伤害
   },
   armor_heavy: {
     typeId: 'armor_heavy',
-    name: '重甲',
     damageReduction: 0.7, // 减少 70% 伤害
     buffs: {
       speedMultiplier: 0.8, // 降低 20% 移动速度（重型护甲）
@@ -405,7 +371,6 @@ export const ARMORS: Record<string, ArmorDef> = {
   },
   armor_exo: {
     typeId: 'armor_exo',
-    name: '外骨骼装甲',
     damageReduction: 0.55, // 减少 55% 伤害
     buffs: {
       speedMultiplier: 1.25, // 增加 25% 移动速度（外骨骼助力）

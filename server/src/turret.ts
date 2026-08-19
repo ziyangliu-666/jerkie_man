@@ -1,5 +1,6 @@
 
-import { TURRET_STATE, OBSTACLE_STATE, getWeaponDef, msToTicks, applySpread, createRng } from '@jerkie-man/shared';
+import { TURRET_STATE, OBSTACLE_STATE, getWeaponDef, msToTicks, applySpread, createRng } from '@ziyang-protocol/shared';
+import type { COMBAT_ACTOR, COMBAT_WEAPON } from '@ziyang-protocol/shared';
 import { Player } from './player.js';
 import { AI } from './ai.js';
 // Using 'any' for Room to avoid circular dependency issues during runtime if strict, 
@@ -13,8 +14,8 @@ export class Turret {
   public ownerId: string;
   public hp: number = 150;
   public maxHp: number = 150;
-  public killedBy?: string; // 新增: 击杀者
-  public killedByWeaponName?: string; // 新增: 击杀武器
+  public killedBy?: COMBAT_ACTOR; // 新增: 结构化击杀者
+  public killedByWeapon?: COMBAT_WEAPON; // 新增: 结构化击杀武器
   
   public state: 'IDLE' | 'SPOOLING' | 'FIRING' | 'RELOADING' = 'IDLE';
   public aimRad: number = 0;

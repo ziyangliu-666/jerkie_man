@@ -9,8 +9,8 @@
  * 5. 命中时显示特效，避免服务端子弹"回放"的割裂感
  */
 
-import type { S2C_SNAPSHOT, BULLET_STATE, OBSTACLE_STATE, PLAYER_STATE } from '@jerkie-man/shared';
-import { getWeaponDef, applySpread, createRng, getBulletPenetration } from '@jerkie-man/shared';
+import type { S2C_SNAPSHOT, BULLET_STATE, OBSTACLE_STATE, PLAYER_STATE } from '@ziyang-protocol/shared';
+import { getWeaponDef, applySpread, createRng, getBulletPenetration } from '@ziyang-protocol/shared';
 
 // 子弹常量（与服务端保持一致）
 const DEFAULT_BULLET_SPEED = 800; // px/s（默认值，实际使用武器参数）
@@ -181,7 +181,7 @@ export class BulletTrackManager {
     };
 
     this.bullets.set(tempId, grenade);
-    console.log('[BulletTracks] 本地手雷已创建:', { id: tempId, targetX, targetY });
+    console.log('[BulletTracks] local grenade spawned:', { id: tempId, targetX, targetY });
   }
 
   /**
@@ -375,7 +375,7 @@ export class BulletTrackManager {
         // 手雷特殊处理：本地预测的手雷不同步位置（本地模拟更流畅）
         if (existingBullet.isGrenade && existingBullet.isLocalPrediction) {
           // 本地预测手雷：只确认存在，不更新位置（避免卡顿）
-          console.log('[BulletTracks] 本地手雷服务端确认，保持本地模拟:', b.id);
+          console.log('[BulletTracks] local grenade confirmed by server, keeping local sim:', b.id);
           continue;
         }
 
@@ -479,7 +479,7 @@ export class BulletTrackManager {
 
       // 日志：记录添加的手雷子弹
       if (b.weaponTypeId === 'frag_grenade' || b.weaponTypeId === 'smoke_grenade' || b.weaponTypeId === 'flash_grenade' || b.weaponTypeId === 'w_grenade_launcher') {
-        console.log('[BulletTracks] 添加手雷到bullets:', {
+        console.log('[BulletTracks] grenade added to bullets:', {
           id: b.id,
           weaponTypeId: b.weaponTypeId,
           spawnTimeMs,

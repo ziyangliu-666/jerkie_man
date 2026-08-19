@@ -1,5 +1,5 @@
-import type { WeaponRuntime, AI_STATE, AIRole } from '@jerkie-man/shared';
-import { getWeaponDef, PositionHistory } from '@jerkie-man/shared';
+import type { WeaponRuntime, AI_STATE, AIRole, COMBAT_ACTOR, COMBAT_WEAPON } from '@ziyang-protocol/shared';
+import { getWeaponDef, PositionHistory } from '@ziyang-protocol/shared';
 import type { PathNode } from './pathfinding.js';
 
 export type AIBehaviorType = 'PATROL' | 'GUARD';
@@ -29,8 +29,8 @@ export class AI {
   public weaponRuntime: WeaponRuntime;
   public armorReduction: number = 0;
   public positionHistory: PositionHistory;
-  public killedBy?: string; // 新增: 击杀者
-  public killedByWeaponName?: string; // 新增: 击杀武器
+  public killedBy?: COMBAT_ACTOR; // 新增: 结构化击杀者
+  public killedByWeapon?: COMBAT_WEAPON; // 新增: 结构化击杀武器
 
   public behaviorType: AIBehaviorType;
   public behaviorState: AIBehaviorState;

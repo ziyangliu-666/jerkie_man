@@ -1,5 +1,48 @@
-import type { PLAYER_STATE, BULLET_STATE, ITEM_STATE, OBSTACLE_STATE, WorldItem, LootBag, DECOY_STATE, TURRET_STATE, Zone } from '@jerkie-man/shared';
-import { getItemType, getWeaponDef, msToTicks, PLAYER_SPEED } from '@jerkie-man/shared';
+import type {
+  PLAYER_STATE,
+  BULLET_STATE,
+  ITEM_STATE,
+  OBSTACLE_STATE,
+  WorldItem,
+  LootBag,
+  DECOY_STATE,
+  TURRET_STATE,
+  Zone,
+  COMBAT_ACTOR,
+  COMBAT_WEAPON,
+} from '@ziyang-protocol/shared';
+import {
+  getItemType,
+  getWeaponDef,
+  msToTicks,
+  PLAYER_SPEED,
+  t,
+  onLocaleChange,
+  itemName,
+  itemShortName,
+  obstacleName,
+  buffName,
+  combatActorName,
+  combatWeaponName,
+} from '@ziyang-protocol/shared';
+
+/**
+ * Emoji prefix for each buff kind. The wording next to it comes from the buff
+ * id (`buffName`), never from the wire — the server sends ids only.
+ */
+const BUFF_ICON_BY_KIND: Record<string, string> = {
+  speed: '⚡',
+  damage_reduction: '🛡️',
+  regeneration: '💖',
+  disguise: '🌿',
+};
+
+/** Badge styling for one AI behaviour state. */
+interface AiStateBadge {
+  text: string;
+  bgColor: string;
+  borderColor: string;
+}
 
 export class Renderer {
   private canvas: HTMLCanvasElement;
@@ -65,10 +108,16 @@ export class Renderer {
     return current + diff * t;
   }
 
-  // 性能优化: 障碍物精灵缓存
+  // 性能优化: 障碍物精灵缓存（部分精灵会把本地化文字烤进离屏画布，切语言必须失效）
   private obsSprite = new Map<string, HTMLCanvasElement>();
   // 性能优化: 文字宽度缓存
   private textWidthCache = new Map<string, number>();
+  // 性能优化: 截断结果缓存（fitText 的输出，key 含 font + 宽度上限）
+  private fitTextCache = new Map<string, string>();
+  // 两个文字缓存的容量上限：玩家昵称是任意字符串，缓存必须有界
+  private static readonly TEXT_CACHE_LIMIT = 2048;
+  // 语言切换订阅的取消函数
+  private unsubscribeLocale: (() => void) | null = null;
   // 性能优化: 复用 Set 对象，避免每帧 new
   private activeIds = new Set<string>();
   private currentDecoyIds = new Set<string>();
@@ -98,7 +147,26 @@ export class Renderer {
       throw new Error('Failed to get 2d context');
     }
     this.ctx = ctx;
+    // 切换语言后所有测量过的文字宽度都失效，烤进离屏精灵的标签也失效。
+    // 主循环每帧重绘，清掉缓存即可让下一帧用新语言重新测量和重画。
+    this.unsubscribeLocale = onLocaleChange(() => this.clearTextCaches());
     // 不再自动resize，由外部调用resize()方法
+  }
+
+  /**
+   * 丢弃所有与文字相关的缓存。
+   * 语言切换时必须调用（构造函数里已订阅），也可在字体加载完成后手动调用。
+   */
+  clearTextCaches(): void {
+    this.textWidthCache.clear();
+    this.fitTextCache.clear();
+    this.obsSprite.clear();
+  }
+
+  /** 释放订阅。渲染器被丢弃时调用。 */
+  dispose(): void {
+    this.unsubscribeLocale?.();
+    this.unsubscribeLocale = null;
   }
 
   triggerShake(intensity: number, durationMs: number = 180): void {
@@ -271,45 +339,8 @@ export class Renderer {
     this.ctx.fillStyle = hpPercent > 0.5 ? '#0f0' : hpPercent > 0.25 ? '#ff0' : '#f00';
     this.ctx.fillRect(barX, barY, barWidth * hpPercent, barHeight);
 
-    // 新增: 显示玩家名字（如果有）
-    // 如果玩家已死亡且有击杀信息，显示坟墓格式的名字
-    let displayName: string | undefined;
-    if (player.status === 'DEAD') {
-      // 如果玩家已死亡，检查是否有击杀信息
-      if (player.killedBy && player.killedByWeaponName) {
-        // 显示为：xxx 的坟墓（被 xxx 用 xxx 所击杀）
-        displayName = `${player.name || player.id} 的坟墓（被 ${player.killedBy} 用 ${player.killedByWeaponName} 所击杀）`;
-      } else if (player.name) {
-        // 死亡但没有击杀信息，仍然显示名字
-        displayName = player.name;
-      } else {
-        // 死亡但没有名字，显示ID
-        displayName = player.id;
-      }
-    } else if (player.name) {
-      // 活着的玩家显示名字
-      displayName = player.name;
-    }
-    
-    if (displayName) {
-      const nameY = screenY - size / 2 - 12;
-      // 只在屏幕内才绘制名字（避免绘制在屏幕外）
-      if (nameY >= 0 && nameY < this.cssHeight && screenX >= 0 && screenX < this.cssWidth) {
-        this.ctx.save();
-        // 死亡玩家的名字颜色改为灰色
-        this.ctx.fillStyle = player.status === 'DEAD' ? '#999' : '#fff';
-        this.ctx.font = 'bold 16px Orbitron, sans-serif';
-        this.ctx.textAlign = 'center';
-        this.ctx.textBaseline = 'bottom';
-        // 文字描边（保证在复杂背景上可读）
-        this.ctx.strokeStyle = '#000';
-        this.ctx.lineWidth = 3;
-        this.ctx.miterLimit = 2;
-        this.ctx.strokeText(displayName, screenX, nameY);
-        this.ctx.fillText(displayName, screenX, nameY);
-        this.ctx.restore();
-      }
-    }
+    // 名牌：活人只有一行昵称，尸体多一行击杀归属
+    this.drawPlayerNameplate(player, screenX, screenY, size);
 
     // 新增: 绘制换弹进度条（玩家下方，蓝色）
     if (player.weaponRuntime && currentServerTick !== undefined) {
@@ -371,19 +402,7 @@ export class Renderer {
     }
 
     // 4. 使用物品状态
-    if (
-      player.usingItemTypeId &&
-      player.usingItemRemainingMs !== undefined &&
-      player.usingItemTotalMs !== undefined &&
-      player.usingItemTotalMs > 0
-    ) {
-      const usedMs = player.usingItemTotalMs - player.usingItemRemainingMs;
-      const progress = Math.max(0, Math.min(1, usedMs / player.usingItemTotalMs));
-      const isHealing = player.usingItemTypeId === 'medkit' || player.usingItemTypeId === 'advanced_medkit';
-      const statusText = isHealing ? '💊 治疗中' : `📦 ${player.usingItemTypeId}`;
-      const color = isHealing ? '#2ECC71' : '#F1C40F';
-      this.drawStatusIndicator(player.x, player.y, statusText, progress, color, indicatorIndex++);
-    }
+    if (this.drawUsingItemIndicator(player, player.x, player.y, indicatorIndex)) indicatorIndex++;
 
     // 5. 其他 Buffs
     if (player.buffs && player.buffs.length > 0) {
@@ -392,32 +411,150 @@ export class Renderer {
         const totalMs = Math.max(1, buff.totalMs ?? 1);
         const progress = Math.min(1, Math.max(0, remainingMs / totalMs));
 
-        let label = buff.name;
         let color = '#4CAF50'; // 默认绿色
-
-        // 根据 buff 类型定制颜色和图标
         switch (buff.kind) {
           case 'speed':
-            label = `⚡ 兴奋`; // 简化：战斗兴奋剂 → 兴奋
             color = '#00BFFF'; // Deep Sky Blue
             break;
           case 'damage_reduction':
-            label = `🛡️ ${buff.name}`; // 坚韧
             color = '#FFA500'; // Orange
             break;
           case 'regeneration':
-            label = `💖 再生`; // 简化：再生血清 → 再生
             color = '#FF69B4'; // Hot Pink
             break;
           case 'disguise':
-            label = `🌿 伪装`; // 伪装也显示进度条
             color = '#32CD32'; // Lime Green
             break;
         }
 
-        this.drawStatusIndicator(player.x, player.y, label, progress, color, indicatorIndex++);
+        this.drawStatusIndicator(player.x, player.y, this.buffLabel(buff), progress, color, indicatorIndex++);
       }
     }
+  }
+
+  /**
+   * Buff 徽标文字：图标按 kind 选，文字按 buff.id 查表。
+   * 服务端只发 id，显示名一律由客户端解析。
+   */
+  private buffLabel(buff: { id: string; kind: string }): string {
+    const icon = BUFF_ICON_BY_KIND[buff.kind] ?? '✨';
+    return `${icon} ${buffName(buff.id)}`;
+  }
+
+  /**
+   * 绘制「正在使用道具」读条徽标（医疗包显示“治疗中”，其他显示物品名）。
+   * 玩家渲染和统一状态层两处都用它，避免文案两份。
+   *
+   * @returns 是否真的画了（用于推进堆叠索引）
+   */
+  private drawUsingItemIndicator(
+    player: PLAYER_STATE,
+    entityX: number,
+    entityY: number,
+    index: number
+  ): boolean {
+    if (
+      !player.usingItemTypeId ||
+      player.usingItemRemainingMs === undefined ||
+      player.usingItemTotalMs === undefined ||
+      player.usingItemTotalMs <= 0
+    ) {
+      return false;
+    }
+
+    const usedMs = player.usingItemTotalMs - player.usingItemRemainingMs;
+    const progress = Math.max(0, Math.min(1, usedMs / player.usingItemTotalMs));
+    const isHealing =
+      player.usingItemTypeId === 'medkit' || player.usingItemTypeId === 'advanced_medkit';
+    const statusText = isHealing
+      ? `💊 ${t('combat.status.healing')}`
+      : `📦 ${itemShortName(player.usingItemTypeId)}`;
+    const color = isHealing ? '#2ECC71' : '#F1C40F';
+
+    this.drawStatusIndicator(entityX, entityY, statusText, progress, color, index);
+    return true;
+  }
+
+  /**
+   * 绘制玩家名牌。
+   *
+   * 活着的玩家只有一行昵称；尸体是两行：上面「谁的坟墓」，下面「被谁用什么杀的」。
+   * 拆成两行而不是拼成一句长串，是因为英文语序和中文完全不同，而且三段拼接在
+   * Orbitron 下能轻松超过 400px —— 名牌没有背景框也没有裁剪，只能靠宽度上限兜底。
+   */
+  private drawPlayerNameplate(
+    player: PLAYER_STATE,
+    screenX: number,
+    screenY: number,
+    size: number
+  ): void {
+    const NAME_FONT = 'bold 16px Orbitron, sans-serif';
+    const DETAIL_FONT = 'bold 11px Rajdhani, sans-serif';
+    // 宽度上限（CSS 像素）。昵称最长 32 字符，Orbitron 是宽体，必须夹住。
+    const NAME_MAX_WIDTH = 180;
+    const CORPSE_NAME_MAX_WIDTH = 130; // 给 "'s corpse" / “的坟墓” 留位置
+    const CORPSE_TITLE_MAX_WIDTH = 240; // 套上模板后的兜底上限
+    const DETAIL_MAX_WIDTH = 240;
+
+    const isDead = player.status === 'DEAD';
+    const rawName = player.name || player.id;
+    if (!rawName) return;
+
+    let title: string;
+    let detail: string | null = null;
+
+    if (isDead) {
+      // 先夹昵称，再套模板，最后再兜一次：模板本身在别的语言里也可能很长
+      title = this.fitText(
+        t('combat.nameplate.corpse', {
+          name: this.fitText(rawName, NAME_FONT, CORPSE_NAME_MAX_WIDTH),
+        }),
+        NAME_FONT,
+        CORPSE_TITLE_MAX_WIDTH
+      );
+      if (player.killedBy) {
+        const killer = combatActorName(player.killedBy);
+        const line = player.killedByWeapon
+          ? t('combat.nameplate.killedBy', {
+              killer,
+              weapon: combatWeaponName(player.killedByWeapon),
+            })
+          : t('combat.nameplate.killedByUnarmed', { killer });
+        detail = this.fitText(line, DETAIL_FONT, DETAIL_MAX_WIDTH);
+      }
+    } else {
+      title = this.fitText(rawName, NAME_FONT, NAME_MAX_WIDTH);
+    }
+
+    const nameY = screenY - size / 2 - 12;
+    // 只在屏幕内才绘制名字（避免绘制在屏幕外）
+    if (nameY < 0 || nameY >= this.cssHeight || screenX < 0 || screenX >= this.cssWidth) return;
+
+    this.ctx.save();
+    this.ctx.textAlign = 'center';
+    this.ctx.textBaseline = 'bottom';
+    this.ctx.strokeStyle = '#000';
+    this.ctx.miterLimit = 2;
+
+    // 有第二行时，标题上移一行
+    const titleY = detail ? nameY - 13 : nameY;
+
+    this.ctx.font = NAME_FONT;
+    this.ctx.lineWidth = 3;
+    // 死亡玩家的名字颜色改为灰色
+    this.ctx.fillStyle = isDead ? '#999' : '#fff';
+    this.ctx.strokeText(title, screenX, titleY);
+    this.ctx.fillText(title, screenX, titleY);
+
+    if (detail) {
+      this.ctx.font = DETAIL_FONT;
+      this.ctx.lineWidth = 2.5;
+      this.ctx.fillStyle = '#bbb';
+      this.ctx.strokeText(detail, screenX, nameY);
+      this.ctx.fillText(detail, screenX, nameY);
+    }
+
+    this.ctx.restore();
   }
 
   /**
@@ -708,7 +845,8 @@ export class Renderer {
         this.ctx.textAlign = 'center';
         this.ctx.textBaseline = 'middle';
         
-        const text = '🌿 伪装';
+        // 与状态徽标同一套文案，避免两份「伪装」字符串
+        const text = this.buffLabel(disguiseBuff);
         // 性能优化: 使用缓存的文字宽度测量
         const textWidth = this.measureCached('bold 12px monospace', text);
         const padding = 6;
@@ -748,7 +886,70 @@ export class Renderer {
   }
 
   /**
+   * AI 行为状态 -> 徽标文案与配色。
+   * 真实 AI 和伪装成 AI 的玩家共用这一份，避免两处状态表各写各的。
+   *
+   * @returns 未知状态返回 null（真实 AI 此时不画标签）
+   */
+  private aiStateBadge(behavior: string): AiStateBadge | null {
+    switch (behavior) {
+      case 'IDLE':
+        return { text: `💤 ${t('combat.ai.idle')}`, bgColor: 'rgba(100, 100, 100, 0.8)', borderColor: '#aaa' };
+      case 'PATROL':
+        return { text: `🚶 ${t('combat.ai.patrol')}`, bgColor: 'rgba(70, 130, 180, 0.85)', borderColor: '#87CEEB' };
+      case 'SPOTTING':
+        return { text: `⚠️ ${t('combat.ai.spotting')}`, bgColor: 'rgba(255, 165, 0, 0.85)', borderColor: '#FFD700' };
+      case 'CHASE':
+        return { text: `🏃 ${t('combat.ai.chase')}`, bgColor: 'rgba(255, 215, 0, 0.85)', borderColor: '#FFD700' };
+      case 'ATTACK':
+        return { text: `🔥 ${t('combat.ai.attack')}`, bgColor: 'rgba(220, 20, 60, 0.85)', borderColor: '#FF6347' };
+      case 'SEARCH':
+        return { text: `🔍 ${t('combat.ai.search')}`, bgColor: 'rgba(255, 140, 0, 0.85)', borderColor: '#FFA500' };
+      case 'RETURN':
+        return { text: `↩ ${t('combat.ai.return')}`, bgColor: 'rgba(50, 205, 50, 0.85)', borderColor: '#90EE90' };
+      default:
+        return null;
+    }
+  }
+
+  /**
+   * 在实体头顶画一个状态徽标。背景框按文字宽度自适应，所以英文变长不会被截断。
+   * @returns 徽标中心的 Y 坐标（用于在其上方继续堆叠）
+   */
+  private drawAiStateBadge(screenX: number, screenY: number, size: number, badge: AiStateBadge): number {
+    const font = 'bold 12px monospace';
+    const textY = screenY - size / 2 - 26; // 增加间距 (-22 -> -26)
+
+    this.ctx.save();
+    this.ctx.font = font;
+    this.ctx.textAlign = 'center';
+    this.ctx.textBaseline = 'middle';
+
+    const textWidth = this.measureCached(font, badge.text);
+    const padding = 6;
+    const boxWidth = textWidth + padding * 2;
+    const boxHeight = 20;
+
+    // 绘制背景框
+    this.ctx.fillStyle = badge.bgColor;
+    this.ctx.fillRect(screenX - boxWidth / 2, textY - boxHeight / 2, boxWidth, boxHeight);
+
+    // 绘制边框
+    this.ctx.strokeStyle = badge.borderColor;
+    this.ctx.lineWidth = 1.5;
+    this.ctx.strokeRect(screenX - boxWidth / 2, textY - boxHeight / 2, boxWidth, boxHeight);
+
+    // 绘制文字
+    this.ctx.fillStyle = '#FFFFFF';
+    this.ctx.fillText(badge.text, screenX, textY);
+
+    this.ctx.restore();
+    return textY;
+  }
+
+  /**
    * 新增: 绘制伪装AI状态标签（与真实AI样式一致）
+   * 与真实 AI 的差别只有一点：未知状态回落到 IDLE，绝不留空。
    * @returns 状态标签的Y坐标（用于在其下方绘制其他元素）
    */
   private drawDisguisedAiStateLabel(
@@ -757,87 +958,8 @@ export class Renderer {
     size: number,
     behavior: string
   ): number {
-    let stateText = '';
-    let bgColor = 'rgba(0, 0, 0, 0.8)';
-    let borderColor = '#fff';
-
-    switch (behavior) {
-      case 'IDLE':
-        stateText = '💤 摸鱼';
-        bgColor = 'rgba(100, 100, 100, 0.8)';
-        borderColor = '#aaa';
-        break;
-      case 'PATROL':
-        stateText = '🚶 巡逻';
-        bgColor = 'rgba(70, 130, 180, 0.85)';
-        borderColor = '#87CEEB';
-        break;
-      case 'SPOTTING':
-        stateText = '⚠️ 发现';
-        bgColor = 'rgba(255, 165, 0, 0.85)';
-        borderColor = '#FFD700';
-        break;
-      case 'CHASE':
-        stateText = '🏃 追击';
-        bgColor = 'rgba(255, 215, 0, 0.85)';
-        borderColor = '#FFD700';
-        break;
-      case 'ATTACK':
-        stateText = '🔥 攻击';
-        bgColor = 'rgba(220, 20, 60, 0.85)';
-        borderColor = '#FF6347';
-        break;
-      case 'SEARCH':
-        stateText = '🔍 搜索';
-        bgColor = 'rgba(255, 140, 0, 0.85)';
-        borderColor = '#FFA500';
-        break;
-      case 'RETURN':
-        stateText = '↩ 返回';
-        bgColor = 'rgba(50, 205, 50, 0.85)';
-        borderColor = '#90EE90';
-        break;
-      default:
-        stateText = '💤 摸鱼';
-        bgColor = 'rgba(100, 100, 100, 0.8)';
-        borderColor = '#aaa';
-        break;
-    }
-
-    if (stateText) {
-      this.ctx.save();
-
-      this.ctx.font = 'bold 12px monospace';
-      this.ctx.textAlign = 'center';
-      this.ctx.textBaseline = 'middle';
-
-      const textWidth = this.measureCached('bold 12px monospace', stateText);
-      const padding = 6;
-      const boxWidth = textWidth + padding * 2;
-      const boxHeight = 20;
-      const textY = screenY - size / 2 - 26; // 增加间距 (-22 -> -26)
-
-      // 绘制背景框
-      this.ctx.fillStyle = bgColor;
-      this.ctx.fillRect(screenX - boxWidth / 2, textY - boxHeight / 2, boxWidth, boxHeight);
-
-      // 绘制边框
-      this.ctx.strokeStyle = borderColor;
-      this.ctx.lineWidth = 1.5;
-      this.ctx.strokeRect(screenX - boxWidth / 2, textY - boxHeight / 2, boxWidth, boxHeight);
-
-      // 绘制文字
-      this.ctx.fillStyle = '#FFFFFF';
-      this.ctx.fillText(stateText, screenX, textY);
-
-      this.ctx.restore();
-      
-      // 返回状态标签的Y坐标（用于在其下方绘制其他元素）
-      return textY;
-    }
-    
-    // 如果没有状态文本，返回默认位置
-    return screenY - size / 2 - 26; // 增加间距 (-22 -> -26)
+    const badge = this.aiStateBadge(behavior) ?? this.aiStateBadge('IDLE')!;
+    return this.drawAiStateBadge(screenX, screenY, size, badge);
   }
 
   // 新增: 绘制诱饵（外观模仿玩家）
@@ -940,14 +1062,16 @@ export class Renderer {
     }
     
     // 显示名字（模仿玩家）
-    const displayName = decoy.name;
-    if (displayName) {
+    if (decoy.name) {
       const nameY = screenY - size / 2 - 12;
       // 只在屏幕内才绘制名字
       if (nameY >= 0 && nameY < this.cssHeight && screenX >= 0 && screenX < this.cssWidth) {
+        const font = 'bold 12px monospace';
+        // 与玩家名牌一样夹住宽度：昵称是任意输入
+        const displayName = this.fitText(decoy.name, font, 180);
         this.ctx.save();
         this.ctx.fillStyle = '#fff';
-        this.ctx.font = 'bold 12px monospace';
+        this.ctx.font = font;
         this.ctx.textAlign = 'center';
         this.ctx.textBaseline = 'bottom';
         this.ctx.strokeStyle = '#000';
@@ -1305,83 +1429,9 @@ export class Renderer {
 
     // AI状态标签（总是显示，类似"隐蔽"标签的样式）
     if (ai.behaviorState) {
-      let stateText = '';
-      let bgColor = 'rgba(0, 0, 0, 0.8)'; // 背景色
-      let borderColor = '#fff'; // 边框色
-
-      switch (ai.behaviorState) {
-        case 'IDLE':
-          stateText = '💤 摸鱼';
-          bgColor = 'rgba(100, 100, 100, 0.8)';
-          borderColor = '#aaa';
-          break;
-        case 'PATROL':
-          stateText = '🚶 巡逻';
-          bgColor = 'rgba(70, 130, 180, 0.85)';
-          borderColor = '#87CEEB';
-          break;
-        case 'SPOTTING':
-          stateText = '⚠️ 发现';
-          bgColor = 'rgba(255, 165, 0, 0.85)'; // 橙色背景
-          borderColor = '#FFD700'; // 金色边框
-          break;
-        case 'CHASE':
-          stateText = '🏃 追击';
-          bgColor = 'rgba(255, 215, 0, 0.85)';
-          borderColor = '#FFD700';
-          break;
-        case 'ATTACK':
-          stateText = '🔥 攻击';
-          bgColor = 'rgba(220, 20, 60, 0.85)';
-          borderColor = '#FF6347';
-          break;
-        case 'SEARCH':
-          stateText = '🔍 搜索';
-          bgColor = 'rgba(255, 140, 0, 0.85)';
-          borderColor = '#FFA500';
-          break;
-        case 'RETURN':
-          stateText = '↩ 返回';
-          bgColor = 'rgba(50, 205, 50, 0.85)';
-          borderColor = '#90EE90';
-          break;
-        default:
-          stateText = '';
-          break;
-      }
-
-      if (stateText) {
-        this.ctx.save();
-
-        // 使用与"隐蔽"标签相同的样式
-        this.ctx.font = 'bold 12px monospace';
-        this.ctx.textAlign = 'center';
-        this.ctx.textBaseline = 'middle';
-
-        const textWidth = this.measureCached('bold 12px monospace', stateText);
-        const padding = 6;
-        const boxWidth = textWidth + padding * 2;
-        const boxHeight = 20;
-        const textY = screenY - size / 2 - 26; // 增加间距 (-22 -> -26)
-
-        // 绘制背景框
-        this.ctx.fillStyle = bgColor;
-        this.ctx.fillRect(screenX - boxWidth / 2, textY - boxHeight / 2, boxWidth, boxHeight);
-
-        // 绘制边框（类似"隐蔽"标签）
-        this.ctx.strokeStyle = borderColor;
-        this.ctx.lineWidth = 1.5;
-        this.ctx.strokeRect(screenX - boxWidth / 2, textY - boxHeight / 2, boxWidth, boxHeight);
-
-        // 绘制文字（白色）
-        this.ctx.fillStyle = '#FFFFFF';
-        this.ctx.fillText(stateText, screenX, textY);
-
-        this.ctx.restore();
-      }
+      const badge = this.aiStateBadge(ai.behaviorState);
+      if (badge) this.drawAiStateBadge(screenX, screenY, size, badge);
     }
-
-
   }
 
   /**
@@ -1681,22 +1731,22 @@ export class Renderer {
 
       switch (turret.state) {
         case 'IDLE':
-          stateText = '💤 待机';
+          stateText = `💤 ${t('combat.turret.idle')}`;
           bgColor = 'rgba(100, 100, 100, 0.8)';
           borderColor = '#aaa';
           break;
         case 'SPOOLING':
-          stateText = '⚠️ 预热';
+          stateText = `⚠️ ${t('combat.turret.spooling')}`;
           bgColor = 'rgba(255, 165, 0, 0.85)';
           borderColor = '#FFD700';
           break;
         case 'FIRING':
-          stateText = '🔥 射击';
+          stateText = `🔥 ${t('combat.turret.firing')}`;
           bgColor = 'rgba(220, 20, 60, 0.85)';
           borderColor = '#FF6347';
           break;
         case 'RELOADING':
-          stateText = '🔄 装弹';
+          stateText = `🔄 ${t('combat.turret.reloading')}`;
           bgColor = 'rgba(70, 130, 180, 0.85)';
           borderColor = '#87CEEB';
           break;
@@ -2723,14 +2773,17 @@ export class Renderer {
         if (itemType.rarity === 'RARE') color = '#0088ff';
         else if (itemType.rarity === 'EPIC') color = '#9d4edd';
         else if (itemType.rarity === 'LEGENDARY') color = '#ffaa00';
-        lines.push({ text: `${itemType.name} x${itemInfo.worldItem.qty} ($${itemValue})`, color });
+        lines.push({
+          text: `${itemName(itemInfo.worldItem.typeId)} x${itemInfo.worldItem.qty} ($${itemValue})`,
+          color,
+        });
       } catch {
         lines.push({ text: `${itemInfo.worldItem.typeId} x${itemInfo.worldItem.qty}`, color: '#ffffff' });
       }
     } else if (itemInfo.type === 'lootBag' && itemInfo.lootBag) {
       const bag = itemInfo.lootBag;
       if (bag.items.length === 0) {
-        lines.push({ text: '空掉落包', color: '#ffffff' });
+        lines.push({ text: t('combat.loot.empty'), color: '#ffffff' });
       } else {
         // 显示前几个物品
         const maxItems = 5; // 最多显示5个物品
@@ -2742,13 +2795,16 @@ export class Renderer {
             if (itemType.rarity === 'RARE') color = '#0088ff';
             else if (itemType.rarity === 'EPIC') color = '#9d4edd';
             else if (itemType.rarity === 'LEGENDARY') color = '#ffaa00';
-            lines.push({ text: `${itemType.name} x${item.qty}`, color });
+            lines.push({ text: `${itemName(item.typeId)} x${item.qty}`, color });
           } catch {
             lines.push({ text: `${item.typeId} x${item.qty}`, color: '#ffffff' });
           }
         }
         if (bag.items.length > maxItems) {
-          lines.push({ text: `... 还有 ${bag.items.length - maxItems} 个物品`, color: '#ffffff' });
+          lines.push({
+            text: t('combat.loot.more', { count: bag.items.length - maxItems }),
+            color: '#ffffff',
+          });
         }
       }
     }
@@ -3131,8 +3187,42 @@ export class Renderer {
     this.ctx.font = font;
     const w = this.ctx.measureText(text).width;
     this.ctx.restore();
+    // 玩家昵称是任意输入，缓存必须有界，否则一局下来会无限增长
+    if (this.textWidthCache.size >= Renderer.TEXT_CACHE_LIMIT) this.textWidthCache.clear();
     this.textWidthCache.set(key, w);
     return w;
+  }
+
+  /**
+   * 把文字截断到指定像素宽度以内，超出部分用省略号代替。
+   *
+   * 玩家昵称最长 32 字符，而 Orbitron 是宽体几何无衬线（同字号比普通 sans 宽
+   * 25~40%），16px 下 32 个大写字符能超过 400px。名牌没有框也没有裁剪，所以
+   * 必须在这里兜住宽度，否则会横跨大半个屏幕。
+   */
+  private fitText(text: string, font: string, maxWidth: number): string {
+    if (!text) return text;
+    const key = `${font}|${maxWidth}|${text}`;
+    const hit = this.fitTextCache.get(key);
+    if (hit !== undefined) return hit;
+
+    let result = text;
+    if (this.measureCached(font, text) > maxWidth) {
+      const ellipsis = '…';
+      // 二分找最长可容纳前缀；结果进缓存，之后每帧 O(1)
+      let lo = 0;
+      let hi = text.length - 1;
+      while (lo < hi) {
+        const mid = Math.ceil((lo + hi) / 2);
+        if (this.measureCached(font, text.slice(0, mid) + ellipsis) <= maxWidth) lo = mid;
+        else hi = mid - 1;
+      }
+      result = lo > 0 ? text.slice(0, lo) + ellipsis : ellipsis;
+    }
+
+    if (this.fitTextCache.size >= Renderer.TEXT_CACHE_LIMIT) this.fitTextCache.clear();
+    this.fitTextCache.set(key, result);
+    return result;
   }
 
   /**
@@ -3352,190 +3442,11 @@ export class Renderer {
     ctx.strokeRect(screenX, screenY, w, h);
   }
 
-  // 简洁渲染：集装箱（方形+文字）
-  private drawContainer(x: number, y: number, w: number, h: number, seed: number): void {
-    const ctx = this.ctx;
-    
-    // 背景色
-    ctx.fillStyle = '#8B4513';
-    ctx.fillRect(x, y, w, h);
-    
-    // 纵向条纹
-    ctx.strokeStyle = 'rgba(0, 0, 0, 0.2)';
-    ctx.lineWidth = 2;
-    for (let i = 1; i < 5; i++) {
-      ctx.beginPath();
-      ctx.moveTo(x + (w * i) / 5, y);
-      ctx.lineTo(x + (w * i) / 5, y + h);
-      ctx.stroke();
-    }
-    
-    // 文字标识
-    ctx.fillStyle = '#FFFFFF';
-    ctx.font = 'bold 16px Arial';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText('集装箱', x + w / 2, y + h / 2);
-    
-    // 边框
-    ctx.strokeStyle = '#654321';
-    ctx.lineWidth = 2;
-    ctx.strokeRect(x, y, w, h);
-  }
 
-  // 简洁渲染：车辆（方形+文字）
-  private drawVehicle(x: number, y: number, w: number, h: number, seed: number): void {
-    const ctx = this.ctx;
-    
-    // 背景色
-    ctx.fillStyle = '#696969';
-    ctx.fillRect(x, y, w, h);
-    
-    // 前后挡风玻璃（浅蓝）
-    ctx.fillStyle = 'rgba(150, 200, 255, 0.5)';
-    ctx.fillRect(x + w * 0.1, y + 5, w * 0.8, h * 0.2);
-    ctx.fillRect(x + w * 0.1, y + h - h * 0.2 - 5, w * 0.8, h * 0.2);
-    
-    // 文字标识
-    ctx.fillStyle = '#FFFFFF';
-    ctx.font = 'bold 16px Arial';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText('车辆', x + w / 2, y + h / 2);
-    
-    // 边框
-    ctx.strokeStyle = '#3F3F3F';
-    ctx.lineWidth = 2;
-    ctx.strokeRect(x, y, w, h);
-  }
 
-  // 简洁渲染：帐篷（方形+文字）
-  private drawSupplyTent(x: number, y: number, w: number, h: number, seed: number): void {
-    const ctx = this.ctx;
-    
-    // 背景色（军绿）
-    ctx.fillStyle = '#556B2F';
-    ctx.fillRect(x, y, w, h);
-    
-    // 交叉线（帐篷结构）
-    ctx.strokeStyle = 'rgba(0, 0, 0, 0.3)';
-    ctx.lineWidth = 3;
-    ctx.beginPath();
-    ctx.moveTo(x + w / 2, y);
-    ctx.lineTo(x + w / 2, y + h);
-    ctx.stroke();
-    ctx.beginPath();
-    ctx.moveTo(x, y + h / 2);
-    ctx.lineTo(x + w, y + h / 2);
-    ctx.stroke();
-    
-    // 文字标识
-    ctx.fillStyle = '#FFFFFF';
-    ctx.font = 'bold 14px Arial';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText('补给帐篷', x + w / 2, y + h / 2);
-    
-    // 边框
-    ctx.strokeStyle = '#3E4A21';
-    ctx.lineWidth = 2;
-    ctx.strokeRect(x, y, w, h);
-  }
 
-  // 简洁渲染：瞭望塔（方形+文字）
-  private drawWatchtower(x: number, y: number, w: number, h: number, seed: number): void {
-    const ctx = this.ctx;
-    
-    // 背景色（木色）
-    ctx.fillStyle = '#6D4C41';
-    ctx.fillRect(x, y, w, h);
-    
-    // 木板纹理（横向）
-    ctx.strokeStyle = 'rgba(0, 0, 0, 0.2)';
-    ctx.lineWidth = 1;
-    for (let i = 0; i < h; i += 12) {
-      ctx.beginPath();
-      ctx.moveTo(x, y + i);
-      ctx.lineTo(x + w, y + i);
-      ctx.stroke();
-    }
-    
-    // 文字标识
-    ctx.fillStyle = '#FFFFFF';
-    ctx.font = 'bold 16px Arial';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText('瞭望塔', x + w / 2, y + h / 2);
-    
-    // 边框
-    ctx.strokeStyle = '#4E342E';
-    ctx.lineWidth = 2;
-    ctx.strokeRect(x, y, w, h);
-  }
 
-  // 简洁渲染：小房屋（方形+文字）
-  private drawSmallHouse(x: number, y: number, w: number, h: number, seed: number): void {
-    const ctx = this.ctx;
-    
-    // 背景色（红褐）
-    ctx.fillStyle = '#A0522D';
-    ctx.fillRect(x, y, w, h);
-    
-    // 瓦片纹理（横向密集线）
-    ctx.strokeStyle = 'rgba(0, 0, 0, 0.15)';
-    ctx.lineWidth = 1;
-    for (let i = 0; i < h; i += 6) {
-      ctx.beginPath();
-      ctx.moveTo(x, y + i);
-      ctx.lineTo(x + w, y + i);
-      ctx.stroke();
-    }
-    
-    // 文字标识
-    ctx.fillStyle = '#FFFFFF';
-    ctx.font = 'bold 16px Arial';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText('房屋', x + w / 2, y + h / 2);
-    
-    // 边框
-    ctx.strokeStyle = '#654321';
-    ctx.lineWidth = 2;
-    ctx.strokeRect(x, y, w, h);
-  }
 
-  // 简洁渲染：树木（方形+文字）
-  private drawTreeLarge(x: number, y: number, w: number, h: number, seed: number): void {
-    const ctx = this.ctx;
-    
-    // 背景色（深绿）
-    ctx.fillStyle = '#2E7D32';
-    ctx.fillRect(x, y, w, h);
-    
-    // 叶子纹理（深绿斑点）
-    ctx.fillStyle = 'rgba(27, 94, 32, 0.4)';
-    for (let i = 0; i < 8; i++) {
-      const px = x + (w * ((seed + i * 17) % 100)) / 100;
-      const py = y + (h * ((seed + i * 23) % 100)) / 100;
-      ctx.fillRect(px - 3, py - 3, 6, 6);
-    }
-    
-    // 中心树干标记
-    ctx.fillStyle = '#5D4037';
-    ctx.fillRect(x + w / 2 - 5, y + h / 2 - 5, 10, 10);
-    
-    // 文字标识
-    ctx.fillStyle = '#FFFFFF';
-    ctx.font = 'bold 16px Arial';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText('树', x + w / 2, y + h / 2 + 20);
-    
-    // 边框
-    ctx.strokeStyle = '#1B5E20';
-    ctx.lineWidth = 2;
-    ctx.strokeRect(x, y, w, h);
-  }
 
   // 简洁渲染：岩石（方形+文字）
   private drawRockLarge(x: number, y: number, w: number, h: number, seed: number): void {
@@ -3563,7 +3474,7 @@ export class Renderer {
     ctx.font = 'bold 16px Arial';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillText('岩石', x + w / 2, y + h / 2);
+    ctx.fillText(obstacleName('rock_large'), x + w / 2, y + h / 2);
     
     // 边框
     ctx.strokeStyle = '#4A4A4A';
@@ -4103,17 +4014,17 @@ export class Renderer {
 
   // 绘制致盲状态提示
   private drawFlashIndicator(entityX: number, entityY: number, progress: number = 1.0, index: number = 0): void {
-    this.drawStatusIndicator(entityX, entityY, '⚡ 致盲', progress, 'rgba(255, 255, 255, 0.8)', index);
+    this.drawStatusIndicator(entityX, entityY, `⚡ ${t('combat.status.blinded')}`, progress, 'rgba(255, 255, 255, 0.8)', index);
   }
 
   // 绘制眩晕状态提示
   private drawStunIndicator(entityX: number, entityY: number, progress: number = 1.0, index: number = 0): void {
-    this.drawStatusIndicator(entityX, entityY, '💫 眩晕', progress, 'rgba(255, 200, 0, 0.8)', index);
+    this.drawStatusIndicator(entityX, entityY, `💫 ${t('combat.status.stunned')}`, progress, 'rgba(255, 200, 0, 0.8)', index);
   }
 
   // 绘制隐蔽状态提示
   private drawConcealmentIndicator(entityX: number, entityY: number, index: number = 0): void {
-    this.drawStatusIndicator(entityX, entityY, '🌿 隐蔽', 1.0, 'rgba(34, 139, 34, 0.8)', index);
+    this.drawStatusIndicator(entityX, entityY, `🌿 ${t('combat.status.concealed')}`, 1.0, 'rgba(34, 139, 34, 0.8)', index);
   }
 
   // 渲染所有玩家和子弹
@@ -4608,22 +4519,7 @@ export class Renderer {
         }
 
         // 4. 正在使用物品 (治疗中)
-        if (
-          p.usingItemTypeId &&
-          p.usingItemRemainingMs !== undefined &&
-          p.usingItemTotalMs !== undefined &&
-          p.usingItemTotalMs > 0
-        ) {
-          const usedMs = p.usingItemTotalMs - p.usingItemRemainingMs;
-          const progress = Math.max(0, Math.min(1, usedMs / p.usingItemTotalMs));
-          
-          // 只有医疗包显示"治疗中"，其他物品显示原本的名字
-          const isHealing = p.usingItemTypeId === 'medkit' || p.usingItemTypeId === 'advanced_medkit';
-          const statusText = isHealing ? '💊 治疗中' : `📦 ${p.usingItemTypeId}`;
-          const color = isHealing ? '#2ECC71' : '#F1C40F';
-
-          this.drawStatusIndicator(visualPlayer.x, visualPlayer.y, statusText, progress, color, statusIndex++);
-        }
+        if (this.drawUsingItemIndicator(p, visualPlayer.x, visualPlayer.y, statusIndex)) statusIndex++;
       }
     }
 

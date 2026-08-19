@@ -24,13 +24,17 @@ import {
   S2C_SMOKE_SCHEMA, // 新增: 烟雾事件
   S2C_FIRE_SCHEMA, // 新增: 燃烧事件
   S2C_KILL_FEED_SCHEMA, // 新增: 击杀播报
+  S2C_MAP_LIST_SCHEMA, // 地图列表回执
+  S2C_PLAYER_LIST_SCHEMA, // 在线玩家列表回执
+  S2C_AUTO_EQUIP_SCHEMA, // 局内自动装备回执
+  type ERROR_CODE,
   getWeaponDef, // 新增: 用于重置武器运行时状态
   TICK_MS,
   SNAPSHOT_MS,
   encodeMessage, // 二进制编码
   exportFieldMapping, // 动态字段压缩
   type C2S_MESSAGE,
-} from '@jerkie-man/shared';
+} from '@ziyang-protocol/shared';
 
 // 支持从环境变量读取端口和主机地址（CI友好）
 const PORT = Number(process.env.PORT) || 18723;
@@ -47,7 +51,7 @@ const ADMIN_PASSWORD_HASH = ADMIN_PASSWORD
   : null;
 
 if (!ADMIN_PASSWORD_HASH) {
-  console.warn('[SECURITY] 未设置 ADMIN_PASSWORD，管理员登录已禁用。');
+  console.warn('[SECURITY] ADMIN_PASSWORD is not set; admin login is disabled.');
 }
 
 // 静态资源目录（client 构建产物），与 WebSocket 共用同一端口，实现同源部署
@@ -188,6 +192,49 @@ const playerLatencies = new Map<string, PlayerLatency>(); // playerId -> PlayerL
 // 新增: 记录玩家撤离时的背包物品数（用于判断"刚完成撤离"）
 const lastExtractedInventoryCount = new Map<string, number>();
 
+// ---------------------------------------------------------------------------
+// Wire helpers
+//
+// Nothing on the wire is prose. Errors carry a code, events carry a catalog key
+// plus params; the client owns every word the player reads.
+// ---------------------------------------------------------------------------
+type EventParams = Record<string, string | number>;
+
+function sendError(ws: WebSocket, code: ERROR_CODE, params?: EventParams): void {
+  if (ws.readyState !== WebSocket.OPEN) return;
+  ws.send(JSON.stringify(S2C_ERROR_SCHEMA.parse({ type: 'S2C_ERROR', code, params })));
+}
+
+function sendEvent(ws: WebSocket, key: string, params?: EventParams): void {
+  if (ws.readyState !== WebSocket.OPEN) return;
+  ws.send(
+    JSON.stringify(
+      S2C_EVENT_SCHEMA.parse({
+        type: 'S2C_EVENT',
+        tick: room.tick,
+        timestamp: Date.now(),
+        key,
+        params,
+      })
+    )
+  );
+}
+
+function sendMapList(ws: WebSocket, maps: string[]): void {
+  if (ws.readyState !== WebSocket.OPEN) return;
+  ws.send(JSON.stringify(S2C_MAP_LIST_SCHEMA.parse({ type: 'S2C_MAP_LIST', maps })));
+}
+
+function sendPlayerList(ws: WebSocket): void {
+  if (ws.readyState !== WebSocket.OPEN) return;
+  const players = Array.from(room.players.values()).map((player) => ({
+    name: player.name ?? '',
+    hp: Math.max(0, Math.round(player.hp)),
+    alive: player.status === 'ALIVE',
+  }));
+  ws.send(JSON.stringify(S2C_PLAYER_LIST_SCHEMA.parse({ type: 'S2C_PLAYER_LIST', players })));
+}
+
 // 辅助函数：发送Profile消息
 function sendProfile(ws: WebSocket, accountId: string, phase?: 'NAME' | 'HIDEOUT' | 'RAID' | 'RESULT'): void {
   const profile = room.profileManager.getProfileData(accountId);
@@ -309,22 +356,17 @@ const admin = {
   // 帮助信息
   help: () => {
     console.log(`
-=== 服务端管理员命令 ===
-调用方式：在服务端控制台输入 admin.命令名()
+=== Server admin console ===
+Call these from the server console, e.g. admin.showRoom()
 
-可用命令：
-  resetRoom()         - 重置整个房间（断开所有连接，重新生成世界）
-  showRoom()          - 显示房间状态
-  showPlayers()       - 显示所有在线玩家
-  showProfiles()      - 显示 Profile 信息
-  listMapTemplates()  - 列出可用地图模板
-  reloadMapTemplates() - 重新加载地图模板
-  setMapTemplate(id)  - 切换地图模板并重置房间（传 null 清除）
-  help()              - 显示此帮助信息
-
-例如：
-  admin.showRoom()
-  admin.resetRoom()
+  resetRoom()          - drop every connection and regenerate the world
+  showRoom()           - print room state
+  showPlayers()        - print every connected player
+  showProfiles()       - print profile storage info
+  listMapTemplates()   - list available map templates
+  reloadMapTemplates() - reload map templates from disk
+  setMapTemplate(id)   - switch map template and reset the room (null clears it)
+  help()               - print this help
     `);
   }
 };
@@ -463,40 +505,40 @@ ws.on('message', (data: Buffer) => {
           if (content.startsWith('/')) {
             // Command handling
             const [cmd, ...args] = content.substring(1).split(' ');
-            
+
             // Get profile to check admin status
             const profile = room.profileManager.getProfileData(accountId);
             const isAdmin = profile.isAdmin === true;
-            
+
             if (cmd === 'admin') {
               // Admin authentication command
               const password = args.join(' ');
               const passwordHash = crypto.createHash('sha256').update(password).digest('hex');
-              
+
               if (ADMIN_PASSWORD_HASH !== null && passwordHash === ADMIN_PASSWORD_HASH) {
                 profile.isAdmin = true;
                 room.profileManager.updateProfile(accountId, { isAdmin: true });
-                ws.send(JSON.stringify(S2C_EVENT_SCHEMA.parse({ type: 'S2C_EVENT', tick: room.tick, timestamp: Date.now(), message: '✅ 管理员权限已激活' })));
+                sendEvent(ws, 'cmd.admin.granted');
                 sendProfile(ws, accountId); // ✅ Sync updated profile (including isAdmin) to client
                 log('ADMIN_AUTH_SUCCESS', { accountId });
               } else {
-                ws.send(JSON.stringify(S2C_EVENT_SCHEMA.parse({ type: 'S2C_EVENT', tick: room.tick, timestamp: Date.now(), message: '❌ 密码错误' })));
+                sendEvent(ws, 'cmd.admin.denied');
                 log('ADMIN_AUTH_FAILED', { accountId });
               }
             } else if (cmd === 'map') {
               // Check admin permission
               if (!isAdmin) {
-                ws.send(JSON.stringify(S2C_EVENT_SCHEMA.parse({ type: 'S2C_EVENT', tick: room.tick, timestamp: Date.now(), message: '❌ 需要管理员权限' })));
+                sendEvent(ws, 'cmd.adminOnly');
                 return;
               }
-              
+
               const mapId = args.join(' ');
               if (!mapId) {
-                ws.send(JSON.stringify(S2C_EVENT_SCHEMA.parse({ type: 'S2C_EVENT', tick: room.tick, timestamp: Date.now(), message: '用法: /map <地图ID>' })));
+                sendEvent(ws, 'cmd.map.usage');
               } else {
                 const next = getMapTemplate(mapTemplateCatalog, mapId);
                 if (!next) {
-                  ws.send(JSON.stringify(S2C_EVENT_SCHEMA.parse({ type: 'S2C_EVENT', tick: room.tick, timestamp: Date.now(), message: `地图未找到: ${mapId}` })));
+                  sendEvent(ws, 'cmd.map.notFound', { map: mapId });
                 } else {
                   activeMapTemplateId = mapId;
                   activeMapTemplate = next;
@@ -505,87 +547,80 @@ ws.on('message', (data: Buffer) => {
                 }
               }
             } else if (cmd === 'maps') {
+              // Machine-readable list + a line the player actually sees
               const ids = listMapTemplateIds(mapTemplateCatalog);
-              // Send both human-readable message and machine-readable list
-              ws.send(JSON.stringify(S2C_EVENT_SCHEMA.parse({ type: 'S2C_EVENT', tick: room.tick, timestamp: Date.now(), message: `可用地图: ${ids.join(', ')}` })));
-              // Also send list for autocomplete (prepend special marker)
-              ws.send(JSON.stringify(S2C_EVENT_SCHEMA.parse({ type: 'S2C_EVENT', tick: room.tick, timestamp: Date.now(), message: `MAP_LIST|${ids.join('|')}` })));
+              sendMapList(ws, ids);
+              sendEvent(ws, 'cmd.maps.list', { maps: ids.join(', ') });
             } else if (cmd === 'maplist') {
               // Silent version for autocomplete sync
-              const ids = listMapTemplateIds(mapTemplateCatalog);
-              ws.send(JSON.stringify(S2C_EVENT_SCHEMA.parse({ type: 'S2C_EVENT', tick: room.tick, timestamp: Date.now(), message: `MAP_LIST|${ids.join('|')}` })));
+              sendMapList(ws, listMapTemplateIds(mapTemplateCatalog));
             } else if (cmd === 'reset') {
               // Check admin permission
               if (!isAdmin) {
-                ws.send(JSON.stringify(S2C_EVENT_SCHEMA.parse({ type: 'S2C_EVENT', tick: room.tick, timestamp: Date.now(), message: '❌ 需要管理员权限' })));
+                sendEvent(ws, 'cmd.adminOnly');
                 return;
               }
               admin.resetRoom();
             } else if (cmd === 'players') {
-              // List online players
-              const playerList: string[] = [];
-              room.players.forEach((player, pid) => {
-                const status = player.status === 'ALIVE' ? '✅' : '💀';
-                playerList.push(`${status} ${player.name} (HP: ${player.hp})`);
-              });
-              const message = playerList.length > 0 
-                ? `在线玩家 (${playerList.length}):\n${playerList.join('\n')}`
-                : '当前无在线玩家';
-              ws.send(JSON.stringify(S2C_EVENT_SCHEMA.parse({ type: 'S2C_EVENT', tick: room.tick, timestamp: Date.now(), message })));
+              // Roster goes over the structured message; the event just tells the
+              // client to print it.
+              sendPlayerList(ws);
+              sendEvent(ws, 'cmd.players.roster', { count: room.players.size });
+            } else if (cmd === 'playerlist') {
+              // Silent version for autocomplete sync
+              sendPlayerList(ws);
             } else if (cmd === 'give') {
               // Give money to player
               if (!isAdmin) {
-                ws.send(JSON.stringify(S2C_EVENT_SCHEMA.parse({ type: 'S2C_EVENT', tick: room.tick, timestamp: Date.now(), message: '❌ 需要管理员权限' })));
+                sendEvent(ws, 'cmd.adminOnly');
                 return;
               }
-              
+
               const targetName = args[0];
               const amount = parseInt(args[1], 10);
-              
+
               if (!targetName || isNaN(amount)) {
-                ws.send(JSON.stringify(S2C_EVENT_SCHEMA.parse({ type: 'S2C_EVENT', tick: room.tick, timestamp: Date.now(), message: '用法: /give <玩家名> <金额>' })));
+                sendEvent(ws, 'cmd.give.usage');
                 return;
               }
-              
+
               // Find player by name
-              let targetPlayerId: string | null = null;
               let targetAccountId: string | null = null;
-              
+
               room.players.forEach((player, pid) => {
                 if (player.name === targetName) {
                   const accId = playerIdToAccountId.get(pid);
                   if (accId) {
-                    targetPlayerId = pid;
                     targetAccountId = accId;
                   }
                 }
               });
-              
+
               if (!targetAccountId) {
-                ws.send(JSON.stringify(S2C_EVENT_SCHEMA.parse({ type: 'S2C_EVENT', tick: room.tick, timestamp: Date.now(), message: `❌ 未找到玩家: ${targetName}` })));
+                sendEvent(ws, 'cmd.playerNotFound', { name: targetName });
                 return;
               }
-              
+
               // Add money
               const targetProfile = room.profileManager.getProfileData(targetAccountId);
               targetProfile.money += amount;
               room.profileManager.updateProfile(targetAccountId, { money: targetProfile.money });
-              
-              ws.send(JSON.stringify(S2C_EVENT_SCHEMA.parse({ type: 'S2C_EVENT', tick: room.tick, timestamp: Date.now(), message: `✅ 已给 ${targetName} 增加 ${amount} 金钱` })));
+
+              sendEvent(ws, 'cmd.give.ok', { name: targetName, amount });
               log('ADMIN_GIVE_MONEY', { admin: accountId, target: targetName, amount });
             } else if (cmd === 'heal') {
               // Heal player
               if (!isAdmin) {
-                ws.send(JSON.stringify(S2C_EVENT_SCHEMA.parse({ type: 'S2C_EVENT', tick: room.tick, timestamp: Date.now(), message: '❌ 需要管理员权限' })));
+                sendEvent(ws, 'cmd.adminOnly');
                 return;
               }
-              
+
               const targetName = args[0];
               if (!targetName) {
-                ws.send(JSON.stringify(S2C_EVENT_SCHEMA.parse({ type: 'S2C_EVENT', tick: room.tick, timestamp: Date.now(), message: '用法: /heal <玩家名>' })));
+                sendEvent(ws, 'cmd.heal.usage');
                 return;
               }
-              
+
               let healed = false;
               room.players.forEach((player) => {
                 if (player.name === targetName) {
@@ -593,56 +628,56 @@ ws.on('message', (data: Buffer) => {
                   healed = true;
                 }
               });
-              
+
               if (healed) {
-                ws.send(JSON.stringify(S2C_EVENT_SCHEMA.parse({ type: 'S2C_EVENT', tick: room.tick, timestamp: Date.now(), message: `✅ 已治疗 ${targetName}` })));
+                sendEvent(ws, 'cmd.heal.ok', { name: targetName });
                 log('ADMIN_HEAL', { admin: accountId, target: targetName });
               } else {
-                ws.send(JSON.stringify(S2C_EVENT_SCHEMA.parse({ type: 'S2C_EVENT', tick: room.tick, timestamp: Date.now(), message: `❌ 未找到玩家: ${targetName}` })));
+                sendEvent(ws, 'cmd.playerNotFound', { name: targetName });
               }
             } else if (cmd === 'kill') {
               // Kill player
               if (!isAdmin) {
-                ws.send(JSON.stringify(S2C_EVENT_SCHEMA.parse({ type: 'S2C_EVENT', tick: room.tick, timestamp: Date.now(), message: '❌ 需要管理员权限' })));
+                sendEvent(ws, 'cmd.adminOnly');
                 return;
               }
-              
+
               const targetName = args[0];
               if (!targetName) {
-                ws.send(JSON.stringify(S2C_EVENT_SCHEMA.parse({ type: 'S2C_EVENT', tick: room.tick, timestamp: Date.now(), message: '用法: /kill <玩家名>' })));
+                sendEvent(ws, 'cmd.kill.usage');
                 return;
               }
-              
+
               let killed = false;
               room.players.forEach((player, pid) => {
                 if (player.name === targetName && player.status === 'ALIVE') {
                   player.hp = 0;
-                  player.killedBy = 'Admin';
-                  player.killedByWeaponName = 'Console';
+                  player.killedBy = { kind: 'admin' };
+                  player.killedByWeapon = { kind: 'special', specialId: 'console' };
                   room.handlePlayerDeath(pid);
                   killed = true;
                 }
               });
-              
+
               if (killed) {
-                ws.send(JSON.stringify(S2C_EVENT_SCHEMA.parse({ type: 'S2C_EVENT', tick: room.tick, timestamp: Date.now(), message: `✅ 已击杀 ${targetName}` })));
+                sendEvent(ws, 'cmd.kill.ok', { name: targetName });
                 log('ADMIN_KILL', { admin: accountId, target: targetName });
               } else {
-                ws.send(JSON.stringify(S2C_EVENT_SCHEMA.parse({ type: 'S2C_EVENT', tick: room.tick, timestamp: Date.now(), message: `❌ 未找到存活玩家: ${targetName}` })));
+                sendEvent(ws, 'cmd.alivePlayerNotFound', { name: targetName });
               }
             } else if (cmd === 'kick') {
               // Kick player
               if (!isAdmin) {
-                ws.send(JSON.stringify(S2C_EVENT_SCHEMA.parse({ type: 'S2C_EVENT', tick: room.tick, timestamp: Date.now(), message: '❌ 需要管理员权限' })));
+                sendEvent(ws, 'cmd.adminOnly');
                 return;
               }
-              
+
               const targetName = args[0];
               if (!targetName) {
-                ws.send(JSON.stringify(S2C_EVENT_SCHEMA.parse({ type: 'S2C_EVENT', tick: room.tick, timestamp: Date.now(), message: '用法: /kick <玩家名>' })));
+                sendEvent(ws, 'cmd.kick.usage');
                 return;
               }
-              
+
               let kicked = false;
               for (const [targetWs, targetPid] of connections.entries()) {
                 const player = room.players.get(targetPid);
@@ -652,37 +687,24 @@ ws.on('message', (data: Buffer) => {
                   break;
                 }
               }
-              
+
               if (kicked) {
-                ws.send(JSON.stringify(S2C_EVENT_SCHEMA.parse({ type: 'S2C_EVENT', tick: room.tick, timestamp: Date.now(), message: `✅ 已踢出 ${targetName}` })));
+                sendEvent(ws, 'cmd.kick.ok', { name: targetName });
                 log('ADMIN_KICK', { admin: accountId, target: targetName });
               } else {
-                ws.send(JSON.stringify(S2C_EVENT_SCHEMA.parse({ type: 'S2C_EVENT', tick: room.tick, timestamp: Date.now(), message: `❌ 未找到玩家: ${targetName}` })));
+                sendEvent(ws, 'cmd.playerNotFound', { name: targetName });
               }
-            } else if (cmd === 'playerlist') {
-              // Silent version for autocomplete sync
-              const playerNames: string[] = [];
-              room.players.forEach(player => {
-                if (player.status === 'ALIVE' && player.name) {
-                  playerNames.push(player.name);
-                }
-              });
-              ws.send(JSON.stringify(S2C_EVENT_SCHEMA.parse({ type: 'S2C_EVENT', tick: room.tick, timestamp: Date.now(), message: `PLAYER_LIST|${playerNames.join('|')}` })));
             } else if (cmd === 'help') {
-              const helpText = isAdmin 
-                ? '命令: /admin <密码>, /map <id>, /maps, /reset, /players, /give <玩家> <金额>, /heal <玩家>, /kill <玩家>, /kick <玩家>, /ping'
-                : '命令: /admin <密码>, /maps, /players, /ping, /help';
-              ws.send(JSON.stringify(S2C_EVENT_SCHEMA.parse({ type: 'S2C_EVENT', tick: room.tick, timestamp: Date.now(), message: helpText })));
+              sendEvent(ws, isAdmin ? 'cmd.help.admin' : 'cmd.help.player');
             } else if (cmd === 'ping') {
-              ws.send(JSON.stringify(S2C_EVENT_SCHEMA.parse({ type: 'S2C_EVENT', tick: room.tick, timestamp: Date.now(), message: 'Pong!' })));
+              sendEvent(ws, 'cmd.ping.pong');
             } else {
-              ws.send(JSON.stringify(S2C_EVENT_SCHEMA.parse({ type: 'S2C_EVENT', tick: room.tick, timestamp: Date.now(), message: `未知命令: ${cmd}` })));
+              sendEvent(ws, 'cmd.unknown', { command: cmd });
             }
           } else {
-          // 普通聊天（简单广播给所有人，或者仅回显）
-          // 暂时作为 System Event 回显给自己
-          ws.send(JSON.stringify(S2C_EVENT_SCHEMA.parse({ type: 'S2C_EVENT', tick: room.tick, timestamp: Date.now(), message: `[你]: ${content}` })));
-        }
+            // 普通聊天（暂时只回显给自己）
+            sendEvent(ws, 'chat.self', { text: content });
+          }
 
       } else if (parsed.type === 'C2S_PING') {
         // Day5: 处理 Ping 消息，立即回复 Pong
@@ -717,15 +739,7 @@ ws.on('message', (data: Buffer) => {
       } else if (parsed.type === 'C2S_INTERACT') {
         // 新增: 通用交互消息（服务端选最近可交互目标）
         if (!playerId) {
-          ws.send(
-            JSON.stringify(
-              S2C_ERROR_SCHEMA.parse({
-                type: 'S2C_ERROR',
-                code: 'NOT_AUTHENTICATED',
-                message: 'Must send C2S_HELLO first',
-              })
-            )
-          );
+          sendError(ws, 'session.notAuthenticated');
           return;
         }
         // 入队列，不立即处理（使用 type: 'auto' 让 tick 中自动选最近目标）
@@ -737,15 +751,7 @@ ws.on('message', (data: Buffer) => {
       } else if (parsed.type === 'C2S_USE_ITEM') {
         // 新增: 使用物品消息（快捷栏1-5键）
         if (!playerId) {
-          ws.send(
-            JSON.stringify(
-              S2C_ERROR_SCHEMA.parse({
-                type: 'S2C_ERROR',
-                code: 'NOT_AUTHENTICATED',
-                message: 'Must send C2S_HELLO first',
-              })
-            )
-          );
+          sendError(ws, 'session.notAuthenticated');
           return;
         }
         // 入队列，不立即处理
@@ -757,15 +763,7 @@ ws.on('message', (data: Buffer) => {
       } else if (parsed.type === 'C2S_THROW') {
         // 新增: 投掷物品消息
         if (!playerId) {
-          ws.send(
-            JSON.stringify(
-              S2C_ERROR_SCHEMA.parse({
-                type: 'S2C_ERROR',
-                code: 'NOT_AUTHENTICATED',
-                message: 'Must send C2S_HELLO first',
-              })
-            )
-          );
+          sendError(ws, 'session.notAuthenticated');
           return;
         }
         // 入队列，不立即处理
@@ -776,15 +774,7 @@ ws.on('message', (data: Buffer) => {
         }
       } else if (parsed.type === 'C2S_LOCAL_BULLET_HIT') {
         if (!playerId) {
-          ws.send(
-            JSON.stringify(
-              S2C_ERROR_SCHEMA.parse({
-                type: 'S2C_ERROR',
-                code: 'NOT_AUTHENTICATED',
-                message: 'Must send C2S_HELLO first',
-              })
-            )
-          );
+          sendError(ws, 'session.notAuthenticated');
           return;
         }
         const bullet =
@@ -823,15 +813,7 @@ ws.on('message', (data: Buffer) => {
       } else if (parsed.type === 'C2S_PICKUP_WORLD_ITEM') {
         // 保留兼容（deprecated，建议用 C2S_INTERACT）
         if (!playerId) {
-          ws.send(
-            JSON.stringify(
-              S2C_ERROR_SCHEMA.parse({
-                type: 'S2C_ERROR',
-                code: 'NOT_AUTHENTICATED',
-                message: 'Must send C2S_HELLO first',
-              })
-            )
-          );
+          sendError(ws, 'session.notAuthenticated');
           return;
         }
         // 入队列，不立即处理
@@ -843,15 +825,7 @@ ws.on('message', (data: Buffer) => {
       } else if (parsed.type === 'C2S_PICKUP_LOOT_BAG') {
         // 保留兼容（deprecated，建议用 C2S_INTERACT）
         if (!playerId) {
-          ws.send(
-            JSON.stringify(
-              S2C_ERROR_SCHEMA.parse({
-                type: 'S2C_ERROR',
-                code: 'NOT_AUTHENTICATED',
-                message: 'Must send C2S_HELLO first',
-              })
-            )
-          );
+          sendError(ws, 'session.notAuthenticated');
           return;
         }
         // 入队列，不立即处理
@@ -863,29 +837,13 @@ ws.on('message', (data: Buffer) => {
       } else if (parsed.type === 'C2S_SET_NAME') {
         // 新增: 处理设置昵称
         if (!playerId) {
-          ws.send(
-            JSON.stringify(
-              S2C_ERROR_SCHEMA.parse({
-                type: 'S2C_ERROR',
-                code: 'NOT_AUTHENTICATED',
-                message: 'Must send C2S_HELLO first',
-              })
-            )
-          );
+          sendError(ws, 'session.notAuthenticated');
           return;
         }
         // 使用 accountId 获取 Profile
         const accountId = wsToAccountId.get(ws);
         if (!accountId) {
-          ws.send(
-            JSON.stringify(
-              S2C_ERROR_SCHEMA.parse({
-                type: 'S2C_ERROR',
-                code: 'NO_ACCOUNT',
-                message: 'Account ID not found',
-              })
-            )
-          );
+          sendError(ws, 'session.noAccount');
           return;
         }
         
@@ -917,43 +875,19 @@ ws.on('message', (data: Buffer) => {
       } else if (parsed.type === 'C2S_SELL_FROM_STASH') {
         // 新增: 处理从仓库卖出物品
         if (!playerId) {
-          ws.send(
-            JSON.stringify(
-              S2C_ERROR_SCHEMA.parse({
-                type: 'S2C_ERROR',
-                code: 'NOT_AUTHENTICATED',
-                message: 'Must send C2S_HELLO first',
-              })
-            )
-          );
+          sendError(ws, 'session.notAuthenticated');
           return;
         }
         // 使用 accountId 获取 Profile
         const accountId = wsToAccountId.get(ws);
         if (!accountId) {
-          ws.send(
-            JSON.stringify(
-              S2C_ERROR_SCHEMA.parse({
-                type: 'S2C_ERROR',
-                code: 'NO_ACCOUNT',
-                message: 'Account ID not found',
-              })
-            )
-          );
+          sendError(ws, 'session.noAccount');
           return;
         }
         
         const result = room.profileManager.sellFromStash(accountId, parsed.iid, parsed.qty);
         if (!result.success) {
-          ws.send(
-            JSON.stringify(
-              S2C_ERROR_SCHEMA.parse({
-                type: 'S2C_ERROR',
-                code: 'SELL_FAILED',
-                message: 'Failed to sell from stash',
-              })
-            )
-          );
+          sendError(ws, 'market.sellFailed');
         } else {
           // 发送成功消息：立即回发 S2C_PROFILE 刷新客户端 HUD
           log('SELL_FROM_STASH', {
@@ -972,28 +906,12 @@ ws.on('message', (data: Buffer) => {
       } else if (parsed.type === 'C2S_MOVE_STASH_TO_PREP') {
         // 新增: 处理从仓库移动到整备区
         if (!playerId) {
-          ws.send(
-            JSON.stringify(
-              S2C_ERROR_SCHEMA.parse({
-                type: 'S2C_ERROR',
-                code: 'NOT_AUTHENTICATED',
-                message: 'Must send C2S_HELLO first',
-              })
-            )
-          );
+          sendError(ws, 'session.notAuthenticated');
           return;
         }
         const accountId = wsToAccountId.get(ws);
         if (!accountId) {
-          ws.send(
-            JSON.stringify(
-              S2C_ERROR_SCHEMA.parse({
-                type: 'S2C_ERROR',
-                code: 'NO_ACCOUNT',
-                message: 'Account ID not found',
-              })
-            )
-          );
+          sendError(ws, 'session.noAccount');
           return;
         }
         
@@ -1015,18 +933,10 @@ ws.on('message', (data: Buffer) => {
             room: room.id,
             player: playerId,
             accountId,
-            message: result.message,
+            errorCode: result.errorCode,
             tick: room.tick,
           });
-          ws.send(
-            JSON.stringify(
-              S2C_ERROR_SCHEMA.parse({
-                type: 'S2C_ERROR',
-                code: 'MOVE_FAILED',
-                message: result.message || 'Failed to move from stash to prep',
-              })
-            )
-          );
+          sendError(ws, result.errorCode);
         } else {
           const updatedProfile = room.profileManager.getProfileData(accountId);
           log('MOVE_STASH_TO_PREP_SUCCESS', {
@@ -1042,42 +952,18 @@ ws.on('message', (data: Buffer) => {
       } else if (parsed.type === 'C2S_MOVE_PREP_TO_STASH') {
         // 新增: 处理从整备区移动回仓库
         if (!playerId) {
-          ws.send(
-            JSON.stringify(
-              S2C_ERROR_SCHEMA.parse({
-                type: 'S2C_ERROR',
-                code: 'NOT_AUTHENTICATED',
-                message: 'Must send C2S_HELLO first',
-              })
-            )
-          );
+          sendError(ws, 'session.notAuthenticated');
           return;
         }
         const accountId = wsToAccountId.get(ws);
         if (!accountId) {
-          ws.send(
-            JSON.stringify(
-              S2C_ERROR_SCHEMA.parse({
-                type: 'S2C_ERROR',
-                code: 'NO_ACCOUNT',
-                message: 'Account ID not found',
-              })
-            )
-          );
+          sendError(ws, 'session.noAccount');
           return;
         }
         
         const result = room.profileManager.movePrepToStash(accountId, parsed.iid, parsed.qty);
         if (!result.success) {
-          ws.send(
-            JSON.stringify(
-              S2C_ERROR_SCHEMA.parse({
-                type: 'S2C_ERROR',
-                code: 'MOVE_FAILED',
-                message: result.message || 'Failed to move from prep to stash',
-              })
-            )
-          );
+          sendError(ws, result.errorCode);
         } else {
           const updatedProfile = room.profileManager.getProfileData(accountId);
           const phase = updatedProfile.displayName === null ? 'NAME' : 'HIDEOUT';
@@ -1087,42 +973,18 @@ ws.on('message', (data: Buffer) => {
       } else if (parsed.type === 'C2S_BUY') {
         // 新增: 处理商店购买物品
         if (!playerId) {
-          ws.send(
-            JSON.stringify(
-              S2C_ERROR_SCHEMA.parse({
-                type: 'S2C_ERROR',
-                code: 'NOT_AUTHENTICATED',
-                message: 'Must send C2S_HELLO first',
-              })
-            )
-          );
+          sendError(ws, 'session.notAuthenticated');
           return;
         }
         const accountId = wsToAccountId.get(ws);
         if (!accountId) {
-          ws.send(
-            JSON.stringify(
-              S2C_ERROR_SCHEMA.parse({
-                type: 'S2C_ERROR',
-                code: 'NO_ACCOUNT',
-                message: 'Account ID not found',
-              })
-            )
-          );
+          sendError(ws, 'session.noAccount');
           return;
         }
         
         const result = room.profileManager.buyItem(accountId, parsed.typeId, parsed.qty, parsed.autoAction);
         if (!result.success) {
-          ws.send(
-            JSON.stringify(
-              S2C_ERROR_SCHEMA.parse({
-                type: 'S2C_ERROR',
-                code: 'BUY_FAILED',
-                message: result.message || 'Failed to buy item',
-              })
-            )
-          );
+          sendError(ws, result.errorCode);
         } else {
           // ✅ 修复: 如果购买时自动装备了物品，需要同步到玩家实体（类似 C2S_EQUIP 的处理）
           if (parsed.autoAction === 'equip' && playerId) {
@@ -1142,42 +1004,18 @@ ws.on('message', (data: Buffer) => {
       } else if (parsed.type === 'C2S_EQUIP') {
         // 新增: 处理装备/卸下装备
         if (!playerId) {
-          ws.send(
-            JSON.stringify(
-              S2C_ERROR_SCHEMA.parse({
-                type: 'S2C_ERROR',
-                code: 'NOT_AUTHENTICATED',
-                message: 'Must send C2S_HELLO first',
-              })
-            )
-          );
+          sendError(ws, 'session.notAuthenticated');
           return;
         }
         const accountId = wsToAccountId.get(ws);
         if (!accountId) {
-          ws.send(
-            JSON.stringify(
-              S2C_ERROR_SCHEMA.parse({
-                type: 'S2C_ERROR',
-                code: 'NO_ACCOUNT',
-                message: 'Account ID not found',
-              })
-            )
-          );
+          sendError(ws, 'session.noAccount');
           return;
         }
         
         const result = room.profileManager.equipItem(accountId, parsed.slot, parsed.iid);
         if (!result.success) {
-          ws.send(
-            JSON.stringify(
-              S2C_ERROR_SCHEMA.parse({
-                type: 'S2C_ERROR',
-                code: 'EQUIP_FAILED',
-                message: result.message || 'Failed to equip item',
-              })
-            )
-          );
+          sendError(ws, result.errorCode);
         } else {
           // If the player is live, sync the equipped gear onto the entity.
           if (playerId) {
@@ -1192,82 +1030,34 @@ ws.on('message', (data: Buffer) => {
       } else if (parsed.type === 'C2S_RAID_EQUIP') {
         // 新增: 处理局内装备切换
         if (!playerId) {
-          ws.send(
-            JSON.stringify(
-              S2C_ERROR_SCHEMA.parse({
-                type: 'S2C_ERROR',
-                code: 'NOT_AUTHENTICATED',
-                message: 'Must send C2S_HELLO first',
-              })
-            )
-          );
+          sendError(ws, 'session.notAuthenticated');
           return;
         }
 
         const result = room.handleRaidEquip(playerId, parsed.slot, parsed.iid, parsed.typeId ?? null);
         if (!result.success) {
-          ws.send(
-            JSON.stringify(
-              S2C_ERROR_SCHEMA.parse({
-                type: 'S2C_ERROR',
-                code: 'RAID_EQUIP_FAILED',
-                message: result.message || 'Failed to equip raid item',
-              })
-            )
-          );
+          sendError(ws, result.errorCode);
         }
       } else if (parsed.type === 'C2S_DROP_ITEM') {
         // 新增: 处理局内丢弃物品
         if (!playerId) {
-          ws.send(
-            JSON.stringify(
-              S2C_ERROR_SCHEMA.parse({
-                type: 'S2C_ERROR',
-                code: 'NOT_AUTHENTICATED',
-                message: 'Must send C2S_HELLO first',
-              })
-            )
-          );
+          sendError(ws, 'session.notAuthenticated');
           return;
         }
 
         const result = room.handleDropItem(playerId, parsed.iid, parsed.qty);
         if (!result.success) {
-          ws.send(
-            JSON.stringify(
-              S2C_ERROR_SCHEMA.parse({
-                type: 'S2C_ERROR',
-                code: 'DROP_FAILED',
-                message: result.message || 'Failed to drop item',
-              })
-            )
-          );
+          sendError(ws, result.errorCode);
         }
       } else if (parsed.type === 'C2S_ENTER_RAID') {
         // 新增: 处理进入战局
         if (!playerId) {
-          ws.send(
-            JSON.stringify(
-              S2C_ERROR_SCHEMA.parse({
-                type: 'S2C_ERROR',
-                code: 'NOT_AUTHENTICATED',
-                message: 'Must send C2S_HELLO first',
-              })
-            )
-          );
+          sendError(ws, 'session.notAuthenticated');
           return;
         }
         const accountId = wsToAccountId.get(ws);
         if (!accountId) {
-          ws.send(
-            JSON.stringify(
-              S2C_ERROR_SCHEMA.parse({
-                type: 'S2C_ERROR',
-                code: 'NO_ACCOUNT',
-                message: 'Account ID not found',
-              })
-            )
-          );
+          sendError(ws, 'session.noAccount');
           return;
         }
         
@@ -1317,7 +1107,7 @@ ws.on('message', (data: Buffer) => {
           player.clearInventory();
           // 清除击杀信息
           player.killedBy = undefined;
-          player.killedByWeaponName = undefined;
+          player.killedByWeapon = undefined;
           
           // 重新初始化武器运行时状态（在stash和prep中查找）
           if (profile && profile.equipment.weaponIid) {
@@ -1483,15 +1273,7 @@ ws.on('message', (data: Buffer) => {
       } else if (parsed.type === 'C2S_ADMIN') {
         // 管理员命令（仅开发环境）
         if (process.env.NODE_ENV === 'production') {
-          ws.send(
-            JSON.stringify(
-              S2C_ERROR_SCHEMA.parse({
-                type: 'S2C_ERROR',
-                code: 'FORBIDDEN',
-                message: 'Admin commands disabled in production',
-              })
-            )
-          );
+          sendError(ws, 'session.adminDisabled');
           return;
         }
         
@@ -1504,30 +1286,16 @@ ws.on('message', (data: Buffer) => {
         
         if (parsed.command === 'show_status') {
           // 发送房间状态给客户端
-          ws.send(
-            JSON.stringify(
-              S2C_EVENT_SCHEMA.parse({
-                type: 'S2C_EVENT',
-                tick: room.tick,
-                timestamp: Date.now(),
-                message: `Room: tick=${room.tick}, players=${room.players.size}, seed=${room.seed}`,
-              })
-            )
-          );
+          sendEvent(ws, 'cmd.status', {
+            tick: room.tick,
+            players: room.players.size,
+            seed: room.seed,
+          });
         } else if (parsed.command === 'reset_world') {
           // 通知所有客户端即将重置
           for (const [clientWs] of connections.entries()) {
             try {
-              clientWs.send(
-                JSON.stringify(
-                  S2C_EVENT_SCHEMA.parse({
-                    type: 'S2C_EVENT',
-                    tick: room.tick,
-                    timestamp: Date.now(),
-                    message: 'Server is resetting world...',
-                  })
-                )
-              );
+              sendEvent(clientWs, 'event.server.resetting');
             } catch (err) {
               // 忽略发送失败
             }
@@ -1541,29 +1309,13 @@ ws.on('message', (data: Buffer) => {
       } else if (parsed.type === 'C2S_EXIT_RESULT') {
         // ✅ 新增: 处理退出结果页面（从 RESULT 阶段返回 HIDEOUT）
         if (!playerId) {
-          ws.send(
-            JSON.stringify(
-              S2C_ERROR_SCHEMA.parse({
-                type: 'S2C_ERROR',
-                code: 'NOT_AUTHENTICATED',
-                message: 'Must send C2S_HELLO first',
-              })
-            )
-          );
+          sendError(ws, 'session.notAuthenticated');
           return;
         }
         
         const accountId = wsToAccountId.get(ws);
         if (!accountId) {
-          ws.send(
-            JSON.stringify(
-              S2C_ERROR_SCHEMA.parse({
-                type: 'S2C_ERROR',
-                code: 'NO_ACCOUNT',
-                message: 'Account ID not found',
-              })
-            )
-          );
+          sendError(ws, 'session.noAccount');
           return;
         }
         
@@ -1582,15 +1334,7 @@ ws.on('message', (data: Buffer) => {
         });
       } else if (parsed.type === 'C2S_INPUT') {
         if (!playerId) {
-          ws.send(
-            JSON.stringify(
-              S2C_ERROR_SCHEMA.parse({
-                type: 'S2C_ERROR',
-                code: 'NOT_AUTHENTICATED',
-                message: 'Must send C2S_HELLO first',
-              })
-            )
-          );
+          sendError(ws, 'session.notAuthenticated');
           return;
         }
 
@@ -1626,15 +1370,7 @@ ws.on('message', (data: Buffer) => {
         error: error instanceof Error ? error.message : String(error),
       });
 
-      ws.send(
-        JSON.stringify(
-          S2C_ERROR_SCHEMA.parse({
-            type: 'S2C_ERROR',
-            code: 'PARSE_ERROR',
-            message: error instanceof Error ? error.message : String(error),
-          })
-        )
-      );
+      sendError(ws, 'session.badRequest');
     }
   });
 
@@ -1749,16 +1485,8 @@ setInterval(() => {
       // 新增: 服务端自动选最近可交互目标
       const result = room.handleAutoInteract(playerId);
       if (!result.success) {
-        if (lastReq.ws.readyState === WebSocket.OPEN && result.message) {
-          lastReq.ws.send(
-            JSON.stringify(
-              S2C_ERROR_SCHEMA.parse({
-                type: 'S2C_ERROR',
-                code: 'INTERACT_FAILED',
-                message: result.message,
-              })
-            )
-          );
+        if (lastReq.ws.readyState === WebSocket.OPEN) {
+          sendError(lastReq.ws, result.errorCode);
         }
       } else {
         log('INTERACT_OK', { player: playerId, target: result.target, tick: room.tick });
@@ -1771,20 +1499,12 @@ setInterval(() => {
           player: playerId,
           type: 'world',
           wid: lastReq.wid,
-          reason: result.message,
+          reason: result.errorCode,
           playerPos: player ? `(${player.x.toFixed(1)},${player.y.toFixed(1)})` : 'N/A',
           tick: room.tick,
         });
         if (lastReq.ws.readyState === WebSocket.OPEN) {
-          lastReq.ws.send(
-            JSON.stringify(
-              S2C_ERROR_SCHEMA.parse({
-                type: 'S2C_ERROR',
-                code: 'PICKUP_FAILED',
-                message: result.message || 'Failed to pickup world item',
-              })
-            )
-          );
+          sendError(lastReq.ws, result.errorCode);
         }
       } else {
         log('PICKUP_OK', { player: playerId, type: 'world', wid: lastReq.wid, tick: room.tick });
@@ -1797,20 +1517,12 @@ setInterval(() => {
           player: playerId,
           type: 'bag',
           bid: lastReq.bid,
-          reason: result.message,
+          reason: result.errorCode,
           playerPos: player ? `(${player.x.toFixed(1)},${player.y.toFixed(1)})` : 'N/A',
           tick: room.tick,
         });
         if (lastReq.ws.readyState === WebSocket.OPEN) {
-          lastReq.ws.send(
-            JSON.stringify(
-              S2C_ERROR_SCHEMA.parse({
-                type: 'S2C_ERROR',
-                code: 'PICKUP_FAILED',
-                message: result.message || 'Failed to pickup loot bag',
-              })
-            )
-          );
+          sendError(lastReq.ws, result.errorCode);
         }
       } else {
         log('PICKUP_OK', { player: playerId, type: 'bag', bid: lastReq.bid, tick: room.tick });
@@ -1830,16 +1542,8 @@ setInterval(() => {
     
     const result = room.handleUseItem(playerId, lastReq.slot);
     if (!result.success) {
-      if (lastReq.ws.readyState === WebSocket.OPEN && result.message) {
-        lastReq.ws.send(
-          JSON.stringify(
-            S2C_ERROR_SCHEMA.parse({
-              type: 'S2C_ERROR',
-              code: 'USE_ITEM_FAILED',
-              message: result.message,
-            })
-          )
-        );
+      if (lastReq.ws.readyState === WebSocket.OPEN) {
+        sendError(lastReq.ws, result.errorCode);
       }
     } else {
       log('USE_ITEM_OK', { player: playerId, slot: lastReq.slot, itemType: result.itemType, tick: room.tick });
@@ -1855,20 +1559,12 @@ setInterval(() => {
     
     // 只处理最后一个请求（避免重复投掷）
     const lastReq = queue[queue.length - 1];
-    console.log(`[server/main] 准备调用 handleThrow: playerId=${playerId}, itemType="${lastReq.itemType}", targetX=${lastReq.targetX.toFixed(2)}, targetY=${lastReq.targetY.toFixed(2)}`);
+    console.log(`[server/main] handleThrow: playerId=${playerId}, itemType="${lastReq.itemType}", targetX=${lastReq.targetX.toFixed(2)}, targetY=${lastReq.targetY.toFixed(2)}`);
     
     const result = room.handleThrow(playerId, lastReq.targetX, lastReq.targetY, lastReq.itemType);
     if (!result.success) {
-      if (lastReq.ws.readyState === WebSocket.OPEN && result.message) {
-        lastReq.ws.send(
-          JSON.stringify(
-            S2C_ERROR_SCHEMA.parse({
-              type: 'S2C_ERROR',
-              code: 'THROW_FAILED',
-              message: result.message,
-            })
-          )
-        );
+      if (lastReq.ws.readyState === WebSocket.OPEN) {
+        sendError(lastReq.ws, result.errorCode);
       }
     } else {
       log('THROW_OK', { player: playerId, targetX: lastReq.targetX, targetY: lastReq.targetY, itemType: lastReq.itemType, tick: room.tick });
@@ -1956,7 +1652,7 @@ setInterval(() => {
             moneyGained: result.moneyGained ?? 0,
             moneyLost: result.moneyLost ??0,
             killedBy: result.killedBy,
-            killedByWeaponName: result.killedByWeaponName,
+            killedByWeapon: result.killedByWeapon,
           })
         )
       );
@@ -2160,6 +1856,24 @@ setInterval(() => {
     }
   }
 
+  // 新增: 单播局内自动装备回执（只有当事玩家需要知道）
+  const autoEquips = room.drainAutoEquips();
+  for (const notice of autoEquips) {
+    const targetWs = Array.from(connections.entries()).find(([, pid]) => pid === notice.playerId)?.[0];
+    if (targetWs && targetWs.readyState === WebSocket.OPEN) {
+      targetWs.send(
+        JSON.stringify(
+          S2C_AUTO_EQUIP_SCHEMA.parse({
+            type: 'S2C_AUTO_EQUIP',
+            playerId: notice.playerId,
+            slot: notice.slot,
+            itemTypeId: notice.itemTypeId,
+          })
+        )
+      );
+    }
+  }
+
   // 新增: 广播击杀播报
   const killFeeds = room.drainKillFeeds();
   if (killFeeds.length > 0) {
@@ -2277,7 +1991,8 @@ setInterval(() => {
       type: 'S2C_EVENT',
       tick: event.tick,
       timestamp: event.timestamp,
-      message: event.message,
+      key: event.key,
+      params: event.params,
     });
 
     for (const ws of connections.keys()) {

@@ -1,3 +1,5 @@
+import { t } from '@ziyang-protocol/shared';
+
 /**
  * 投掷瞄准系统
  * 按数字键进入瞄准模式，显示投掷范围和目标位置
@@ -207,7 +209,7 @@ export class ThrowingAim {
     this.ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
     this.ctx.font = '16px Rajdhani, sans-serif';
     this.ctx.textAlign = 'center';
-    this.ctx.fillText('左键投掷 | 右键取消', this.canvas.width / 2, 50);
+    this.ctx.fillText(t('combat.throw.hint'), this.canvas.width / 2, 50);
     
     this.ctx.restore();
   }

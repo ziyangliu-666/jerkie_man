@@ -1,5 +1,5 @@
-import type { S2C_SNAPSHOT, PLAYER_STATE, BULLET_STATE, ITEM_STATE, WorldItem, LootBag, OBSTACLE_STATE, DECOY_STATE, TURRET_STATE } from '@jerkie-man/shared';
-import { lerp, CLIENT_INTERPOLATION_DELAY_MS } from '@jerkie-man/shared';
+import type { S2C_SNAPSHOT, PLAYER_STATE, BULLET_STATE, ITEM_STATE, WorldItem, LootBag, OBSTACLE_STATE, DECOY_STATE, TURRET_STATE } from '@ziyang-protocol/shared';
+import { lerp, CLIENT_INTERPOLATION_DELAY_MS } from '@ziyang-protocol/shared';
 
 interface SnapshotEntry {
   snapshot: S2C_SNAPSHOT;

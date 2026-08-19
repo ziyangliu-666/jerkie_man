@@ -1,5 +1,5 @@
-import type { OBSTACLE_STATE } from '@jerkie-man/shared';
-import { doesObstacleBlockPlayer } from '@jerkie-man/shared';
+import type { OBSTACLE_STATE } from '@ziyang-protocol/shared';
+import { doesObstacleBlockPlayer } from '@ziyang-protocol/shared';
 
 export type PathNode = {
   x: number;

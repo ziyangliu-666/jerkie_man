@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { parseMapTemplateText, type MapTemplate } from '@jerkie-man/shared';
+import { parseMapTemplateText, type MapTemplate } from '@ziyang-protocol/shared';
 
 export type MapTemplateCatalog = {
   dir: string;
