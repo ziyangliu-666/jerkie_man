@@ -7,7 +7,6 @@ import { Room } from './room.js';
 import { getMapTemplate, listMapTemplateIds, loadMapTemplates, resolveMapTemplateDir } from './mapTemplates.js';
 import { log } from './logger.js';
 import crypto from 'crypto';
-import { deflateSync } from 'zlib';
 import {
   C2S_MESSAGE_SCHEMA,
   S2C_SNAPSHOT_SCHEMA,
@@ -149,6 +148,9 @@ wss.on('error', (error: Error) => {
 
 // 存储每个连接的玩家ID
 const connections = new Map<WebSocket, string>();
+// 反向映射 playerId -> WebSocket。单播事件（战斗反馈、战局结果、自动装备）
+// 每 tick 都要按 playerId 找连接，没有它就得对 connections 做全表扫描。
+const playerIdToWs = new Map<string, WebSocket>();
 // 新增: 存储每个连接的账号ID（用于 Profile 持久化）
 const wsToAccountId = new Map<WebSocket, string>();
 // 新增: playerId -> accountId 映射（让 room/profile 能查）
@@ -272,6 +274,7 @@ const admin = {
       }
     }
     connections.clear();
+    playerIdToWs.clear();
     wsToAccountId.clear();
     playerIdToAccountId.clear();
     inputQueues.clear();
@@ -427,6 +430,7 @@ ws.on('message', (data: Buffer) => {
                 if (oldPid === existingPlayerId) {
                   oldWs.close();
                   connections.delete(oldWs);
+                  playerIdToWs.delete(oldPid);
                   wsToAccountId.delete(oldWs);
                   playerIdToAccountId.delete(oldPid);
                   break;
@@ -437,6 +441,7 @@ ws.on('message', (data: Buffer) => {
             // 总是创建新的玩家实体
             playerId = `p${Date.now()}_${Math.random().toString(36).substring(2, 11)}`;
             connections.set(ws, playerId);
+            playerIdToWs.set(playerId, ws);
             wsToAccountId.set(ws, accountId);
             playerIdToAccountId.set(playerId, accountId);
             accountIdToPlayerId.set(accountId, playerId);
@@ -1389,6 +1394,7 @@ ws.on('message', (data: Buffer) => {
 
       // 清理所有映射
       connections.delete(ws);
+      playerIdToWs.delete(playerId);
       wsToAccountId.delete(ws);
       playerIdToAccountId.delete(playerId);
 
@@ -1588,7 +1594,7 @@ setInterval(() => {
       const justExtracted = player.inventory.items.length === 0 && lastInvCount !== 0;
       
       if (justExtracted && lastSent < room.tick) {
-        const ws = Array.from(connections.entries()).find(([, pid]) => pid === playerId)?.[0];
+        const ws = playerIdToWs.get(playerId);
         if (ws && ws.readyState === WebSocket.OPEN) {
           // 使用 accountId 获取 Profile
           const accountId = playerIdToAccountId.get(playerId);
@@ -1617,7 +1623,7 @@ setInterval(() => {
       playerCount: room.players.size,
       tick: room.tick,
     });
-    const ws = Array.from(connections.entries()).find(([, pid]) => pid === playerId)?.[0];
+    const ws = playerIdToWs.get(playerId);
     
     // 调试日志：检查 WebSocket 连接状态
     log('RAID_RESULT_WS_CHECK', {
@@ -1750,7 +1756,7 @@ setInterval(() => {
   // 新增: 处理战斗事件（干火/命中/受伤反馈）
   const combatEvents = room.drainCombatEvents();
   for (const [playerId, events] of combatEvents.entries()) {
-    const ws = Array.from(connections.entries()).find(([, pid]) => pid === playerId)?.[0];
+    const ws = playerIdToWs.get(playerId);
     if (ws && ws.readyState === WebSocket.OPEN) {
       // 发送所有战斗事件（可能有多条，例如同时命中多个目标）
       for (const event of events) {
@@ -1859,7 +1865,7 @@ setInterval(() => {
   // 新增: 单播局内自动装备回执（只有当事玩家需要知道）
   const autoEquips = room.drainAutoEquips();
   for (const notice of autoEquips) {
-    const targetWs = Array.from(connections.entries()).find(([, pid]) => pid === notice.playerId)?.[0];
+    const targetWs = playerIdToWs.get(notice.playerId);
     if (targetWs && targetWs.readyState === WebSocket.OPEN) {
       targetWs.send(
         JSON.stringify(
@@ -1916,65 +1922,48 @@ setInterval(() => {
 
 }, TICK_INTERVAL_MS);
 
-// Snapshot 广播循环（10Hz）
-let lastSnapshotLogTick = 0;
-
+// Snapshot 广播循环（20Hz）
 setInterval(() => {
-  // 调试日志：每200 tick（约10秒）打印一次快照大小和内容摘要
-  if (room.tick - lastSnapshotLogTick >= 200 && connections.size > 0) {
-    lastSnapshotLogTick = room.tick;
-    
-    // 获取一个通用快照用于调试（不带 playerId）
-    const debugSnapshot = room.getSnapshot();
-    const debugMessage = {
-      type: 'S2C_SNAPSHOT',
-      tick: room.tick,
-      timestamp: Date.now(),
-      ...debugSnapshot,
-    };
-    const debugJsonString = JSON.stringify(debugMessage);
-    
-    // 估算压缩后大小
-    const compressed = deflateSync(Buffer.from(debugJsonString));
-    const compressionRatio = ((1 - compressed.length / debugJsonString.length) * 100).toFixed(0);
-    
-    console.log(`\n========== SNAPSHOT DEBUG (tick=${room.tick}) ==========`);
-    console.log(`📦 JSON Size: ${(debugJsonString.length / 1024).toFixed(2)} KB`);
-    console.log(`🗜️ Compressed: ${(compressed.length / 1024).toFixed(2)} KB (${compressionRatio}% smaller)`);
-    console.log(`👤 Players: ${debugSnapshot.players.length}`);
-    console.log(`🤖 AIs: ${debugSnapshot.ais.length}`);
-    console.log(`🔫 Bullets: ${debugSnapshot.bullets.length}`);
-    console.log(`🎯 Decoys: ${debugSnapshot.decoys.length}`);
-    console.log(`🗼 Turrets: ${debugSnapshot.turrets.length}`);
-    console.log(`\n--- Full Snapshot JSON ---`);
-    console.log(debugJsonString);
-    console.log(`==========================================\n`);
+  if (connections.size === 0) return;
+
+  // 世界状态对所有人都一样，只构造一次。
+  // 玩家之间唯一的差异是自己的 inventory，发送时临时挂上去即可，
+  // 不必为每条连接把整个世界（含每个实体的草丛/烟雾判定）重新遍历一遍。
+  const snapshot = room.getSnapshot();
+  const message = {
+    type: 'S2C_SNAPSHOT' as const,
+    tick: room.tick,
+    timestamp: Date.now(),
+    players: snapshot.players,
+    bullets: snapshot.bullets,
+    items: snapshot.items,
+    worldItems: snapshot.worldItems,
+    lootBags: snapshot.lootBags,
+    obstacles: snapshot.obstacles,
+    ais: snapshot.ais,
+    decoys: snapshot.decoys,
+    turrets: snapshot.turrets,
+  };
+
+  const stateById = new Map<string, any>();
+  for (const p of snapshot.players) {
+    stateById.set(p.id, p);
   }
 
-  // ✅ 优化: 按玩家发送快照，每个玩家收到包含自己 inventory 的版本
-  // 注意: 不使用 S2C_SNAPSHOT_SCHEMA.parse()，因为 zod 会填回所有 .default() 字段
   for (const [ws, playerId] of connections.entries()) {
     if (ws.readyState !== WebSocket.OPEN) continue;
-    
-    const snapshot = room.getSnapshot(playerId);
-    // 直接构造消息，保持精简的字段结构
-    const message = {
-      type: 'S2C_SNAPSHOT' as const,
-      tick: room.tick,
-      timestamp: Date.now(),
-      players: snapshot.players,
-      bullets: snapshot.bullets,
-      items: snapshot.items,
-      worldItems: snapshot.worldItems,
-      lootBags: snapshot.lootBags,
-      obstacles: snapshot.obstacles,
-      ais: snapshot.ais,
-      decoys: snapshot.decoys,
-      turrets: snapshot.turrets,
-    };
-    
+
+    // Inventory 隐私：只有本人那一份带背包
+    const ownState = stateById.get(playerId);
+    if (ownState) {
+      const inventory = room.getInventoryStateFor(playerId);
+      if (inventory) ownState.inventory = inventory;
+    }
+
     // 使用 MessagePack 二进制编码发送
     ws.send(encodeMessage(message));
+
+    if (ownState) delete ownState.inventory;
   }
 }, SNAPSHOT_INTERVAL_MS);
 

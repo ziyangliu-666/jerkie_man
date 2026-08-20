@@ -50,6 +50,9 @@ export class AI {
   public currentPath: Array<{ x: number; y: number }> = [];
   public pathUpdateCooldown: number = 0;
   public readonly PATH_UPDATE_INTERVAL = 10; // 每0.5秒（10 ticks）更新路径
+  // 连续寻路失败次数，用于指数退避。目标不可达时不能每 tick 重算。
+  public pathFailStreak: number = 0;
+  public readonly PATH_FAIL_BACKOFF_MAX = 100; // 退避上限：5 秒
 
   public currentAimRad: number = 0;
   public nextAimUpdateTick: number = 0;

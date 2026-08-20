@@ -120,6 +120,9 @@ export class Room {
   private navGrid!: NavigationGrid;
   private pathfinder!: Pathfinder;
   private aiBehaviorController!: AIBehaviorController;
+  // 地形变化（开门、障碍物被摧毁）后需要重建导航网格。
+  // 按 tick 批量重建，避免一次交互触发多次全图洪水填充。
+  private navGridDirty = false;
 
   // 重刷系统字段
   private mapTemplate?: MapTemplate; // 保存地图模板引用
@@ -4434,6 +4437,19 @@ export class Room {
     };
   }
 
+  /**
+   * 单个玩家的背包状态（只发给本人）。
+   * 广播时共用一份世界快照，靠这个方法给本人那一份补上 inventory。
+   */
+  public getInventoryStateFor(playerId: string) {
+    const player = this.players.get(playerId);
+    if (!player) return undefined;
+    return {
+      ...player.inventory,
+      items: player.inventory.items.filter((item) => item.qty > 0),
+    };
+  }
+
   public drainWorldEvents(): S2C_MESSAGE[] {
     const events = [...this.worldEvents];
     this.worldEvents = [];
@@ -4570,6 +4586,7 @@ export class Room {
         const type = bestObs.type;
         if (type === 'door_closed') {
              bestObs.type = 'door_open';
+             this.navGridDirty = true; // 门打开会连通新的区域，导航网格必须跟着变
              log('DOOR_OPENED', { room: this.id, player: playerId, obstacle: bestObs.id, tick: this.tick });
 
              this.worldEvents.push({
@@ -4581,6 +4598,7 @@ export class Room {
              });
         } else if (type === 'door_open') {
              bestObs.type = 'door_closed';
+             this.navGridDirty = true; // 关门会切断通路，同样要重建
              log('DOOR_CLOSED', { room: this.id, player: playerId, obstacle: bestObs.id, tick: this.tick });
              
              this.worldEvents.push({
@@ -4988,6 +5006,7 @@ export class Room {
 
     // 真正移除所有需要移除的障碍物
     // 现在所有破坏或开启后的障碍物都直接消失，不再保留残骸
+    const before = this.obstacles.length;
     this.obstacles = this.obstacles.filter(obs => {
         const hp = (obs as any).hp;
         if (hp !== undefined && hp <= 0) {
@@ -5001,6 +5020,27 @@ export class Room {
         }
         return true;
     });
+    if (this.obstacles.length !== before) {
+      this.navGridDirty = true;
+    }
+
+    // 地形变了就重建导航网格，否则 AI 会一直按开局那一刻的地形寻路
+    // （门被打开也走不过去，被炸开的墙也绕着走）。
+    if (this.navGridDirty) {
+      this.navGridDirty = false;
+      this.navGrid.rebuild(this.obstacles);
+      // 地形变化会让缓存的路径失效，清掉让 AI 立刻重新规划
+      for (const ai of this.ais.values()) {
+        ai.currentPath = [];
+        ai.pathUpdateCooldown = 0;
+        ai.pathFailStreak = 0;
+      }
+    }
+  }
+
+  /** 地形发生变化时调用，下一次 updateObstacles 会重建导航网格 */
+  public markNavGridDirty(): void {
+    this.navGridDirty = true;
   }
 
   // 新增: 拾取世界物品

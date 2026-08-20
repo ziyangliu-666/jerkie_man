@@ -4,6 +4,7 @@ import {
   C2S_HELLO_SCHEMA,
   C2S_INPUT_SCHEMA,
   S2C_MESSAGE_SCHEMA,
+  parseWebSocketMessage,
   type S2C_SNAPSHOT,
   type S2C_MESSAGE,
 } from '@ziyang-protocol/shared';
@@ -42,14 +43,18 @@ async function createClient(id: string): Promise<TestClient> {
           C2S_HELLO_SCHEMA.parse({
             type: 'C2S_HELLO',
             room: 'local',
+            accountId: `smoke-${id}`,
           })
         )
       );
     });
 
-    ws.on('message', (data: Buffer) => {
+    ws.on('message', (data: Buffer, isBinary: boolean) => {
       try {
-        const raw = JSON.parse(data.toString());
+        // 快照走 MessagePack 二进制，其余消息仍是 JSON
+        const raw = isBinary
+          ? parseWebSocketMessage<unknown>(new Uint8Array(data))
+          : JSON.parse(data.toString());
         const message = S2C_MESSAGE_SCHEMA.parse(raw) as S2C_MESSAGE;
 
         // 统一通过schema解析

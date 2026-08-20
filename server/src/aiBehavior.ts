@@ -927,7 +927,18 @@ export class AIBehaviorController {
     if (path.length > 0) {
       ai.currentPath = path;
       ai.pathUpdateCooldown = ai.PATH_UPDATE_INTERVAL;
+      ai.pathFailStreak = 0;
+      return;
     }
+
+    // 寻路失败也必须设冷却，否则目标不可达的 AI 会在 20Hz 下无限重算 A*。
+    // 用指数退避：越是一直找不到路，越不该继续试。
+    ai.pathFailStreak++;
+    const backoff = Math.min(
+      ai.PATH_UPDATE_INTERVAL * Math.pow(2, ai.pathFailStreak - 1),
+      ai.PATH_FAIL_BACKOFF_MAX
+    );
+    ai.pathUpdateCooldown = backoff;
   }
 
   private moveAlongPath(ai: AI, currentTick: number): void {
