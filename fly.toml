@@ -8,6 +8,10 @@ primary_region = 'sin'
   PORT = '8080'
   HOST = '0.0.0.0'
   NODE_ENV = 'production'
+  # 必须写在这里而不是用 `fly machine update --env` 临时设置：
+  # deploy 会用本文件覆盖机器配置，手工设的环境变量会被静默清掉，
+  # 服务器随即回落到随机地图（没有 AI，也没有模板里的物资规则）。
+  MAP_TEMPLATE = 'mansion_strategic_v1_2p5k'
 
 [http_service]
   internal_port = 8080
